@@ -81,7 +81,12 @@ jobs:
         run: su builder -c 'paru -S --noconfirm monocoque'
 
       - name: npm ci
-        run: su builder -c "cd '$GITHUB_WORKSPACE/typiql-tauri/typiql' && npm ci"
+        # --allow-git=all: npm v12+ disables fetching git-protocol
+        # dependencies by default (EALLOWGIT) as a supply-chain security
+        # default — this repo's @octant/per-form dependency is exactly that
+        # (a git dependency, deliberately, per per-form's own fork history),
+        # so it needs an explicit opt-in here.
+        run: su builder -c "cd '$GITHUB_WORKSPACE/typiql-tauri/typiql' && npm ci --allow-git=all"
 
       - name: cargo build (release, so the smoke test drives a real binary)
         run: su builder -c "cd '$GITHUB_WORKSPACE/typiql-tauri/typiql/src-tauri' && cargo build --release"
