@@ -31,11 +31,19 @@ jobs:
       image: archlinux:latest
     steps:
       - name: Prepare Arch environment
+        # `rustup default stable` is per-user (writes to ~/.rustup), and every
+        # build step below runs as `builder` via `su builder -c`, not root —
+        # so builder needs its own default toolchain set explicitly here,
+        # once, before makepkg/cargo ever runs as that user. Hit this in
+        # practice: "rustup could not choose a version of cargo to run,
+        # because one wasn't specified explicitly, and no default is
+        # configured" from paru's build() step.
         run: |
           pacman -Syu --noconfirm base-devel git sudo webkit2gtk-4.1 nodejs npm rustup jq
           rustup default stable
           useradd -m builder
           echo 'builder ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/builder
+          su builder -c 'rustup default stable'
 
       - uses: actions/checkout@v4
         with:
