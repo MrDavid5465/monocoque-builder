@@ -29,6 +29,16 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: archlinux:latest
+    env:
+      # The built `typiql` binary is a real native GTK/webkit2gtk window, not
+      # just the embedded axum API — this container has no display server at
+      # all, so it panics on startup ("Failed to initialize GTK") before the
+      # API ever starts listening. Xvfb (started below) gives it one; DISPLAY
+      # is a job-level env var so it's available to every `run:` block's own
+      # (root) shell, which substitutes it into the `su builder -c "..."`
+      # strings the same way $GITHUB_WORKSPACE already is — su itself doesn't
+      # forward environment, so it still has to be threaded through per step.
+      DISPLAY: ':99'
     steps:
       - name: Prepare Arch environment
         # `rustup default stable` is per-user (writes to ~/.rustup), and every
@@ -44,11 +54,17 @@ jobs:
           # compiles a bundled pa_devs test tool against portaudio.h — a gap
           # in the third-party AUR package, not ours, worked around here by
           # installing it ourselves before paru ever builds monocoque.
-          pacman -Syu --noconfirm base-devel git sudo webkit2gtk-4.1 nodejs npm rustup jq portaudio
+          # xorg-server-xvfb: see the job-level DISPLAY comment above.
+          pacman -Syu --noconfirm base-devel git sudo webkit2gtk-4.1 nodejs npm rustup jq portaudio xorg-server-xvfb
           rustup default stable
           useradd -m builder
           echo 'builder ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/builder
           su builder -c 'rustup default stable'
+
+      - name: Start virtual display (Xvfb)
+        run: |
+          Xvfb "$DISPLAY" -screen 0 1280x720x24 &
+          sleep 2
 
       - uses: actions/checkout@v4
         with:
@@ -96,6 +112,7 @@ jobs:
           cat > /tmp/smoke-test.sh <<'SCRIPT'
           #!/usr/bin/env bash
           set -e
+          export DISPLAY=:99
           cd "$1/typiql-tauri/typiql/src-tauri"
 
           ./target/release/typiql &
