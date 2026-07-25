@@ -27,6 +27,14 @@ const defaultProps = {
   selected: false,
 };
 
+// Pre-class-fields-syntax pattern: typing this class component's instance
+// properties (all assigned in the constructor, not declared as class
+// fields) via a same-named merged interface rather than restructuring the
+// class body — left as-is rather than converted, since `handleImageLoaded`
+// here is referenced (`this.handleImageLoaded`, below) but never actually
+// assigned anywhere in this file, and touching this class's shape risks
+// interacting with that in ways not worth risking in an unrelated lint pass.
+// eslint-disable-next-line @typescript-eslint/no-unsafe-declaration-merging
 interface Photo {
   preview: any;
   original: any;
@@ -40,6 +48,7 @@ interface foo {
   height: any;
   width: any;
 }
+// eslint-disable-next-line @typescript-eslint/no-unsafe-declaration-merging
 class Photo extends React.Component {
   constructor(props: any) {
     super(props);
@@ -89,9 +98,7 @@ class Photo extends React.Component {
     const canvas = this.original.current;
     const ctx = canvas.getContext('2d');
 
-    const self = this;
-
-    image.onload = function() {
+    image.onload = () => {
       canvas.width = image.width;
       canvas.height = image.height;
       ctx.drawImage(image, 0, 0);
@@ -102,7 +109,7 @@ class Photo extends React.Component {
       ctx.restore();
       ctx.save();
 
-      self.setState(() => ({
+      this.setState(() => ({
         fileDimensions: { height: image.height, width: image.width },
         base64URL: canvas.toDataURL('image/png;base64'),
         cropping: true,
@@ -129,6 +136,13 @@ class Photo extends React.Component {
       return;
     }
 
+    // Not an arrow-function candidate like handleEdit's onload above — the
+    // nested `function(this: foo)`/`function(this: any)` callbacks below
+    // deliberately rely on EXIF.getData's and the Image element's own
+    // `this` bindings (EXIF tag lookup, image width/height), so `self` is
+    // still needed to reach the Photo component's own `this` from inside
+    // them without touching that binding.
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
     const self = this;
     const file = acceptedFiles[0];
     const image = new Image();
@@ -203,8 +217,7 @@ class Photo extends React.Component {
     image: any,
     canvas: any,
     ctx: any,
-    orientation: any,
-    self = this
+    orientation: any
   ) => {
     if (orientation === -90 || orientation === 90) {
       canvas.height = this.width;

@@ -17,7 +17,7 @@ vi.mock('../lib/denim/lib', () => ({
   PrimaryButton: ({ children, onClick, disabled }: any) => (
     <button onClick={onClick} disabled={disabled}>{children}</button>
   ),
-  Form: ({ children, onChange }: any) => <div data-testid="form">{children}</div>,
+  Form: ({ children, onChange: _onChange }: any) => <div data-testid="form">{children}</div>,
   getTheme: () => ({
     palette: {
       neutralLight: '#ccc', neutralLighter: '#eee', neutralQuaternaryAlt: '#ddd',

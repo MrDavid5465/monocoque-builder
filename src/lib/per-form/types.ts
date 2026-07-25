@@ -2,13 +2,13 @@ import type { RefObject, FC } from 'react';
 
 export interface StringTMap<T> { [key: string]: T }
 
-export interface IForm extends StringTMap<any> {}
-export interface ISchema extends StringTMap<Required<Field>> {}
-export interface IValidationErrors extends StringTMap<string[]> {}
-export interface IIs extends StringTMap<boolean> {}
-export interface IConverters extends StringTMap<
+export type IForm = StringTMap<any>;
+export type ISchema = StringTMap<Required<Field>>;
+export type IValidationErrors = StringTMap<string[]>;
+export type IIs = StringTMap<boolean>;
+export type IConverters = StringTMap<
   (key: string, values: IForm, defaultNull: any, dirty?: boolean) => any
-> {}
+>;
 
 export interface Validation {
   test(form: IForm): boolean;

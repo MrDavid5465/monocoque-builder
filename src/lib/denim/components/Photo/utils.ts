@@ -1,9 +1,9 @@
 export function base64StringToFile(base64String: string, filename: string) {
-  var arr = base64String.split(','),
-    mime = (arr[0].match(/:(.*?);/) || '')[1],
-    bstr = atob(arr[1]),
-    n = bstr.length,
-    u8arr = new Uint8Array(n);
+  const arr = base64String.split(',');
+  const mime = (arr[0].match(/:(.*?);/) || '')[1];
+  const bstr = atob(arr[1]);
+  let n = bstr.length;
+  const u8arr = new Uint8Array(n);
   while (n--) {
     u8arr[n] = bstr.charCodeAt(n);
   }
@@ -22,7 +22,7 @@ export function extractBase64(base64Data: string) {
 }
 
 export function downloadBase64File(base64Data: string, filename: string) {
-  var element = document.createElement('a');
+  const element = document.createElement('a');
   element.setAttribute('href', base64Data);
   element.setAttribute('download', filename);
   element.style.display = 'none';

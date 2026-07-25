@@ -1,5 +1,5 @@
 import React from 'react';
-import { Route, useLocation, Routes } from './lib';
+import { Route, Routes } from './lib';
 
 import Update from './Update';
 import List from './List';

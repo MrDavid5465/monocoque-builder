@@ -82,10 +82,10 @@ export interface GamepadMapping {
 }
 
 export interface IUserSettingInput {
-  launchPage: String;
-  theme: String;
+  launchPage: string;
+  theme: string;
   fontSize: number;
-  deviceMap: {};
+  deviceMap: Record<string, string>;
   typiqlDataDir?: string;
   steerMaxDeg?: number;
   setupComplete?: boolean;

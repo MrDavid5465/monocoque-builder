@@ -212,7 +212,7 @@ describe('buildConfigText', () => {
     const records = [rec({ channelId: 'c1' }), rec({ channelId: 'c2' })];
     const text = buildConfigText(records, channels, false);
     // Two blocks joined by ","
-    expect(text.match(/\},\n        \{/)).toBeTruthy();
+    expect(text.match(/\},\n {8}\{/)).toBeTruthy();
   });
 
   it('always uses the real physical pan from its channel, regardless of dspSlot', () => {

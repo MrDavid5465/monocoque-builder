@@ -27,13 +27,13 @@ const List: React.FC<Props> = ({
   items,
   schema,
   onSelect,
-  name,
-  csvHeaders,
+  name: _name,
+  csvHeaders: _csvHeaders,
   pageSize,
 }) => {
   const [filters, setFilters] = useState<IndexableObject>({});
   const [sort, setSort] = useState<IndexableObject>({});
-  var filteredItems = items;
+  let filteredItems = items;
   const style = getStyle();
   const [page, setPage] = useState(0);
   function handleSelect(item?: any) {
@@ -62,7 +62,9 @@ const List: React.FC<Props> = ({
         break;
     }
   }
-  function toCSV(schema: DisplaySchema<any>, items: any[]) {
+  // Only referenced by the commented-out CSV export block below —
+  // prefixed rather than deleted to keep it available if that's reactivated.
+  function _toCSV(schema: DisplaySchema<any>, items: any[]) {
     return items.map((i) => {
       const item = { ...i };
       Object.entries(schema).forEach(([k, v]: any) => {

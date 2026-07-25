@@ -3,10 +3,7 @@ import React from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 // import { div } from "../../lib/denim/lib";
 
-interface Props {
-}
-
-export const TitleBar: React.FC<Props> = () => {
+export const TitleBar: React.FC = () => {
   const appWindow = getCurrentWindow();
 
   return (

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Link, Name, Icon, IconButton } from './lib';
+import { Name, Icon, IconButton } from './lib';
 import { Stack, Separator, useLocation, useParams, useNavigate } from './lib';
 import { IDispatcher } from '../typical-admin';
 
@@ -8,7 +8,7 @@ interface Props {
   dispatcher: IDispatcher;
 }
 
-const Links: React.FC<Props> = ({ name, dispatcher }) => {
+const Links: React.FC<Props> = ({ name: _name, dispatcher }) => {
   const { pathname } =  useLocation();
   const { id } = useParams();
   const navigate = useNavigate();

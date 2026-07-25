@@ -14,6 +14,7 @@ import {
   mergeStyleSets,
   DatePicker,
   PrimaryButton,
+  DefaultButton,
 } from '@fluentui/react';
 import { format, parseISO } from 'date-fns';
 interface IndexableObject {
@@ -253,9 +254,9 @@ export default function Raw(props: any): ReactElement {
     type,
     value,
     placeholder,
-    hint,
-    parent,
-    options: o,
+    hint: _hint,
+    parent: _parent,
+    options: _o,
     ...rest
   }: any = props;
   const [option, setOption] = useState({ index: -1, value: '' });
@@ -278,7 +279,7 @@ export default function Raw(props: any): ReactElement {
     onChange(name, value);
   }
   function handleMultiSelect(_: any, option: any) {
-    var newValue = value;
+    let newValue = value;
     if (newValue === undefined || newValue === null || newValue === '') {
       newValue = [];
     }
@@ -358,7 +359,7 @@ export default function Raw(props: any): ReactElement {
     minute: number,
     date: Date | null | string = new Date()
   ) {
-    var newDate: Date;
+    let newDate: Date;
     if (date === null || typeof date === 'string') {
       newDate = new Date();
     } else {
@@ -380,12 +381,12 @@ export default function Raw(props: any): ReactElement {
   }
 
   function choose() {
-    var i;
+    let i;
     const hours = [];
     const minutes = [];
-    var hour: number;
-    var minute: number;
-    var ampm: string;
+    let hour: number;
+    let minute: number;
+    let ampm: string;
     switch (type) {
       case 'checkbox':
         return (
@@ -978,25 +979,34 @@ export default function Raw(props: any): ReactElement {
           </Stack>
         );
       case 'button': {
+        // Real Fluent buttons, not a manually-styled raw <button> — the
+        // previous version approximated Fluent's primary color but lacked
+        // its actual chrome (hover/focus states, padding, font weight),
+        // which reads as visibly "not a Fluent button" next to real ones.
+        // 'danger' matches ConfirmDialog.tsx's own existing convention
+        // (PrimaryButton + a redDark background override), not a separate
+        // one-off red style.
         const variant: 'primary' | 'danger' | 'default' = rest.variant ?? 'default';
-        const bgColor = variant === 'primary'
-          ? theme.palette.themePrimary
-          : variant === 'danger'
-          ? theme.palette.redDark
-          : theme.palette.neutralLight;
-        const txtColor = variant === 'default' ? theme.palette.neutralDark : '#fff';
+        if (variant === 'default') {
+          return (
+            <DefaultButton onClick={rest.onClick} disabled={rest.disabled} styles={rest.buttonStyle ? { root: rest.buttonStyle } : undefined}>
+              {label}
+            </DefaultButton>
+          );
+        }
         return (
-          <button
+          <PrimaryButton
             onClick={rest.onClick}
             disabled={rest.disabled}
-            style={{
-              padding: '4px 12px', cursor: rest.disabled ? 'not-allowed' : 'pointer',
-              borderRadius: 3, border: 'none', background: bgColor, color: txtColor,
-              fontSize: '0.9em', ...rest.buttonStyle,
+            styles={{
+              root: {
+                ...(variant === 'danger' ? { background: theme.palette.redDark, border: 'none' } : {}),
+                ...rest.buttonStyle,
+              },
             }}
           >
             {label}
-          </button>
+          </PrimaryButton>
         );
       }
       case 'signature':

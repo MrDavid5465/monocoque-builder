@@ -1,10 +1,14 @@
+use crate::config_manager::app_config::{read_app_config, write_app_config};
+use crate::pipewire_dsp::{
+    self, CornerSpec, DeviceChainSpec, EffectDspSpec, LfeCornerSpec, LfeSpec,
+};
+use crate::typiql_types::{
+    LfeChannel, MonocoqueSoundDevice, ShakerChannel, ShakerDspChannel, SoundDeviceProfile,
+};
+use async_graphql::{Context, Object, Result as GqlResult};
 use std::collections::HashMap;
 use std::sync::Arc;
-use async_graphql::{Context, Object, Result as GqlResult};
 use typiql::{resolve_list, TypiQLAdapter, TypiQLType};
-use crate::config_manager::app_config::{read_app_config, write_app_config};
-use crate::pipewire_dsp::{self, CornerSpec, DeviceChainSpec, EffectDspSpec, LfeCornerSpec, LfeSpec};
-use crate::typiql_types::{LfeChannel, MonocoqueSoundDevice, ShakerChannel, ShakerDspChannel, SoundDeviceProfile};
 
 /// Fetches every live (profileId == null) MonocoqueSoundDevice row.
 async fn fetch_live_monocoque_rows(adapter: &Arc<dyn TypiQLAdapter>) -> Vec<MonocoqueSoundDevice> {
@@ -36,21 +40,27 @@ async fn fetch_live_shaker_channels(adapter: &Arc<dyn TypiQLAdapter>) -> Vec<Sha
 /// channel's own device (see ShakerChannel.pan's doc comment), so a flat
 /// pan-based join would be ambiguous once two channels on different devices
 /// share a pan value.
-async fn build_device_chains(adapter: &Arc<dyn TypiQLAdapter>) -> Result<Vec<DeviceChainSpec>, String> {
+async fn build_device_chains(
+    adapter: &Arc<dyn TypiQLAdapter>,
+) -> Result<Vec<DeviceChainSpec>, String> {
     let live_rows = fetch_live_monocoque_rows(adapter).await;
     if live_rows.is_empty() {
         return Err("No active shaker channels to enable DSP for.".to_string());
     }
     let live_channels = fetch_live_shaker_channels(adapter).await;
-    let channels_by_id: HashMap<String, ShakerChannel> =
-        live_channels.into_iter().map(|c| (c.id.clone(), c)).collect();
+    let channels_by_id: HashMap<String, ShakerChannel> = live_channels
+        .into_iter()
+        .map(|c| (c.id.clone(), c))
+        .collect();
 
     // Every device in use, with its own channel count — derived from the
     // channels themselves, since devid/channels live on ShakerChannel, not
     // duplicated per effect row.
     let mut channels_per_device: HashMap<String, u8> = HashMap::new();
     for channel in channels_by_id.values() {
-        channels_per_device.entry(channel.devid.clone()).or_insert(channel.channels);
+        channels_per_device
+            .entry(channel.devid.clone())
+            .or_insert(channel.channels);
     }
 
     let all_dsp_channels: Vec<ShakerDspChannel> = adapter
@@ -74,7 +84,9 @@ async fn build_device_chains(adapter: &Arc<dyn TypiQLAdapter>) -> Result<Vec<Dev
     let mut effects_by_device: HashMap<String, HashMap<String, Vec<CornerSpec>>> = HashMap::new();
     for row in &live_rows {
         let Some(slot) = row.dsp_slot else { continue };
-        let Some(channel) = channels_by_id.get(&row.channel_id) else { continue };
+        let Some(channel) = channels_by_id.get(&row.channel_id) else {
+            continue;
+        };
         let dsp = live_dsp_by_slot.get(&slot);
         effects_by_device
             .entry(channel.devid.clone())
@@ -99,19 +111,31 @@ async fn build_device_chains(adapter: &Arc<dyn TypiQLAdapter>) -> Result<Vec<Dev
         .filter_map(|v| serde_json::from_value(v).ok())
         .collect();
     let mut lfe_corners_by_device: HashMap<String, Vec<LfeCornerSpec>> = HashMap::new();
-    for c in all_lfe_channels.into_iter().filter(|c| c.profile_id.is_none()) {
-        let Some(channel) = channels_by_id.get(&c.channel_id) else { continue };
-        lfe_corners_by_device.entry(channel.devid.clone()).or_default().push(LfeCornerSpec {
-            pan: channel.pan,
-            fader: c.fader,
-            muted: c.muted,
-        });
+    for c in all_lfe_channels
+        .into_iter()
+        .filter(|c| c.profile_id.is_none())
+    {
+        let Some(channel) = channels_by_id.get(&c.channel_id) else {
+            continue;
+        };
+        lfe_corners_by_device
+            .entry(channel.devid.clone())
+            .or_default()
+            .push(LfeCornerSpec {
+                pan: channel.pan,
+                fader: c.fader,
+                muted: c.muted,
+            });
     }
 
     let lfe_source_channels = match &lfe_source_device {
         Some(source) => {
             let sinks = pipewire_dsp::list_audio_sinks().unwrap_or_default();
-            sinks.iter().find(|s| &s.name == source).map(|s| s.channels).unwrap_or(2)
+            sinks
+                .iter()
+                .find(|s| &s.name == source)
+                .map(|s| s.channels)
+                .unwrap_or(2)
         }
         None => 0,
     };
@@ -126,7 +150,10 @@ async fn build_device_chains(adapter: &Arc<dyn TypiQLAdapter>) -> Result<Vec<Dev
             .remove(&devid)
             .unwrap_or_default()
             .into_iter()
-            .map(|(effect_key, corners)| EffectDspSpec { effect_key, corners })
+            .map(|(effect_key, corners)| EffectDspSpec {
+                effect_key,
+                corners,
+            })
             .collect();
         let lfe = match (&lfe_source_device, lfe_corners_by_device.remove(&devid)) {
             (Some(source_device), Some(corners)) => Some(LfeSpec {
@@ -138,7 +165,12 @@ async fn build_device_chains(adapter: &Arc<dyn TypiQLAdapter>) -> Result<Vec<Dev
             _ => None,
         };
 
-        chains.push(DeviceChainSpec { output_device: devid, output_channel_count, effects, lfe });
+        chains.push(DeviceChainSpec {
+            output_device: devid,
+            output_channel_count,
+            effects,
+            lfe,
+        });
     }
 
     Ok(chains)
@@ -154,11 +186,15 @@ async fn build_device_chains(adapter: &Arc<dyn TypiQLAdapter>) -> Result<Vec<Dev
 /// swallowed rather than panicking server startup over a DSP feature that's
 /// secondary to the rest of the app.
 pub async fn resume_shaker_dsp_if_enabled(adapter: Arc<dyn TypiQLAdapter>) {
-    let Ok(app_config) = read_app_config() else { return };
+    let Ok(app_config) = read_app_config() else {
+        return;
+    };
     if !app_config.settings.shaker_dsp_enabled {
         return;
     }
-    let Ok(chains) = build_device_chains(&adapter).await else { return };
+    let Ok(chains) = build_device_chains(&adapter).await else {
+        return;
+    };
 
     if let Err(e) = pipewire_dsp::load_filter_chain(&chains) {
         eprintln!("resume_shaker_dsp_if_enabled: failed to reload filter-chain: {e}");
@@ -192,9 +228,11 @@ impl ShakerDspMutation {
     /// frontend since loading the filter-chain does immediately start
     /// routing real audio through it.
     async fn enable_shaker_dsp(&self, ctx: &Context<'_>) -> GqlResult<bool> {
-        let adapter = ctx.data::<Arc<dyn TypiQLAdapter>>()?;
+        let adapter = crate::graphql::default_adapter(ctx)?;
 
-        let chains = build_device_chains(adapter).await.map_err(async_graphql::Error::new)?;
+        let chains = build_device_chains(&adapter)
+            .await
+            .map_err(async_graphql::Error::new)?;
 
         pipewire_dsp::load_filter_chain(&chains).map_err(async_graphql::Error::new)?;
 
@@ -226,19 +264,30 @@ impl ShakerDspMutation {
         ctx: &Context<'_>,
         id: String,
     ) -> GqlResult<SoundDeviceProfile> {
-        let adapter = ctx.data::<Arc<dyn TypiQLAdapter>>()?;
+        let adapter = crate::graphql::default_adapter(ctx)?;
 
-        let all_profiles: Vec<SoundDeviceProfile> = resolve_list::<SoundDeviceProfile>(ctx, vec![]).await?;
+        let all_profiles: Vec<SoundDeviceProfile> =
+            resolve_list::<SoundDeviceProfile>(ctx, vec![]).await?;
         for p in &all_profiles {
             if p.is_default && p.id != id {
                 adapter
-                    .update(SoundDeviceProfile::collection_name().into(), "id", &p.id, serde_json::json!({ "is_default": false }))
+                    .update(
+                        SoundDeviceProfile::collection_name().into(),
+                        "id",
+                        &p.id,
+                        serde_json::json!({ "is_default": false }),
+                    )
                     .await;
             }
         }
 
         let updated = adapter
-            .update(SoundDeviceProfile::collection_name().into(), "id", &id, serde_json::json!({ "is_default": true }))
+            .update(
+                SoundDeviceProfile::collection_name().into(),
+                "id",
+                &id,
+                serde_json::json!({ "is_default": true }),
+            )
             .await
             .ok_or_else(|| async_graphql::Error::new("Profile not found"))?;
 
@@ -274,8 +323,15 @@ impl ShakerDspMutation {
     /// MonocoqueSoundDevice.dsp_slot) — resolved here to the (devid,
     /// effect_key, pan) triple pipewire_dsp::set_live_channel actually
     /// needs, via the row's own channel_id join.
-    async fn apply_shaker_dsp_channel_live(&self, ctx: &Context<'_>, slot: u8, lpf_hz: Option<f32>, fader: u8, muted: bool) -> GqlResult<bool> {
-        let adapter = ctx.data::<Arc<dyn TypiQLAdapter>>()?;
+    async fn apply_shaker_dsp_channel_live(
+        &self,
+        ctx: &Context<'_>,
+        slot: u8,
+        lpf_hz: Option<f32>,
+        fader: u8,
+        muted: bool,
+    ) -> GqlResult<bool> {
+        let adapter = crate::graphql::default_adapter(ctx)?;
         let all_rows: Vec<MonocoqueSoundDevice> = adapter
             .get_many(MonocoqueSoundDevice::collection_name().into(), vec![])
             .await
@@ -287,14 +343,21 @@ impl ShakerDspMutation {
             .find(|r| r.profile_id.is_none() && r.dsp_slot == Some(slot))
             .ok_or_else(|| async_graphql::Error::new(format!("No live row for DSP slot {slot}")))?;
 
-        let live_channels = fetch_live_shaker_channels(adapter).await;
+        let live_channels = fetch_live_shaker_channels(&adapter).await;
         let channel = live_channels
             .iter()
             .find(|c| c.id == row.channel_id)
             .ok_or_else(|| async_graphql::Error::new("This row's channel no longer exists"))?;
 
-        pipewire_dsp::set_live_channel(&channel.devid, &row.effect.to_lowercase(), channel.pan, lpf_hz, fader, muted)
-            .map_err(async_graphql::Error::new)?;
+        pipewire_dsp::set_live_channel(
+            &channel.devid,
+            &row.effect.to_lowercase(),
+            channel.pan,
+            lpf_hz,
+            fader,
+            muted,
+        )
+        .map_err(async_graphql::Error::new)?;
         Ok(true)
     }
 
@@ -304,15 +367,22 @@ impl ShakerDspMutation {
     /// directly to its owning ShakerChannel for devid + pan, rather than a
     /// pan-based lookup (pan is no longer globally unique — see
     /// ShakerChannel.pan's doc comment).
-    async fn apply_lfe_channel_live(&self, ctx: &Context<'_>, channel_id: String, fader: u8, muted: bool) -> GqlResult<bool> {
-        let adapter = ctx.data::<Arc<dyn TypiQLAdapter>>()?;
-        let live_channels = fetch_live_shaker_channels(adapter).await;
+    async fn apply_lfe_channel_live(
+        &self,
+        ctx: &Context<'_>,
+        channel_id: String,
+        fader: u8,
+        muted: bool,
+    ) -> GqlResult<bool> {
+        let adapter = crate::graphql::default_adapter(ctx)?;
+        let live_channels = fetch_live_shaker_channels(&adapter).await;
         let channel = live_channels
             .iter()
             .find(|c| c.id == channel_id)
             .ok_or_else(|| async_graphql::Error::new("This channel no longer exists"))?;
 
-        pipewire_dsp::set_live_lfe_channel(&channel.devid, channel.pan, fader, muted).map_err(async_graphql::Error::new)?;
+        pipewire_dsp::set_live_lfe_channel(&channel.devid, channel.pan, fader, muted)
+            .map_err(async_graphql::Error::new)?;
         Ok(true)
     }
 

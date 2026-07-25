@@ -18,7 +18,7 @@ export const AppNavBar: React.FC<Props> = ({
   dismissPanel,
   ExternalApps,
 }) => {
-  const { pathname, ...state } = useLocation()
+  const { pathname } = useLocation()
   const navigate = useNavigate();
   const [modalOpen, setModalOpen] = useState(false);
   const openGroup = getCurrentApp();

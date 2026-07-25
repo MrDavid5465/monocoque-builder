@@ -1,5 +1,5 @@
 import React from 'react';
-import { useSubscription, SubscriptionHookOptions } from '@apollo/client/react';
+import { useSubscription } from '@apollo/client/react';
 import { DocumentNode } from 'graphql';
 
 interface Props {

@@ -15,7 +15,7 @@ export default function Base64Img({ image }: any) {
       );
     };
   }, [image]);
-  return !!image ? (
+  return image ? (
     <div>
       <img alt="Selected File" {...dimensions} src={image} />
     </div>
