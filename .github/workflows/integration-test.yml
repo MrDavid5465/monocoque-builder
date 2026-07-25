@@ -1,0 +1,112 @@
+name: Integration test (Arch + monocoque)
+
+# Closest analogue to a "deploy to integration environment, then test"
+# stage: builds the real app inside a disposable Arch Linux container
+# (not a self-hosted runner — see the security note in the plan this
+# workflow was designed from), installs `monocoque` from the AUR, and
+# proves the built artifact actually talks to live telemetry rather than
+# just checking that compilation succeeded. Also validates the AUR
+# PKGBUILD in the same container, since it's the same environment either
+# way.
+#
+# NEW, UNPROVEN INFRASTRUCTURE: unlike the Rust/TS work in this repo's other
+# workflows, none of this could be exercised locally while writing it (no
+# way to spin up a real Arch container in this environment). Treat the
+# first several runs as genuinely experimental and expect to iterate on
+# exact package names, the AUR-helper bootstrap, and the smoke-test
+# timing/ports below. `su builder -c` doesn't inherit the runner's working
+# directory, so every step below cds into `$GITHUB_WORKSPACE` explicitly
+# rather than relying on relative paths; the smoke test's own logic lives
+# in a real script file (not an inline `su -c "..."` string) specifically
+# to avoid nested-quoting the GraphQL JSON payload inside a shell string.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch: {}
+
+jobs:
+  integration-test:
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:latest
+    steps:
+      - name: Prepare Arch environment
+        run: |
+          pacman -Syu --noconfirm base-devel git sudo webkit2gtk-4.1 nodejs npm rustup jq
+          rustup default stable
+          useradd -m builder
+          echo 'builder ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/builder
+
+      - uses: actions/checkout@v4
+        with:
+          path: typiql-tauri/typiql
+      - uses: actions/checkout@v4
+        with:
+          repository: MrDavid5465/typiql-rs
+          path: typiql-rs
+
+      - name: Hand the checked-out workspace to the non-root build user
+        run: chown -R builder:builder "$GITHUB_WORKSPACE"
+
+      - name: Build an AUR helper (paru) — none ship in the official repos
+        run: |
+          su builder -c '
+            set -e
+            git clone https://aur.archlinux.org/paru-bin.git /tmp/paru-bin
+            cd /tmp/paru-bin
+            makepkg -si --noconfirm
+          '
+
+      - name: Install monocoque from the AUR
+        run: su builder -c 'paru -S --noconfirm monocoque'
+
+      - name: npm ci
+        run: su builder -c "cd '$GITHUB_WORKSPACE/typiql-tauri/typiql' && npm ci"
+
+      - name: cargo build (release, so the smoke test drives a real binary)
+        run: su builder -c "cd '$GITHUB_WORKSPACE/typiql-tauri/typiql/src-tauri' && cargo build --release"
+
+      - name: Write smoke-test script
+        run: |
+          cat > /tmp/smoke-test.sh <<'SCRIPT'
+          #!/usr/bin/env bash
+          set -e
+          cd "$1/typiql-tauri/typiql/src-tauri"
+
+          ./target/release/typiql &
+          app_pid=$!
+          sleep 5
+
+          monocoque test &
+          monocoque_pid=$!
+          sleep 3
+
+          snapshot=$(curl -sf http://localhost:9000/typiql/graphql \
+            -H "Content-Type: application/json" \
+            -d '{"query":"{ telemetrySnapshot { simStatus car rpm } }"}')
+          echo "$snapshot"
+          echo "$snapshot" | jq -e '.data.telemetrySnapshot.simStatus == "ACTIVE"'
+
+          kill "$monocoque_pid" "$app_pid" 2>/dev/null || true
+          SCRIPT
+          chmod +x /tmp/smoke-test.sh
+
+      - name: Smoke test — real telemetry through the real built backend
+        run: su builder -c "/tmp/smoke-test.sh '$GITHUB_WORKSPACE'"
+
+      - name: Playwright e2e suite against the real build
+        run: |
+          su builder -c "
+            cd '$GITHUB_WORKSPACE/typiql-tauri/typiql'
+            npx playwright install --with-deps chromium
+            npm run test:e2e
+          "
+
+      - name: Validate AUR PKGBUILD (build + install in this same environment)
+        run: |
+          su builder -c "
+            cd '$GITHUB_WORKSPACE/typiql-tauri/typiql/pkg/aur'
+            makepkg --printsrcinfo > .SRCINFO
+            makepkg -si --noconfirm
+            command -v typiql
+          "

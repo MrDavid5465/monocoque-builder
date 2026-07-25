@@ -1,0 +1,87 @@
+name: Bump typiql-rs dependencies
+
+# Reacts to typiql-rs's release-plz-release job dispatching
+# "typiql-rs-published" (see typiql-rs/.github/workflows/release-plz.yml)
+# after every push to its master, whether or not that particular run
+# actually published something new. This job just pins Cargo.toml to
+# whatever's currently on crates.io and opens a PR if that's a real
+# change — cargo check has to pass first, so a breaking typiql-rs change
+# fails this workflow loudly (no PR) rather than opening something red.
+# workflow_dispatch lets you run it manually (e.g. to retry, or bump
+# without waiting for a dispatch) — with no client_payload, it just
+# looks up each crate's current max_version on crates.io itself.
+on:
+  repository_dispatch:
+    types: [typiql-rs-published]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
+            libayatana-appindicator3-dev patchelf build-essential curl wget file \
+            libxdo-dev libssl-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Determine target versions
+        id: versions
+        run: |
+          if [ -n "${{ github.event.client_payload.typiql_core }}" ]; then
+            echo "core=${{ github.event.client_payload.typiql_core }}" >> "$GITHUB_OUTPUT"
+            echo "json=${{ github.event.client_payload.typiql_adapter_json }}" >> "$GITHUB_OUTPUT"
+            echo "duckdb=${{ github.event.client_payload.typiql_adapter_duckdb }}" >> "$GITHUB_OUTPUT"
+          else
+            crate_version() {
+              curl -sf -H "User-Agent: typiql-tauri-ci (david@davidallanscott.ca)" \
+                "https://crates.io/api/v1/crates/$1" | jq -r '.crate.max_version'
+            }
+            echo "core=$(crate_version typiql-core)" >> "$GITHUB_OUTPUT"
+            echo "json=$(crate_version typiql-adapter-json)" >> "$GITHUB_OUTPUT"
+            echo "duckdb=$(crate_version typiql-adapter-duckdb)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Pin Cargo.toml to published versions
+        run: |
+          ./scripts/typiql-deps.sh published \
+            --core "${{ steps.versions.outputs.core }}" \
+            --json-adapter "${{ steps.versions.outputs.json }}" \
+            --duckdb-adapter "${{ steps.versions.outputs.duckdb }}"
+
+      - name: cargo check (regression gate before opening a PR)
+        working-directory: src-tauri
+        run: cargo check --all-features
+
+      - name: Open PR if the pinned versions changed
+        uses: peter-evans/create-pull-request@v7
+        with:
+          commit-message: >-
+            chore: bump typiql-rs deps (core ${{ steps.versions.outputs.core }},
+            json-adapter ${{ steps.versions.outputs.json }},
+            duckdb-adapter ${{ steps.versions.outputs.duckdb }})
+          title: "chore: bump typiql-rs dependencies"
+          body: >-
+            Bumps `typiql-core`/`typiql-adapter-json`/`typiql-adapter-duckdb`
+            to their current crates.io versions
+            (${{ steps.versions.outputs.core }} /
+            ${{ steps.versions.outputs.json }} /
+            ${{ steps.versions.outputs.duckdb }}). Opened automatically after
+            `cargo check` passed against these versions.
+          branch: bump-typiql-rs-deps
+          delete-branch: true
+          add-paths: |
+            src-tauri/Cargo.toml
+            src-tauri/Cargo.lock

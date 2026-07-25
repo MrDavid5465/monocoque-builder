@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=typiql
+Comment=Telemetry dashboard designer and recorder for sim racing rigs
+Exec=typiql
+Icon=com.telemetryadmin.app
+Terminal=false
+Type=Application
+Categories=Utility;Game;

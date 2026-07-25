@@ -1,0 +1,38 @@
+# Maintainer: David Scott <david@davidallanscott.ca>
+#
+# "-bin" package wrapping the official .deb produced by this repo's own
+# GitHub Release (tauri-action's build job) — the standard AUR pattern for
+# packages that wrap an upstream project's own official prebuilt artifact
+# rather than rebuilding from source on the user's machine.
+#
+# UNVERIFIED against a real release yet (no crates.io/GitHub release has
+# actually run at the time this was written): the .deb filename pattern
+# below (`typiql_<pkgver>_amd64.deb`) is Tauri's documented default
+# (`<productName>_<version>_<arch>.deb`, productName="typiql" per
+# src-tauri/tauri.conf.json) but hasn't been confirmed against a real
+# build artifact — check the actual asset name on the first real release
+# and adjust `source=` below if it differs. sha256sums is `SKIP` for the
+# same reason (no real artifact exists yet to hash) — replace with a real
+# checksum via `updpkgsums` before ever pushing this to the real AUR;
+# `SKIP` is fine for the CI validation build in .github/workflows/
+# integration-test.yml, which only needs the package to build+install
+# successfully, not to prove supply-chain integrity.
+
+pkgname=typiql-bin
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Telemetry dashboard designer and recorder for sim racing rigs (typiql)"
+arch=('x86_64')
+url="https://github.com/MrDavid5465/telemetry-admin"
+license=('MIT')
+depends=('webkit2gtk-4.1' 'gtk3' 'libayatana-appindicator')
+provides=('typiql')
+conflicts=('typiql')
+options=('!strip')
+source=("https://github.com/MrDavid5465/telemetry-admin/releases/download/v${pkgver}/typiql_${pkgver}_amd64.deb")
+sha256sums=('SKIP')
+
+package() {
+  cd "$srcdir"
+  bsdtar -xOf "typiql_${pkgver}_amd64.deb" data.tar.* | bsdtar -xf - -C "$pkgdir"
+}

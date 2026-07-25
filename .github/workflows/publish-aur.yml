@@ -1,0 +1,82 @@
+name: Publish to AUR
+
+# Deliberately workflow_dispatch-only, never automatic — the plan's "nothing
+# publishes live until you've dry-run it and are satisfied" requirement
+# applies here too. integration-test.yml already validates that the
+# PKGBUILD in pkg/aur/ builds and installs cleanly in a real Arch
+# container; this workflow just pushes that same PKGBUILD (with a real
+# pkgver + sha256sum filled in) to the real AUR, and only when triggered
+# by hand. Runs in an Arch container (same pattern as integration-test.yml)
+# so `makepkg --printsrcinfo` can run for real rather than being faked
+# with a second tool — makepkg refuses to run as root even for this, so
+# it needs the same non-root builder-user setup.
+#
+# Needs a secret this repo doesn't have yet: AUR_SSH_PRIVATE_KEY, the
+# private half of an SSH key registered under aur.archlinux.org -> My
+# Account -> SSH Public Key. Not created yet — do that yourself before
+# ever running this workflow for real.
+on:
+  workflow_dispatch:
+    inputs:
+      pkgver:
+        description: 'Version to publish (must match a real GitHub Release tag, e.g. 0.1.0)'
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish-aur:
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:latest
+    steps:
+      - name: Prepare Arch environment
+        run: |
+          pacman -Syu --noconfirm base-devel git openssh
+          useradd -m builder
+          echo 'builder ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/builder
+
+      - uses: actions/checkout@v4
+        with:
+          path: typiql-tauri/typiql
+
+      - name: Set pkgver and real sha256sum against the release .deb
+        working-directory: typiql-tauri/typiql/pkg/aur
+        run: |
+          sed -i "s/^pkgver=.*/pkgver=${{ inputs.pkgver }}/" PKGBUILD
+          curl -fsSL -o typiql.deb \
+            "https://github.com/MrDavid5465/telemetry-admin/releases/download/v${{ inputs.pkgver }}/typiql_${{ inputs.pkgver }}_amd64.deb"
+          sum=$(sha256sum typiql.deb | cut -d' ' -f1)
+          sed -i "s/^sha256sums=.*/sha256sums=('${sum}')/" PKGBUILD
+          rm typiql.deb
+
+      - name: Hand the workspace to the non-root build user
+        run: chown -R builder:builder "$GITHUB_WORKSPACE"
+
+      - name: Generate .SRCINFO
+        working-directory: typiql-tauri/typiql/pkg/aur
+        run: su builder -c "cd '$GITHUB_WORKSPACE/typiql-tauri/typiql/pkg/aur' && makepkg --printsrcinfo > .SRCINFO"
+
+      - name: Set up SSH for the AUR
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.AUR_SSH_PRIVATE_KEY }}" > ~/.ssh/aur
+          chmod 600 ~/.ssh/aur
+          ssh-keyscan -H aur.archlinux.org >> ~/.ssh/known_hosts
+          cat > ~/.ssh/config <<'EOF'
+          Host aur.archlinux.org
+            IdentityFile ~/.ssh/aur
+            User aur
+          EOF
+
+      - name: Push PKGBUILD to the AUR
+        run: |
+          git clone ssh://aur@aur.archlinux.org/typiql-bin.git /tmp/aur-typiql-bin
+          cp typiql-tauri/typiql/pkg/aur/PKGBUILD typiql-tauri/typiql/pkg/aur/.SRCINFO /tmp/aur-typiql-bin/
+          cd /tmp/aur-typiql-bin
+          git config user.name "David Scott"
+          git config user.email "david@davidallanscott.ca"
+          git add PKGBUILD .SRCINFO
+          git commit -m "Update to ${{ inputs.pkgver }}"
+          git push

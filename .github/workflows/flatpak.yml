@@ -1,0 +1,73 @@
+name: Flatpak (best effort)
+
+# Deliberately its own workflow file, not a step bolted onto
+# release-please.yml's build-release job — a Flatpak build failure (the
+# riskiest, least-tested part of this whole CI/CD setup) must never turn
+# the real AppImage/.deb release red or block it. Triggered the same way
+# as integration-test.yml (tag push + manual dispatch) rather than a
+# cross-workflow `needs:`, which doesn't work across separate workflow
+# files.
+#
+# UNVERIFIED: nothing here has been exercised against a real
+# flatpak-builder run (no way to do that in this environment). Expect to
+# iterate on generator invocations, runtime/SDK extension versions, and
+# the offline build step once a real CI log exists.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  flatpak:
+    runs-on: ubuntu-22.04
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: typiql-tauri/typiql
+      - uses: actions/checkout@v4
+        with:
+          repository: MrDavid5465/typiql-rs
+          path: typiql-rs
+
+      - name: Install flatpak-builder + GNOME runtime/SDK + extensions
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder
+          sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          sudo flatpak install -y --noninteractive flathub org.gnome.Platform//46 org.gnome.Sdk//46
+          sudo flatpak install -y --noninteractive flathub org.freedesktop.Sdk.Extension.rust-stable//24.08 org.freedesktop.Sdk.Extension.node20//24.08
+
+      - name: Install flatpak-builder-tools generators
+        run: |
+          pip install --user aiohttp toml
+          git clone --depth 1 https://github.com/flatpak/flatpak-builder-tools /tmp/flatpak-builder-tools
+
+      - name: Generate offline npm sources
+        run: |
+          python3 /tmp/flatpak-builder-tools/node/flatpak-node-generator.py \
+            npm typiql-tauri/typiql/package-lock.json \
+            -o typiql-tauri/typiql/flatpak/generated-node-sources.json
+
+      - name: Generate offline cargo sources
+        run: |
+          python3 /tmp/flatpak-builder-tools/cargo/flatpak-cargo-generator.py \
+            typiql-tauri/typiql/src-tauri/Cargo.lock \
+            -o typiql-tauri/typiql/flatpak/generated-cargo-sources.json
+
+      - name: Build .flatpak (network-isolated, offline sources only)
+        working-directory: typiql-tauri/typiql/flatpak
+        run: |
+          flatpak-builder --force-clean --repo=repo build-dir com.telemetryadmin.app.yml
+          flatpak build-bundle repo typiql.flatpak com.telemetryadmin.app
+
+      - name: Upload .flatpak to the matching (draft) release
+        if: success() && startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: typiql-tauri/typiql/flatpak/typiql.flatpak
+          draft: true
