@@ -3,7 +3,7 @@ import React, { CSSProperties } from "react";
 interface IconProps {
   style?: CSSProperties;
   className?: string;
-  onClick?: any;
+  onClick?: React.MouseEventHandler<SVGSVGElement>;
 }
 
 const Logo: React.FC<IconProps> = props => {

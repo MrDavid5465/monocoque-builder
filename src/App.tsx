@@ -19,7 +19,7 @@ import TelemetryControls from "./components/Telemetry/Controls";
 import { useMutation, useQuery } from "@apollo/client/react";
 import { HEARTBEAT_CLIENT } from "./components/Telemetry/clientsQueries";
 import { getAppId } from "./graphql/client";
-import dispatcher from "./lib/denim/lib/queries";
+import dispatcher, { IMy } from "./lib/denim/lib/queries";
 import SetupWizard from "./components/Onboarding/SetupWizard";
 import { ConfirmDialogHost } from "./lib/denim/components/ConfirmDialog";
 
@@ -39,10 +39,10 @@ const ClientHeartbeat: React.FC = () => {
 };
 
 const SetupGuard: React.FC = () => {
-  const { data, loading } = useQuery(dispatcher.my, { fetchPolicy: 'cache-first' });
+  const { data, loading } = useQuery<IMy>(dispatcher.my, { fetchPolicy: 'cache-first' });
   const [wizardDone, setWizardDone] = React.useState(false);
   if (loading || wizardDone || !data) return null;
-  const setupComplete = (data as any)?.my?.settings?.setupComplete;
+  const setupComplete = data.my?.settings?.setupComplete;
   if (setupComplete) return null;
   return <SetupWizard onComplete={() => setWizardDone(true)} />;
 };
@@ -52,9 +52,9 @@ const SetupGuard: React.FC = () => {
 // the time this renders: Denim's own top-level `my` query gates rendering
 // any routes at all until it resolves, so this never shows a loading flash.
 const DefaultLanding: React.FC = () => {
-  const { data, loading } = useQuery(dispatcher.my, { fetchPolicy: 'cache-first' });
+  const { data, loading } = useQuery<IMy>(dispatcher.my, { fetchPolicy: 'cache-first' });
   if (loading || !data) return null;
-  const launchPage = (data as any)?.my?.settings?.launchPage;
+  const launchPage = data.my?.settings?.launchPage;
   return <Navigate to={launchPage ? `/${launchPage}` : '/telemetryadmin/default'} replace />;
 };
 

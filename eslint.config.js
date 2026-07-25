@@ -64,4 +64,17 @@ export default tseslint.config(
       'no-empty': ['error', { allowEmptyCatch: true }],
     },
   },
+  {
+    // Test-only mocks stub out third-party components/hooks (Fluent UI,
+    // Apollo) whose real prop/return types are large and irrelevant to
+    // what the test exercises — typing a mock to match, say, IButtonProps
+    // just to satisfy the linter adds coupling to library internals with
+    // no safety benefit, since a wrong mock shape fails the test loudly
+    // regardless of what TypeScript thinks. `any` is the correct type
+    // here, not a shortcut.
+    files: ['**/__tests__/**'],
+    rules: {
+      '@typescript-eslint/no-explicit-any': 'off',
+    },
+  },
 );
