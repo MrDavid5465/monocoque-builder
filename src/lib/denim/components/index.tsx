@@ -39,10 +39,37 @@ function writeThemeCache(settings: { theme?: string; fontSize?: number }) {
   } catch {}
 }
 
+// Keeps the browser tab favicon in sync with the user's selected theme
+// color. Rendered as a data URI rather than reusing /logo.svg because the
+// desktop app icon (generated from that static file via `tauri icon`)
+// can't be re-colored at runtime, but the favicon can and should track
+// whichever of the 12 theme colors is currently active.
+const FAVICON_SVG = (color: string) =>
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80">` +
+  `<path d="M 24 73 A 32 32 0 1 1 56 73 L 50 62 A 20 20 0 1 0 30 62 Z" fill="${color}"/>` +
+  `<path d="M 42 44 L 41 48 L 38 46 L 32 22 Z" fill="${color}"/>` +
+  `<circle cx="40" cy="45" r="3" fill="${color}"/>` +
+  `</svg>`;
+
+function setFaviconColor(color: string) {
+  let link = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
+  if (!link) {
+    link = document.createElement("link");
+    link.rel = "icon";
+    document.head.appendChild(link);
+  }
+  link.type = "image/svg+xml";
+  link.href = `data:image/svg+xml,${encodeURIComponent(FAVICON_SVG(color))}`;
+}
+
 export const setTheme = (theme: any, themes: any) => {
   const key = (theme && theme.theme) || "default";
   const build = themes[key] || themes.default;
-  loadTheme(build(theme.fontSize || 1));
+  const builtTheme = build(theme.fontSize || 1);
+  loadTheme(builtTheme);
+  if (builtTheme?.palette?.themePrimary) {
+    setFaviconColor(builtTheme.palette.themePrimary);
+  }
 };
 
 interface Props {
