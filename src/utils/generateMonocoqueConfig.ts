@@ -39,9 +39,9 @@ export function generateMonocoqueConfig(channels: ChannelConfig[]): string {
               volume       = ${eff.volume ?? 100};
               modulation   = ${eff.modulation ?? "frequency"};
               frequency    = ${eff.frequency};
-              frequencyMax = ${eff.frequency_max};
+              frequencyMax = ${eff.frequencyMax};
               amplitude    = ${eff.amplitude};
-              amplitudeMax = ${eff.amplitude_max};
+              amplitudeMax = ${eff.amplitudeMax};
           },
           `;
         }
@@ -56,10 +56,10 @@ export function generateMonocoqueConfig(channels: ChannelConfig[]): string {
               volume       = ${eff.volume ?? 100};
               modulation   = ${eff.modulation ?? "frequency"};
               frequency    = ${eff.frequency};
-              frequencyMax = ${eff.frequency_max};
+              frequencyMax = ${eff.frequencyMax};
               amplitude    = ${eff.amplitude};
-              amplitudeMax = ${eff.amplitude_max};
-          }, 
+              amplitudeMax = ${eff.amplitudeMax};
+          },
           `;
         }
       }

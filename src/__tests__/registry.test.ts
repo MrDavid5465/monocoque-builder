@@ -33,8 +33,8 @@ describe('getSchema', () => {
 // ─── ALL_SCHEMAS ──────────────────────────────────────────────────────────────
 
 describe('ALL_SCHEMAS', () => {
-  it('contains exactly 13 schemas', () => {
-    expect(ALL_SCHEMAS).toHaveLength(13);
+  it('contains exactly 16 schemas', () => {
+    expect(ALL_SCHEMAS).toHaveLength(16);
   });
 
   it('every schema has required shape', () => {
@@ -117,9 +117,11 @@ describe('ALL_SCHEMAS', () => {
     expect(getSchema('group').allowChildren).toBe(true);
   });
 
-  it('types that allow children are group, static-sprite, needle-gauge, and bar-gauge', () => {
+  it('types that allow children are group, static-sprite, needle-gauge, bar-gauge, gif-gauge, arc-gauge-face, and sprite-arc-gauge-face', () => {
     const allowingChildren = ALL_SCHEMAS.filter(s => s.allowChildren).map(s => s.type).sort();
-    expect(allowingChildren).toEqual(['bar-gauge', 'group', 'needle-gauge', 'static-sprite'].sort());
+    expect(allowingChildren).toEqual(
+      ['arc-gauge-face', 'bar-gauge', 'gif-gauge', 'group', 'needle-gauge', 'sprite-arc-gauge-face', 'static-sprite'].sort()
+    );
   });
 
   it('freeform leaf types do not allow children', () => {

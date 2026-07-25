@@ -62,17 +62,18 @@ const List: React.FC<Props> = ({
         break;
     }
   }
-  // Only referenced by the commented-out CSV export block below —
-  // prefixed rather than deleted to keep it available if that's reactivated.
-  function _toCSV(schema: DisplaySchema<any>, items: any[]) {
-    return items.map((i) => {
-      const item = { ...i };
-      Object.entries(schema).forEach(([k, v]: any) => {
-        item[k] = v.onRender ? v.onRender({ value: i[k], values: i }) : i[k];
-      });
-      return item;
-    });
-  }
+  // Only referenced by the commented-out CSV export block below — commented
+  // out alongside it (rather than deleted) to keep it available if that's
+  // reactivated; a live-but-unreferenced function fails `tsc --noEmit`.
+  // function toCSV(schema: DisplaySchema<any>, items: any[]) {
+  //   return items.map((i) => {
+  //     const item = { ...i };
+  //     Object.entries(schema).forEach(([k, v]: any) => {
+  //       item[k] = v.onRender ? v.onRender({ value: i[k], values: i }) : i[k];
+  //     });
+  //     return item;
+  //   });
+  // }
   Object.entries(filters).forEach(([name, value]) => {
     if (value !== '' && !(name.includes('_gt') || name.includes('_lt'))) {
       filteredItems = matchSorter(filteredItems, value, { keys: [name] });
