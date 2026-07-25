@@ -1,9 +1,7 @@
-use std::sync::Arc;
+use super::car::thumbnails_dir;
+use crate::typiql_types::DashTemplate;
 use async_graphql::{Context, Object, Result as GqlResult};
 use serde_json::json;
-use typiql::TypiQLAdapter;
-use crate::typiql_types::DashTemplate;
-use super::car::thumbnails_dir;
 
 #[derive(Default)]
 pub struct DashTemplateThumbnailMutation;
@@ -21,13 +19,15 @@ impl DashTemplateThumbnailMutation {
         id: String,
         data: String,
     ) -> GqlResult<DashTemplate> {
-        let adapter = ctx.data::<Arc<dyn TypiQLAdapter>>()?;
+        let adapter = crate::graphql::default_adapter(ctx)?;
 
         let existing: DashTemplate = adapter
             .get_one("dash_templates".into(), "id", &id)
             .await
             .ok_or_else(|| async_graphql::Error::new("Template not found"))
-            .and_then(|v| serde_json::from_value(v).map_err(|e| async_graphql::Error::new(e.to_string())))?;
+            .and_then(|v| {
+                serde_json::from_value(v).map_err(|e| async_graphql::Error::new(e.to_string()))
+            })?;
 
         let dir = thumbnails_dir();
         std::fs::create_dir_all(&dir).map_err(|e| async_graphql::Error::new(e.to_string()))?;
@@ -60,7 +60,12 @@ impl DashTemplateThumbnailMutation {
         std::fs::write(&file_path, &bytes).map_err(|e| async_graphql::Error::new(e.to_string()))?;
 
         let result_val = adapter
-            .update("dash_templates".into(), "id", &existing.id, json!({ "thumbnail": filename }))
+            .update(
+                "dash_templates".into(),
+                "id",
+                &existing.id,
+                json!({ "thumbnail": filename }),
+            )
             .await
             .ok_or_else(|| async_graphql::Error::new("Update failed"))?;
 

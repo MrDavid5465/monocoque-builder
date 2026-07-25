@@ -137,7 +137,7 @@ export function useTelemetryPlayback(
     return () => {
       if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
     };
-  }, [configKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [configKey]);  
 
   return frame;
 }

@@ -721,7 +721,7 @@ const DashboardPropertiesPanel: React.FC<{
     canvasHeight: dashboard.canvasHeight,
     dayNight: dashboard.dayNight ?? false,
     neckFx: dashboard.neckFx ?? false,
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   }), [dashboard.name, dashboard.path, dashboard.baseDashType, dashboard.canvasWidth, dashboard.canvasHeight, dashboard.dayNight, dashboard.neckFx]);
 
   const bgInitial = useMemo(() => ({

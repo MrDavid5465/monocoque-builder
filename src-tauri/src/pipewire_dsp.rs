@@ -1,8 +1,8 @@
-use std::process::Command;
-use std::sync::Mutex;
 use async_graphql::SimpleObject;
 use serde::Serialize;
 use serde_json::Value;
+use std::process::Command;
+use std::sync::Mutex;
 
 #[derive(Debug, Clone, Serialize, SimpleObject)]
 pub struct AudioSinkInfo {
@@ -51,7 +51,11 @@ pub fn list_audio_sinks() -> Result<Vec<AudioSinkInfo>, String> {
                 .and_then(Value::as_str)
                 .and_then(|s| s.parse::<u8>().ok())
                 .unwrap_or(2);
-            Some(AudioSinkInfo { name, description, channels })
+            Some(AudioSinkInfo {
+                name,
+                description,
+                channels,
+            })
         })
         .collect();
 
@@ -74,7 +78,13 @@ pub const DSP_SINK_PREFIX: &str = "shaker_dsp_";
 fn device_slug(devid: &str) -> String {
     devid
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }
 
@@ -122,7 +132,11 @@ pub struct CornerSpec {
 /// `muted` in without disturbing the stored `fader` value it's derived
 /// from.
 fn effective_mult(fader: u8, muted: bool) -> f32 {
-    if muted { 0.0 } else { (fader as f32) / 100.0 }
+    if muted {
+        0.0
+    } else {
+        (fader as f32) / 100.0
+    }
 }
 
 /// One effect's worth of DSP corners, sharing one capture sink. `effect_key`
@@ -225,125 +239,130 @@ pub struct DeviceChainSpec {
 /// remap to real output channels) — see load_filter_chain's doc comment for
 /// the full reasoning behind this shape. Extracted so it can run once per
 /// device the effect has corners on, not just once globally.
-fn build_effect_module(devid: &str, output_channel_count: u8, effect: &EffectDspSpec) -> Result<String, String> {
+fn build_effect_module(
+    devid: &str,
+    output_channel_count: u8,
+    effect: &EffectDspSpec,
+) -> Result<String, String> {
     let sink_name = effect_sink_name(devid, &effect.effect_key);
 
-        // "volume" is not a real builtin filter-graph label — confirmed by
-        // hands-on testing (PipeWire 1.6.8) that it fails with "cannot
-        // create label volume", killing the whole filter-chain module load.
-        // "linear" (new = old * Mult + Add) is the actual builtin gain
-        // filter; Mult alone gives a plain 0.0-1.0 fader (Add defaults to 0).
-        //
-        // The lpf node is *always* present per channel, even when
-        // "bypassed" — see BYPASS_FREQ_HZ's doc comment for why (topology
-        // must stay constant for live control updates to work at all). Q
-        // must be set explicitly — confirmed by hands-on testing that
-        // leaving it unset defaults to 0, a degenerate/invalid value for a
-        // biquad's Freq/Q design math that produced total silence on real
-        // hardware despite Freq being set correctly. 0.707 is the standard
-        // "maximally flat" (Butterworth-equivalent) Q for a simple
-        // 2nd-order lowpass.
-        //
-        // lpf{p}/vol{p} node names are suffixed by capture-channel index
-        // (Monocoque's own `pan` for that corner) since, unlike the old
-        // per-row-module design, multiple corners' chains now coexist in
-        // one shared per-effect module instance.
-        let mut nodes = Vec::new();
-        let mut links = Vec::new();
-        let mut inputs = Vec::new();
-        for p in 0..output_channel_count {
-            let corner = effect.corners.iter().find(|c| c.pan == p);
-            let lpf_name = format!("lpf{p}");
-            let vol_name = format!("vol{p}");
-            nodes.push(serde_json::json!({
-                "type": "builtin",
-                "name": vol_name,
-                "label": "linear",
-                "control": { "Mult": corner.map(|c| effective_mult(c.fader, c.muted)).unwrap_or(0.0) },
-            }));
-            nodes.push(serde_json::json!({
+    // "volume" is not a real builtin filter-graph label — confirmed by
+    // hands-on testing (PipeWire 1.6.8) that it fails with "cannot
+    // create label volume", killing the whole filter-chain module load.
+    // "linear" (new = old * Mult + Add) is the actual builtin gain
+    // filter; Mult alone gives a plain 0.0-1.0 fader (Add defaults to 0).
+    //
+    // The lpf node is *always* present per channel, even when
+    // "bypassed" — see BYPASS_FREQ_HZ's doc comment for why (topology
+    // must stay constant for live control updates to work at all). Q
+    // must be set explicitly — confirmed by hands-on testing that
+    // leaving it unset defaults to 0, a degenerate/invalid value for a
+    // biquad's Freq/Q design math that produced total silence on real
+    // hardware despite Freq being set correctly. 0.707 is the standard
+    // "maximally flat" (Butterworth-equivalent) Q for a simple
+    // 2nd-order lowpass.
+    //
+    // lpf{p}/vol{p} node names are suffixed by capture-channel index
+    // (Monocoque's own `pan` for that corner) since, unlike the old
+    // per-row-module design, multiple corners' chains now coexist in
+    // one shared per-effect module instance.
+    let mut nodes = Vec::new();
+    let mut links = Vec::new();
+    let mut inputs = Vec::new();
+    for p in 0..output_channel_count {
+        let corner = effect.corners.iter().find(|c| c.pan == p);
+        let lpf_name = format!("lpf{p}");
+        let vol_name = format!("vol{p}");
+        nodes.push(serde_json::json!({
+            "type": "builtin",
+            "name": vol_name,
+            "label": "linear",
+            "control": { "Mult": corner.map(|c| effective_mult(c.fader, c.muted)).unwrap_or(0.0) },
+        }));
+        nodes.push(serde_json::json!({
                 "type": "builtin",
                 "name": lpf_name,
                 "label": "bq_lowpass",
                 "control": { "Freq": corner.and_then(|c| c.lpf_hz).unwrap_or(BYPASS_FREQ_HZ), "Q": 0.707 },
             }));
-            links.push(serde_json::json!({
-                "output": format!("{lpf_name}:Out"),
-                "input": format!("{vol_name}:In"),
+        links.push(serde_json::json!({
+            "output": format!("{lpf_name}:Out"),
+            "input": format!("{vol_name}:In"),
+        }));
+        inputs.push(format!("{lpf_name}:In"));
+    }
+
+    // Direct remap: each real output channel gets exactly the one
+    // corner-chain that targets it, or a permanently-silent placeholder
+    // if this effect has no corner for that channel.
+    let mut outputs = Vec::new();
+    for idx in 0..output_channel_count {
+        if let Some(corner) = effect.corners.iter().find(|c| c.pan == idx) {
+            outputs.push(format!("vol{}:Out", corner.pan));
+        } else {
+            let silence_name = format!("silence{idx}");
+            nodes.push(serde_json::json!({
+                "type": "builtin",
+                "name": silence_name,
+                "label": "linear",
+                "control": { "Mult": 0.0 },
             }));
-            inputs.push(format!("{lpf_name}:In"));
+            // vol0 always exists (the loop above builds all
+            // output_channel_count chains unconditionally) — its actual
+            // content is irrelevant here since Mult=0 zeroes it either way.
+            links.push(serde_json::json!({
+                "output": "vol0:Out",
+                "input": format!("{silence_name}:In"),
+            }));
+            outputs.push(format!("{silence_name}:Out"));
         }
+    }
 
-        // Direct remap: each real output channel gets exactly the one
-        // corner-chain that targets it, or a permanently-silent placeholder
-        // if this effect has no corner for that channel.
-        let mut outputs = Vec::new();
-        for idx in 0..output_channel_count {
-            if let Some(corner) = effect.corners.iter().find(|c| c.pan == idx) {
-                outputs.push(format!("vol{}:Out", corner.pan));
-            } else {
-                let silence_name = format!("silence{idx}");
-                nodes.push(serde_json::json!({
-                    "type": "builtin",
-                    "name": silence_name,
-                    "label": "linear",
-                    "control": { "Mult": 0.0 },
-                }));
-                // vol0 always exists (the loop above builds all
-                // output_channel_count chains unconditionally) — its actual
-                // content is irrelevant here since Mult=0 zeroes it either way.
-                links.push(serde_json::json!({
-                    "output": "vol0:Out",
-                    "input": format!("{silence_name}:In"),
-                }));
-                outputs.push(format!("{silence_name}:Out"));
-            }
-        }
+    // playback.props deliberately has no media.class — confirmed by
+    // testing that setting one there (Audio/Sink, matching the capture
+    // side) causes PipeWire to log "media.class Audio/Sink does not
+    // expect Output stream direction" and the node never connects.
+    let mut playback_props = serde_json::json!({
+        "node.name": format!("{sink_name}_out"),
+        "audio.channels": output_channel_count,
+        "target.object": devid,
+    });
+    if let Some(positions) = channel_positions(output_channel_count) {
+        playback_props["audio.position"] = serde_json::json!(positions);
+    }
 
-        // playback.props deliberately has no media.class — confirmed by
-        // testing that setting one there (Audio/Sink, matching the capture
-        // side) causes PipeWire to log "media.class Audio/Sink does not
-        // expect Output stream direction" and the node never connects.
-        let mut playback_props = serde_json::json!({
-            "node.name": format!("{sink_name}_out"),
-            "audio.channels": output_channel_count,
-            "target.object": devid,
-        });
-        if let Some(positions) = channel_positions(output_channel_count) {
-            playback_props["audio.position"] = serde_json::json!(positions);
-        }
+    // capture.props channel count matches output_channel_count exactly
+    // (mirroring the real device's own channel count, same as
+    // Monocoque's pre-DSP config always used) — no dont-remix/explicit
+    // position needed here, since Monocoque's own stream declares the
+    // identical channel count and its own explicit channel_map, so
+    // ports connect straightforwardly by index, the same mechanism the
+    // proven-working pre-DSP backup config already relied on.
+    let mut capture_props = serde_json::json!({
+        "node.name": sink_name,
+        "media.class": "Audio/Sink",
+        "audio.channels": output_channel_count,
+    });
+    if let Some(positions) = channel_positions(output_channel_count) {
+        capture_props["audio.position"] = serde_json::json!(positions);
+    }
 
-        // capture.props channel count matches output_channel_count exactly
-        // (mirroring the real device's own channel count, same as
-        // Monocoque's pre-DSP config always used) — no dont-remix/explicit
-        // position needed here, since Monocoque's own stream declares the
-        // identical channel count and its own explicit channel_map, so
-        // ports connect straightforwardly by index, the same mechanism the
-        // proven-working pre-DSP backup config already relied on.
-        let mut capture_props = serde_json::json!({
-            "node.name": sink_name,
-            "media.class": "Audio/Sink",
-            "audio.channels": output_channel_count,
-        });
-        if let Some(positions) = channel_positions(output_channel_count) {
-            capture_props["audio.position"] = serde_json::json!(positions);
-        }
+    let filter_chain_args = serde_json::json!({
+        "node.description": format!("Shaker DSP: {}", effect.effect_key),
+        "media.name": format!("Shaker DSP: {}", effect.effect_key),
+        "filter.graph": {
+            "nodes": nodes,
+            "links": links,
+            "inputs": inputs,
+            "outputs": outputs,
+        },
+        "capture.props": capture_props,
+        "playback.props": playback_props,
+    });
+    let filter_chain_args_str =
+        serde_json::to_string(&filter_chain_args).map_err(|e| e.to_string())?;
 
-        let filter_chain_args = serde_json::json!({
-            "node.description": format!("Shaker DSP: {}", effect.effect_key),
-            "media.name": format!("Shaker DSP: {}", effect.effect_key),
-            "filter.graph": {
-                "nodes": nodes,
-                "links": links,
-                "inputs": inputs,
-                "outputs": outputs,
-            },
-            "capture.props": capture_props,
-            "playback.props": playback_props,
-        });
-        let filter_chain_args_str = serde_json::to_string(&filter_chain_args).map_err(|e| e.to_string())?;
-
-        Ok(format!(
+    Ok(format!(
             "    {{ name = libpipewire-module-filter-chain\n        args = {filter_chain_args_str}\n    }}"
         ))
 }
@@ -369,106 +388,117 @@ fn build_effect_module(devid: &str, output_channel_count: u8, effect: &EffectDsp
 /// enabled corner's own "vol{pan}" gain node — a real fan-out, not a remap,
 /// since multiple corners can (and typically do) all want a share of the one
 /// LFE signal simultaneously.
-fn build_lfe_module(devid: &str, output_channel_count: u8, lfe: &LfeSpec) -> Result<String, String> {
-        let sink_name = lfe_sink_name(devid);
-        let mut nodes = Vec::new();
-        let mut links = Vec::new();
+fn build_lfe_module(
+    devid: &str,
+    output_channel_count: u8,
+    lfe: &LfeSpec,
+) -> Result<String, String> {
+    let sink_name = lfe_sink_name(devid);
+    let mut nodes = Vec::new();
+    let mut links = Vec::new();
 
-        let mut mixer_control = serde_json::Map::new();
-        let n = lfe.source_channels.max(1);
-        for i in 0..lfe.source_channels {
-            mixer_control.insert(format!("Gain {}", i + 1), serde_json::json!(1.0 / n as f32));
+    let mut mixer_control = serde_json::Map::new();
+    let n = lfe.source_channels.max(1);
+    for i in 0..lfe.source_channels {
+        mixer_control.insert(format!("Gain {}", i + 1), serde_json::json!(1.0 / n as f32));
+    }
+    nodes.push(serde_json::json!({
+        "type": "builtin", "name": "mix", "label": "mixer", "control": mixer_control,
+    }));
+    let inputs: Vec<String> = (0..lfe.source_channels)
+        .map(|i| format!("mix:In {}", i + 1))
+        .collect();
+
+    nodes.push(serde_json::json!({
+        "type": "builtin", "name": "lpf", "label": "bq_lowpass",
+        "control": { "Freq": lfe.lpf_hz.unwrap_or(BYPASS_FREQ_HZ), "Q": 0.707 },
+    }));
+    links.push(serde_json::json!({ "output": "mix:Out", "input": "lpf:In" }));
+
+    let mut outputs = Vec::new();
+    for idx in 0..output_channel_count {
+        if let Some(corner) = lfe.corners.iter().find(|c| c.pan == idx) {
+            let vol_name = format!("vol{idx}");
+            nodes.push(serde_json::json!({
+                "type": "builtin", "name": vol_name, "label": "linear",
+                "control": { "Mult": effective_mult(corner.fader, corner.muted) },
+            }));
+            links.push(
+                serde_json::json!({ "output": "lpf:Out", "input": format!("{vol_name}:In") }),
+            );
+            outputs.push(format!("{vol_name}:Out"));
+        } else {
+            let silence_name = format!("silence{idx}");
+            nodes.push(serde_json::json!({
+                "type": "builtin", "name": silence_name, "label": "linear",
+                "control": { "Mult": 0.0 },
+            }));
+            links.push(
+                serde_json::json!({ "output": "lpf:Out", "input": format!("{silence_name}:In") }),
+            );
+            outputs.push(format!("{silence_name}:Out"));
         }
-        nodes.push(serde_json::json!({
-            "type": "builtin", "name": "mix", "label": "mixer", "control": mixer_control,
-        }));
-        let inputs: Vec<String> = (0..lfe.source_channels).map(|i| format!("mix:In {}", i + 1)).collect();
+    }
 
-        nodes.push(serde_json::json!({
-            "type": "builtin", "name": "lpf", "label": "bq_lowpass",
-            "control": { "Freq": lfe.lpf_hz.unwrap_or(BYPASS_FREQ_HZ), "Q": 0.707 },
-        }));
-        links.push(serde_json::json!({ "output": "mix:Out", "input": "lpf:In" }));
+    // No media.class — mirrors playback_props below (and every effect's
+    // own playback_props above): omitting it plus setting target.object
+    // makes this a plain stream that connects itself *to* an existing
+    // node, here the source sink, rather than creating a new virtual
+    // device for something else to connect to.
+    //
+    // `target.object` is deliberately the sink's own name, NOT
+    // "{name}.monitor" — confirmed via hands-on testing (real hardware,
+    // an atypical multi-app PipeWire routing setup with several virtual
+    // sinks feeding an external DAW, all patched by a saved qpwgraph
+    // layout at startup) that "{name}.monitor" doesn't resolve to
+    // anything in the *native* PipeWire graph at all: that name only
+    // exists in the PulseAudio-compatibility layer (pipewire-pulse),
+    // which native `libpipewire-module-filter-chain` clients don't go
+    // through. With an unresolvable target.object, PipeWire silently
+    // fell back to auto-linking this capture stream to *the system's
+    // default source* instead — observed directly in qpwgraph landing on
+    // "default.remapped source" (an unrelated mic-passthrough), not the
+    // configured sink at all. `stream.capture.sink: true` is the correct
+    // native mechanism for "listen to what's being played to this sink"
+    // (the same property `pw-record --target <sink> -P
+    // 'stream.capture.sink=true'` uses) — it tells the adapter to
+    // capture the sink node's own render/monitor side rather than
+    // treating target.object as a capture source to be routed *from*.
+    let mut capture_props = serde_json::json!({
+        "node.name": sink_name,
+        "audio.channels": lfe.source_channels,
+        "target.object": lfe.source_device,
+        "stream.capture.sink": true,
+    });
+    if let Some(positions) = channel_positions(lfe.source_channels) {
+        capture_props["audio.position"] = serde_json::json!(positions);
+    }
 
-        let mut outputs = Vec::new();
-        for idx in 0..output_channel_count {
-            if let Some(corner) = lfe.corners.iter().find(|c| c.pan == idx) {
-                let vol_name = format!("vol{idx}");
-                nodes.push(serde_json::json!({
-                    "type": "builtin", "name": vol_name, "label": "linear",
-                    "control": { "Mult": effective_mult(corner.fader, corner.muted) },
-                }));
-                links.push(serde_json::json!({ "output": "lpf:Out", "input": format!("{vol_name}:In") }));
-                outputs.push(format!("{vol_name}:Out"));
-            } else {
-                let silence_name = format!("silence{idx}");
-                nodes.push(serde_json::json!({
-                    "type": "builtin", "name": silence_name, "label": "linear",
-                    "control": { "Mult": 0.0 },
-                }));
-                links.push(serde_json::json!({ "output": "lpf:Out", "input": format!("{silence_name}:In") }));
-                outputs.push(format!("{silence_name}:Out"));
-            }
-        }
+    let mut playback_props = serde_json::json!({
+        "node.name": format!("{sink_name}_out"),
+        "audio.channels": output_channel_count,
+        "target.object": devid,
+    });
+    if let Some(positions) = channel_positions(output_channel_count) {
+        playback_props["audio.position"] = serde_json::json!(positions);
+    }
 
-        // No media.class — mirrors playback_props below (and every effect's
-        // own playback_props above): omitting it plus setting target.object
-        // makes this a plain stream that connects itself *to* an existing
-        // node, here the source sink, rather than creating a new virtual
-        // device for something else to connect to.
-        //
-        // `target.object` is deliberately the sink's own name, NOT
-        // "{name}.monitor" — confirmed via hands-on testing (real hardware,
-        // an atypical multi-app PipeWire routing setup with several virtual
-        // sinks feeding an external DAW, all patched by a saved qpwgraph
-        // layout at startup) that "{name}.monitor" doesn't resolve to
-        // anything in the *native* PipeWire graph at all: that name only
-        // exists in the PulseAudio-compatibility layer (pipewire-pulse),
-        // which native `libpipewire-module-filter-chain` clients don't go
-        // through. With an unresolvable target.object, PipeWire silently
-        // fell back to auto-linking this capture stream to *the system's
-        // default source* instead — observed directly in qpwgraph landing on
-        // "default.remapped source" (an unrelated mic-passthrough), not the
-        // configured sink at all. `stream.capture.sink: true` is the correct
-        // native mechanism for "listen to what's being played to this sink"
-        // (the same property `pw-record --target <sink> -P
-        // 'stream.capture.sink=true'` uses) — it tells the adapter to
-        // capture the sink node's own render/monitor side rather than
-        // treating target.object as a capture source to be routed *from*.
-        let mut capture_props = serde_json::json!({
-            "node.name": sink_name,
-            "audio.channels": lfe.source_channels,
-            "target.object": lfe.source_device,
-            "stream.capture.sink": true,
-        });
-        if let Some(positions) = channel_positions(lfe.source_channels) {
-            capture_props["audio.position"] = serde_json::json!(positions);
-        }
+    let filter_chain_args = serde_json::json!({
+        "node.description": "Shaker DSP: LFE",
+        "media.name": "Shaker DSP: LFE",
+        "filter.graph": {
+            "nodes": nodes,
+            "links": links,
+            "inputs": inputs,
+            "outputs": outputs,
+        },
+        "capture.props": capture_props,
+        "playback.props": playback_props,
+    });
+    let filter_chain_args_str =
+        serde_json::to_string(&filter_chain_args).map_err(|e| e.to_string())?;
 
-        let mut playback_props = serde_json::json!({
-            "node.name": format!("{sink_name}_out"),
-            "audio.channels": output_channel_count,
-            "target.object": devid,
-        });
-        if let Some(positions) = channel_positions(output_channel_count) {
-            playback_props["audio.position"] = serde_json::json!(positions);
-        }
-
-        let filter_chain_args = serde_json::json!({
-            "node.description": "Shaker DSP: LFE",
-            "media.name": "Shaker DSP: LFE",
-            "filter.graph": {
-                "nodes": nodes,
-                "links": links,
-                "inputs": inputs,
-                "outputs": outputs,
-            },
-            "capture.props": capture_props,
-            "playback.props": playback_props,
-        });
-        let filter_chain_args_str = serde_json::to_string(&filter_chain_args).map_err(|e| e.to_string())?;
-
-        Ok(format!(
+    Ok(format!(
             "    {{ name = libpipewire-module-filter-chain\n        args = {filter_chain_args_str}\n    }}"
         ))
 }
@@ -541,10 +571,18 @@ pub fn load_filter_chain(chains: &[DeviceChainSpec]) -> Result<u32, String> {
 
     for chain in chains {
         for effect in &chain.effects {
-            modules.push(build_effect_module(&chain.output_device, chain.output_channel_count, effect)?);
+            modules.push(build_effect_module(
+                &chain.output_device,
+                chain.output_channel_count,
+                effect,
+            )?);
         }
         if let Some(lfe) = &chain.lfe {
-            modules.push(build_lfe_module(&chain.output_device, chain.output_channel_count, lfe)?);
+            modules.push(build_lfe_module(
+                &chain.output_device,
+                chain.output_channel_count,
+                lfe,
+            )?);
         }
     }
 
@@ -578,7 +616,8 @@ context.modules = [
     );
 
     let config_path = config_file_path();
-    std::fs::write(&config_path, config_text).map_err(|e| format!("Failed to write filter-chain config: {e}"))?;
+    std::fs::write(&config_path, config_text)
+        .map_err(|e| format!("Failed to write filter-chain config: {e}"))?;
 
     // Stop any previous instance first — matches ensure-clean-state idiom
     // used elsewhere (e.g. gamepad.rs's ensure_device).
@@ -662,12 +701,14 @@ fn find_node_id_by_name(target_name: &str) -> Result<u32, String> {
 
     nodes
         .into_iter()
-        .find(|n| {
-            n.pointer("/info/props/node.name").and_then(Value::as_str) == Some(target_name)
-        })
+        .find(|n| n.pointer("/info/props/node.name").and_then(Value::as_str) == Some(target_name))
         .and_then(|n| n.get("id").and_then(Value::as_u64))
         .map(|id| id as u32)
-        .ok_or_else(|| format!("Shaker DSP node '{target_name}' is not currently loaded (no running sink found)"))
+        .ok_or_else(|| {
+            format!(
+                "Shaker DSP node '{target_name}' is not currently loaded (no running sink found)"
+            )
+        })
 }
 
 fn find_effect_capture_node_id(devid: &str, effect_key: &str) -> Result<u32, String> {
@@ -717,7 +758,10 @@ fn set_prop(node_id: u32, key: &str, value: f32) -> Result<(), String> {
         .output()
         .map_err(|e| format!("Failed to run pw-cli: {e}"))?;
     if !output.status.success() {
-        return Err(format!("pw-cli set {key} failed: {}", String::from_utf8_lossy(&output.stderr)));
+        return Err(format!(
+            "pw-cli set {key} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
     }
     Ok(())
 }
@@ -737,7 +781,14 @@ fn set_prop(node_id: u32, key: &str, value: f32) -> Result<(), String> {
 /// via hands-on testing: `pw-cli s <capture-node-id> Props '{ params = [
 /// "<control>" <value> ] }'` updates the value immediately, verified by
 /// reading it straight back with enum-params.
-pub fn set_live_channel(devid: &str, effect_key: &str, pan: u8, lpf_hz: Option<f32>, fader: u8, muted: bool) -> Result<(), String> {
+pub fn set_live_channel(
+    devid: &str,
+    effect_key: &str,
+    pan: u8,
+    lpf_hz: Option<f32>,
+    fader: u8,
+    muted: bool,
+) -> Result<(), String> {
     let node_id = find_effect_capture_node_id(devid, effect_key)?;
     let freq = lpf_hz.unwrap_or(BYPASS_FREQ_HZ);
     let mult = effective_mult(fader, muted);
@@ -775,5 +826,9 @@ pub fn set_live_lfe_lpf(lpf_hz: Option<f32>) -> Result<(), String> {
 /// cycle, only control *values* are live-adjustable in between.
 pub fn set_live_lfe_channel(devid: &str, pan: u8, fader: u8, muted: bool) -> Result<(), String> {
     let node_id = find_node_id_by_name(&lfe_sink_name(devid))?;
-    set_prop(node_id, &format!("vol{pan}:Mult"), effective_mult(fader, muted))
+    set_prop(
+        node_id,
+        &format!("vol{pan}:Mult"),
+        effective_mult(fader, muted),
+    )
 }

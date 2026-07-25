@@ -2,7 +2,7 @@ import { ChannelConfig, ShakerEffect, ChannelEffect } from "../types/";
 
 
 function tyreToWheelFlags(tyre: string | null | undefined) {
-  var selection = {
+  let selection = {
     fl: tyre === "FrontLeft",
     fr: tyre === "FrontRight",
     rl: tyre === "RearLeft",

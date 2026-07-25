@@ -1,12 +1,12 @@
+use crate::config_manager::types::{AppConfig, AppEntry, AppLink, AppSettings};
+use dirs;
 use std::fs;
 use std::path::PathBuf;
-use crate::config_manager::types::{AppSettings, AppEntry, AppLink, AppConfig};
-use dirs;
 
 impl Default for AppConfig {
     fn default() -> Self {
-        let default_data_dir = dirs::config_dir()
-            .map(|p| p.join("dashboard-designer").to_string_lossy().to_string());
+        let default_data_dir =
+            dirs::config_dir().map(|p| p.join("dashboard-designer").to_string_lossy().to_string());
         AppConfig {
             settings: AppSettings {
                 theme: "dark-purple".into(),
@@ -33,10 +33,26 @@ pub fn applications() -> Vec<AppEntry> {
             front_end: "TelemetryAdmin".into(),
             default_route: "".into(),
             links: vec![
-                AppLink { path: "dashboards".into(), text: "Dashboards".into() },
-                AppLink { path: "cars".into(), text: "Cars".into() },
-                AppLink { path: "groups".into(), text: "Groups".into() },
-                AppLink { path: "templates".into(), text: "Templates".into() },
+                AppLink {
+                    path: "dashboards".into(),
+                    text: "Dashboards".into(),
+                },
+                AppLink {
+                    path: "cars".into(),
+                    text: "Cars".into(),
+                },
+                AppLink {
+                    path: "groups".into(),
+                    text: "Groups".into(),
+                },
+                AppLink {
+                    path: "templates".into(),
+                    text: "Templates".into(),
+                },
+                AppLink {
+                    path: "recordings".into(),
+                    text: "Recordings".into(),
+                },
             ],
         },
         AppEntry {
@@ -44,36 +60,40 @@ pub fn applications() -> Vec<AppEntry> {
             path: "shakers".into(),
             front_end: "Shakers".into(),
             default_route: "".into(),
-            links: vec![
-                AppLink { path: "profiles".into(), text: "Profiles".into() },
-            ],
+            links: vec![AppLink {
+                path: "profiles".into(),
+                text: "Profiles".into(),
+            }],
         },
         AppEntry {
             name: "LED Controllers".into(),
             path: "leds".into(),
             front_end: "LedsDevices".into(),
             default_route: "".into(),
-            links: vec![
-                AppLink { path: "profiles".into(), text: "Profiles".into() },
-            ],
+            links: vec![AppLink {
+                path: "profiles".into(),
+                text: "Profiles".into(),
+            }],
         },
         AppEntry {
             name: "Shift Lights".into(),
             path: "shift-lights".into(),
             front_end: "ShiftLights".into(),
             default_route: "".into(),
-            links: vec![
-                AppLink { path: "profiles".into(), text: "Profiles".into() },
-            ],
+            links: vec![AppLink {
+                path: "profiles".into(),
+                text: "Profiles".into(),
+            }],
         },
         AppEntry {
             name: "SimWind".into(),
             path: "sim-wind".into(),
             front_end: "SimWindDevices".into(),
             default_route: "".into(),
-            links: vec![
-                AppLink { path: "profiles".into(), text: "Profiles".into() },
-            ],
+            links: vec![AppLink {
+                path: "profiles".into(),
+                text: "Profiles".into(),
+            }],
         },
     ]
 }

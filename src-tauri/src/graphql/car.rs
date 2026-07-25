@@ -1,9 +1,9 @@
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use crate::typiql_types::{Car, File};
 use async_graphql::{Context, Object, Result as GqlResult};
 use serde_json::json;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use typiql::TypiQLAdapter;
-use crate::typiql_types::{Car, File};
 
 /// Returns the directory where centralized 360° photos are stored.
 /// Mirrors the `typiql_data_dir()` logic from `api.rs`.
@@ -114,7 +114,11 @@ async fn upsert_file(
     url: &str,
 ) -> GqlResult<()> {
     let values = json!({ "path": path, "id": id, "filename": filename, "url": url });
-    if adapter.get_one("files".into(), "path", path).await.is_some() {
+    if adapter
+        .get_one("files".into(), "path", path)
+        .await
+        .is_some()
+    {
         adapter.update("files".into(), "path", path, values).await;
     } else {
         adapter
@@ -179,16 +183,25 @@ impl CarFileMutation {
         filename: String,
         data: String,
     ) -> GqlResult<Car> {
-        let adapter = ctx.data::<Arc<dyn TypiQLAdapter>>()?;
+        let adapter = crate::graphql::default_adapter(ctx)?;
 
         let existing: Car = adapter
             .get_one("cars".into(), "id", &id)
             .await
             .ok_or_else(|| async_graphql::Error::new("Car not found"))
-            .and_then(|v| serde_json::from_value(v).map_err(|e| async_graphql::Error::new(e.to_string())))?;
+            .and_then(|v| {
+                serde_json::from_value(v).map_err(|e| async_graphql::Error::new(e.to_string()))
+            })?;
 
-        let new_path =
-            store_uploaded_photo(adapter, &id, "day", &filename, &data, existing.day_photo_path.as_ref()).await?;
+        let new_path = store_uploaded_photo(
+            &adapter,
+            &id,
+            "day",
+            &filename,
+            &data,
+            existing.day_photo_path.as_ref(),
+        )
+        .await?;
 
         let result_val = if existing.day_photo_path.as_deref() == Some(new_path.as_str()) {
             adapter
@@ -197,7 +210,12 @@ impl CarFileMutation {
                 .ok_or_else(|| async_graphql::Error::new("Car not found"))?
         } else {
             adapter
-                .update("cars".into(), "id", &id, json!({ "day_photo_path": new_path }))
+                .update(
+                    "cars".into(),
+                    "id",
+                    &id,
+                    json!({ "day_photo_path": new_path }),
+                )
                 .await
                 .ok_or_else(|| async_graphql::Error::new("Update failed"))?
         };
@@ -214,16 +232,25 @@ impl CarFileMutation {
         filename: String,
         data: String,
     ) -> GqlResult<Car> {
-        let adapter = ctx.data::<Arc<dyn TypiQLAdapter>>()?;
+        let adapter = crate::graphql::default_adapter(ctx)?;
 
         let existing: Car = adapter
             .get_one("cars".into(), "id", &id)
             .await
             .ok_or_else(|| async_graphql::Error::new("Car not found"))
-            .and_then(|v| serde_json::from_value(v).map_err(|e| async_graphql::Error::new(e.to_string())))?;
+            .and_then(|v| {
+                serde_json::from_value(v).map_err(|e| async_graphql::Error::new(e.to_string()))
+            })?;
 
-        let new_path =
-            store_uploaded_photo(adapter, &id, "night", &filename, &data, existing.night_photo_path.as_ref()).await?;
+        let new_path = store_uploaded_photo(
+            &adapter,
+            &id,
+            "night",
+            &filename,
+            &data,
+            existing.night_photo_path.as_ref(),
+        )
+        .await?;
 
         let result_val = if existing.night_photo_path.as_deref() == Some(new_path.as_str()) {
             adapter
@@ -232,7 +259,12 @@ impl CarFileMutation {
                 .ok_or_else(|| async_graphql::Error::new("Car not found"))?
         } else {
             adapter
-                .update("cars".into(), "id", &id, json!({ "night_photo_path": new_path }))
+                .update(
+                    "cars".into(),
+                    "id",
+                    &id,
+                    json!({ "night_photo_path": new_path }),
+                )
                 .await
                 .ok_or_else(|| async_graphql::Error::new("Update failed"))?
         };
@@ -242,24 +274,32 @@ impl CarFileMutation {
 
     /// Remove a car's night photo (file + File record), keeping the day photo intact.
     async fn delete_car_photo_night(&self, ctx: &Context<'_>, id: String) -> GqlResult<Car> {
-        let adapter = ctx.data::<Arc<dyn TypiQLAdapter>>()?;
+        let adapter = crate::graphql::default_adapter(ctx)?;
 
         let existing: Car = adapter
             .get_one("cars".into(), "id", &id)
             .await
             .ok_or_else(|| async_graphql::Error::new("Car not found"))
-            .and_then(|v| serde_json::from_value(v).map_err(|e| async_graphql::Error::new(e.to_string())))?;
+            .and_then(|v| {
+                serde_json::from_value(v).map_err(|e| async_graphql::Error::new(e.to_string()))
+            })?;
 
         if let Some(path) = &existing.night_photo_path {
             let pathbuf = PathBuf::from(path);
             if pathbuf.exists() {
-                std::fs::remove_file(&pathbuf).map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                std::fs::remove_file(&pathbuf)
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
             }
             adapter.remove("files".into(), "path", path).await;
         }
 
         let result_val = adapter
-            .update("cars".into(), "id", &id, json!({ "night_photo_path": null }))
+            .update(
+                "cars".into(),
+                "id",
+                &id,
+                json!({ "night_photo_path": null }),
+            )
             .await
             .ok_or_else(|| async_graphql::Error::new("Update failed"))?;
 
@@ -271,18 +311,24 @@ impl CarFileMutation {
     /// under thumbnails_dir(), not inline, to keep the JSON store small — the
     /// record only holds the generated filename, served from `/thumbnails/*`.
     /// Unaffected by the File-relation migration — thumbnail stays a plain field.
-    async fn upload_car_thumbnail(&self, ctx: &Context<'_>, id: String, data: String) -> GqlResult<Car> {
-        let adapter = ctx.data::<Arc<dyn TypiQLAdapter>>()?;
+    async fn upload_car_thumbnail(
+        &self,
+        ctx: &Context<'_>,
+        id: String,
+        data: String,
+    ) -> GqlResult<Car> {
+        let adapter = crate::graphql::default_adapter(ctx)?;
 
         let existing_rec: Car = adapter
             .get_one("cars".into(), "id", &id)
             .await
             .ok_or_else(|| async_graphql::Error::new("Car not found"))
-            .and_then(|v| serde_json::from_value(v).map_err(|e| async_graphql::Error::new(e.to_string())))?;
+            .and_then(|v| {
+                serde_json::from_value(v).map_err(|e| async_graphql::Error::new(e.to_string()))
+            })?;
 
         let dir = thumbnails_dir();
-        std::fs::create_dir_all(&dir)
-            .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        std::fs::create_dir_all(&dir).map_err(|e| async_graphql::Error::new(e.to_string()))?;
 
         let bytes = decode_b64(&data)?;
 
@@ -302,11 +348,15 @@ impl CarFileMutation {
         let filename = format!("{}-{}.png", existing_rec.id, nanos);
 
         let file_path = dir.join(&filename);
-        std::fs::write(&file_path, &bytes)
-            .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        std::fs::write(&file_path, &bytes).map_err(|e| async_graphql::Error::new(e.to_string()))?;
 
         let result_val = adapter
-            .update("cars".into(), "id", &existing_rec.id, json!({ "thumbnail": filename }))
+            .update(
+                "cars".into(),
+                "id",
+                &existing_rec.id,
+                json!({ "thumbnail": filename }),
+            )
             .await
             .ok_or_else(|| async_graphql::Error::new("Update failed"))?;
 
@@ -315,15 +365,20 @@ impl CarFileMutation {
 
     /// Delete a car record and remove its file(s)/File record(s) from disk/store.
     async fn delete_car(&self, ctx: &Context<'_>, id: String) -> GqlResult<bool> {
-        let adapter = ctx.data::<Arc<dyn TypiQLAdapter>>()?;
+        let adapter = crate::graphql::default_adapter(ctx)?;
 
         let rec: Car = adapter
             .get_one("cars".into(), "id", &id)
             .await
             .ok_or_else(|| async_graphql::Error::new("Car not found"))
-            .and_then(|v| serde_json::from_value(v).map_err(|e| async_graphql::Error::new(e.to_string())))?;
+            .and_then(|v| {
+                serde_json::from_value(v).map_err(|e| async_graphql::Error::new(e.to_string()))
+            })?;
 
-        for path in [&rec.day_photo_path, &rec.night_photo_path].into_iter().flatten() {
+        for path in [&rec.day_photo_path, &rec.night_photo_path]
+            .into_iter()
+            .flatten()
+        {
             let pathbuf = PathBuf::from(path);
             if pathbuf.exists() {
                 std::fs::remove_file(&pathbuf).ok();
@@ -356,25 +411,36 @@ impl CarPhotoSyncQuery {
     /// only the File row(s) it points at by (stable) path. Called by the
     /// frontend whenever a car's detail view loads.
     async fn sync_car_photos(&self, ctx: &Context<'_>, id: String) -> GqlResult<Car> {
-        let adapter = ctx.data::<Arc<dyn TypiQLAdapter>>()?;
+        let adapter = crate::graphql::default_adapter(ctx)?;
 
         let existing: Car = adapter
             .get_one("cars".into(), "id", &id)
             .await
             .ok_or_else(|| async_graphql::Error::new("Car not found"))
-            .and_then(|v| serde_json::from_value(v).map_err(|e| async_graphql::Error::new(e.to_string())))?;
+            .and_then(|v| {
+                serde_json::from_value(v).map_err(|e| async_graphql::Error::new(e.to_string()))
+            })?;
 
-        for path in [&existing.day_photo_path, &existing.night_photo_path].into_iter().flatten() {
+        for path in [&existing.day_photo_path, &existing.night_photo_path]
+            .into_iter()
+            .flatten()
+        {
             let pathbuf = PathBuf::from(path);
             if !pathbuf.exists() {
                 continue;
             }
-            let Some(file_val) = adapter.get_one("files".into(), "path", path).await else { continue };
-            let Ok(file_rec) = serde_json::from_value::<File>(file_val) else { continue };
+            let Some(file_val) = adapter.get_one("files".into(), "path", path).await else {
+                continue;
+            };
+            let Ok(file_rec) = serde_json::from_value::<File>(file_val) else {
+                continue;
+            };
             let ext = ext_of(path);
-            let Ok((new_hash, new_url)) = hash_and_link(&pathbuf, &ext) else { continue };
+            let Ok((new_hash, new_url)) = hash_and_link(&pathbuf, &ext) else {
+                continue;
+            };
             if new_hash != file_rec.id {
-                upsert_file(adapter, path, &file_rec.filename, &new_hash, &new_url).await?;
+                upsert_file(&adapter, path, &file_rec.filename, &new_hash, &new_url).await?;
             }
         }
 

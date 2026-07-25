@@ -1,15 +1,22 @@
-use std::sync::Arc;
-use axum::{Router, routing::get, extract::Query, response::IntoResponse, http::StatusCode, middleware::{self, Next}, extract::Request};
-use http::{Method, header};
-use tower_http::cors::{CorsLayer, Any};
+use crate::config_manager::app_config::read_app_config;
+use crate::config_manager::{parser, read_monocoque_config};
+use crate::typiql_types::build_typiql_schema;
+use axum::{
+    extract::Query,
+    extract::Request,
+    http::StatusCode,
+    middleware::{self, Next},
+    response::IntoResponse,
+    routing::get,
+    Router,
+};
+use http::{header, Method};
 use serde::Deserialize;
 use serde_json::Value;
-use crate::typiql_types::build_typiql_schema;
-use crate::config_manager::{parser, read_monocoque_config};
-use crate::config_manager::app_config::read_app_config;
+use std::sync::Arc;
+use tower_http::cors::{Any, CorsLayer};
 use typiql::TypiQLAdapter;
 use typiql_adapter_json::JsonAdapter;
-use dirs;
 
 /// Uploaded 360° photos always get a fresh timestamped filename rather than
 /// being overwritten in place, so a given URL's content never changes —
@@ -31,7 +38,9 @@ fn typiql_data_dir() -> std::path::PathBuf {
     let config = read_app_config().unwrap_or_default();
     if let Some(dir) = config.settings.typiql_data_dir {
         let p = expand_tilde(&dir);
-        if !dir.is_empty() { return p; }
+        if !dir.is_empty() {
+            return p;
+        }
     }
     // Fallback: ~/.config/dashboard-designer
     dirs::config_dir()
@@ -48,13 +57,27 @@ pub async fn build_router() -> Router {
     // before a backend restart — see resume_shaker_dsp_if_enabled's doc
     // comment. Fire-and-forget: needs its own Arc<dyn TypiQLAdapter> handle
     // (a clone of the same underlying JsonAdapter, not a separate store —
-    // JsonAdapter's Clone shares its Arc<RwLock<...>> cache) since
-    // build_typiql_schema takes ownership of `adapter` below and doesn't
-    // expose the Arc it wraps it in.
+    // JsonAdapter's Clone shares its Arc<RwLock<...>> cache) since the
+    // adapter map below only holds `Arc`s, not the original `JsonAdapter`.
     let dsp_resume_adapter: Arc<dyn TypiQLAdapter> = Arc::new(adapter.clone());
-    tokio::spawn(crate::graphql::shaker_dsp::resume_shaker_dsp_if_enabled(dsp_resume_adapter));
+    tokio::spawn(crate::graphql::shaker_dsp::resume_shaker_dsp_if_enabled(
+        dsp_resume_adapter,
+    ));
 
-    let typiql_schema = build_typiql_schema(adapter);
+    // Every hand-written resolver and every existing typiql type stays on
+    // "default" (JsonAdapter) — only DuckDB-backed types (currently just
+    // RecordingFrame, see typiql_types.rs) opt into "duckdb" via
+    // #[typiql_type(adapter = "duckdb")]. See build_typiql_schema, which
+    // wires each registered type's DataLoader/CRUD against whichever entry
+    // here matches its own T::adapter_name().
+    let duckdb_adapter =
+        typiql_adapter_duckdb::DuckDbAdapter::new(data_dir.join("recordings.duckdb"))
+            .expect("failed to open duckdb database");
+    let mut adapters: typiql::AdapterMap = std::collections::HashMap::new();
+    adapters.insert("default", Arc::new(adapter) as Arc<dyn TypiQLAdapter>);
+    adapters.insert("duckdb", Arc::new(duckdb_adapter) as Arc<dyn TypiQLAdapter>);
+
+    let typiql_schema = build_typiql_schema(adapters);
 
     // /360-photos serves per-file symlinks (named by content hash), not the
     // real files directly — see graphql::car::link_photo/car_photo_links_dir.
@@ -76,15 +99,19 @@ pub async fn build_router() -> Router {
     let router = Router::new()
         .route("/file-proxy", get(file_proxy))
         .route("/list-files", get(list_files))
-        .nest("/360-photos", Router::new()
-            .fallback_service(tower_http::services::ServeDir::new(&car_photo_links_dir))
-            .layer(middleware::from_fn(long_cache))
+        .nest(
+            "/360-photos",
+            Router::new()
+                .fallback_service(tower_http::services::ServeDir::new(&car_photo_links_dir))
+                .layer(middleware::from_fn(long_cache)),
         )
         // Car-card thumbnails — always a fresh filename per capture (old file is
         // removed before a new one is written), so same long-cache treatment.
-        .nest("/thumbnails", Router::new()
-            .fallback_service(tower_http::services::ServeDir::new(&thumbnails_dir))
-            .layer(middleware::from_fn(long_cache))
+        .nest(
+            "/thumbnails",
+            Router::new()
+                .fallback_service(tower_http::services::ServeDir::new(&thumbnails_dir))
+                .layer(middleware::from_fn(long_cache)),
         )
         // Serve symlinked dashboard folders — populated by syncDashboardFiles.
         // In dev mode the path lives outside src-tauri/ to avoid triggering Tauri's file watcher.
@@ -98,16 +125,20 @@ pub async fn build_router() -> Router {
         // effectively unloadable on remote kiosks — the same failure mode already
         // fixed for /360-photos above. ServeDir's default Last-Modified/ETag headers
         // still support correct conditional revalidation.
-        .nest("/dash-assets", Router::new()
-            .fallback_service(tower_http::services::ServeDir::new(
+        .nest(
+            "/dash-assets",
+            Router::new().fallback_service(tower_http::services::ServeDir::new(
                 if cfg!(debug_assertions) {
                     concat!(env!("CARGO_MANIFEST_DIR"), "/../data/dash-assets")
                 } else {
                     "data/dash-assets"
-                }
-            ))
+                },
+            )),
         )
-        .nest("/typiql", typiql::typiql_router(typiql_schema, "/typiql/graphql"));
+        .nest(
+            "/typiql",
+            typiql::typiql_router(typiql_schema, "/typiql/graphql"),
+        );
 
     // In dev mode Vite serves the frontend, but the API is on a different port —
     // so browsers on remote machines can't reach relative /dash-sprites/ URLs.
@@ -152,12 +183,12 @@ async fn file_proxy(Query(params): Query<FileProxyParams>) -> impl IntoResponse 
     match std::fs::read(path) {
         Ok(data) => {
             let content_type = match path.extension().and_then(|e| e.to_str()) {
-                Some("png")  => "image/png",
+                Some("png") => "image/png",
                 Some("jpg") | Some("jpeg") => "image/jpeg",
                 Some("webp") => "image/webp",
-                Some("svg")  => "image/svg+xml",
-                Some("gif")  => "image/gif",
-                _            => "application/octet-stream",
+                Some("svg") => "image/svg+xml",
+                Some("gif") => "image/gif",
+                _ => "application/octet-stream",
             };
             (StatusCode::OK, [(header::CONTENT_TYPE, content_type)], data).into_response()
         }
@@ -176,9 +207,13 @@ async fn list_files(Query(params): Query<FileProxyParams>) -> impl IntoResponse 
                 .filter_map(|e| e.ok())
                 .filter_map(|e| {
                     let p = e.path();
-                    if !p.is_file() { return None; }
+                    if !p.is_file() {
+                        return None;
+                    }
                     let ext = p.extension()?.to_str()?.to_lowercase();
-                    if !IMAGE_EXTS.contains(&ext.as_str()) { return None; }
+                    if !IMAGE_EXTS.contains(&ext.as_str()) {
+                        return None;
+                    }
                     p.file_name()?.to_str().map(String::from)
                 })
                 .collect()
@@ -214,7 +249,9 @@ async fn seed_monocoque_sound_devices(adapter: &JsonAdapter) {
         return;
     }
 
-    let Ok(text) = read_monocoque_config() else { return };
+    let Ok(text) = read_monocoque_config() else {
+        return;
+    };
 
     let mut next_dsp_slot: u8 = 0;
     for (pan, channel) in parser::parse_shaker_channels(&text).into_iter().enumerate() {
@@ -233,7 +270,13 @@ async fn seed_monocoque_sound_devices(adapter: &JsonAdapter) {
             )
             .await
             .ok();
-        let Some(channel_id) = created.as_ref().and_then(|v| v.get("id")).and_then(Value::as_str) else { continue };
+        let Some(channel_id) = created
+            .as_ref()
+            .and_then(|v| v.get("id"))
+            .and_then(Value::as_str)
+        else {
+            continue;
+        };
 
         for effect in channel.effects {
             adapter

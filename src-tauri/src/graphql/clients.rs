@@ -1,9 +1,7 @@
-use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use crate::typiql_types::ConnectedClient;
 use async_graphql::{Context, Object, Result as GqlResult};
 use serde_json::json;
-use typiql::TypiQLAdapter;
-use crate::typiql_types::ConnectedClient;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Default)]
 pub struct ClientsMutation;
@@ -16,7 +14,7 @@ impl ClientsMutation {
         id: String,
         name: Option<String>,
     ) -> GqlResult<ConnectedClient> {
-        let adapter = ctx.data::<Arc<dyn TypiQLAdapter>>()?;
+        let adapter = crate::graphql::default_adapter(ctx)?;
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
@@ -52,13 +50,17 @@ impl ClientsMutation {
     }
 
     async fn register_car(&self, ctx: &Context<'_>, name: String) -> GqlResult<bool> {
-        let adapter = ctx.data::<Arc<dyn TypiQLAdapter>>()?;
+        let adapter = crate::graphql::default_adapter(ctx)?;
         let existing = adapter.get_one("known_cars".into(), "id", &name).await;
         if existing.is_none() {
             adapter
-                .add("known_cars".into(), "id", json!({ "id": name, "name": name }))
+                .add(
+                    "known_cars".into(),
+                    "id",
+                    json!({ "id": name, "name": name }),
+                )
                 .await
-                .map_err(|e| async_graphql::Error::new(e))?;
+                .map_err(async_graphql::Error::new)?;
             return Ok(true);
         }
         Ok(false)

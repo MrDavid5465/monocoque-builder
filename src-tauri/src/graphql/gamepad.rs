@@ -1,5 +1,5 @@
-use async_graphql::{Object, Result as GqlResult};
 use crate::gamepad;
+use async_graphql::{Object, Result as GqlResult};
 
 #[derive(Default)]
 pub struct GamepadMutation;
@@ -15,8 +15,7 @@ impl GamepadMutation {
         pressed: bool,
         #[graphql(default)] watchdog: bool,
     ) -> GqlResult<bool> {
-        gamepad::set_button(button_index, pressed, watchdog)
-            .map_err(async_graphql::Error::new)?;
+        gamepad::set_button(button_index, pressed, watchdog).map_err(async_graphql::Error::new)?;
         Ok(true)
     }
 

@@ -42,6 +42,8 @@ memmap2 = "0.9.10"
 dns-lookup = "3.0.1"
 base64 = "0.22"
 sha2 = "0.10"
+uuid = { version = "1", features = ["v4"] }
 typiql = { path = "../../../typiql-rs/crates/typiql-core", package = "typiql-core" }
 typiql-adapter-json = { path = "../../../typiql-rs/crates/typiql-adapter-json" }
+typiql-adapter-duckdb = { path = "../../../typiql-rs/crates/typiql-adapter-duckdb" }
 evdev = "0.12"

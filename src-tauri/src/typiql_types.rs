@@ -1,10 +1,22 @@
-use typiql::{typiql_schema, typiql_type};
-use crate::graphql::app_config::{AppConfigQuery, AppConfigMutation};
+// `#[typiql_type]` generates one constructor-shaped function per struct
+// (its Input type, add/update resolvers, ...) with one parameter per field —
+// inherent to CRUD codegen, not something to fix by shrinking arg counts
+// (some structs here, e.g. RecordingFrame, have dozens of real fields).
+// `needless_question_mark` similarly fires against the macro's own generated
+// `Ok(...?)` pattern, not any hand-written code in this file.
+#![allow(clippy::too_many_arguments, clippy::needless_question_mark)]
+
+use crate::graphql::app_config::{AppConfigMutation, AppConfigQuery};
 use crate::graphql::builtin_templates::BuiltinTemplatesQuery;
-use crate::graphql::dashboard_files::{DashboardFileSyncQuery, DashboardFileUploadMutation};
 use crate::graphql::clients::ClientsMutation;
-use crate::graphql::{CarFileMutation, CarPhotoSyncQuery, DashTemplateThumbnailMutation, DashboardMutation, GamepadMutation, ShakerDspMutation, ShakerDspQuery};
+use crate::graphql::dashboard_files::{DashboardFileSyncQuery, DashboardFileUploadMutation};
+use crate::graphql::{
+    CarFileMutation, CarPhotoSyncQuery, DashTemplateThumbnailMutation, DashboardMutation,
+    GamepadMutation, RecordingControlMutation, ShakerDspMutation, ShakerDspQuery,
+};
 use crate::graphql::{QueryRoot, SubscriptionRoot};
+use crate::telemetry::types::{CourseFlag, SimStatus};
+use typiql::{typiql_schema, typiql_type};
 
 /// A dashboard's location — enough to list it and find its folder. The only
 /// part of a dashboard stored in the shared config file; its actual
@@ -416,7 +428,8 @@ pub struct DeviceDefault {
 /// Named profile for LED controller configurations.
 #[typiql_type]
 pub struct LedsDeviceProfile {
-    #[typiql(key)] pub id: String,
+    #[typiql(key)]
+    pub id: String,
     pub name: String,
     pub car: Option<String>,
     pub game: Option<String>,
@@ -425,7 +438,8 @@ pub struct LedsDeviceProfile {
 /// Named profile for shift light configurations.
 #[typiql_type]
 pub struct ShiftLightProfile {
-    #[typiql(key)] pub id: String,
+    #[typiql(key)]
+    pub id: String,
     pub name: String,
     pub car: Option<String>,
     pub game: Option<String>,
@@ -434,10 +448,151 @@ pub struct ShiftLightProfile {
 /// Named profile for SimWind fan controller configurations.
 #[typiql_type]
 pub struct SimWindDeviceProfile {
-    #[typiql(key)] pub id: String,
+    #[typiql(key)]
+    pub id: String,
     pub name: String,
     pub car: Option<String>,
     pub game: Option<String>,
+}
+
+/// A recorded telemetry session's metadata — small and infrequently
+/// written, so it stays on the "default" (JSON) adapter. The frame data
+/// itself is a real DuckDB-backed type (`RecordingFrame` below), related
+/// here as a has-many field matched on `recording_id` — a recording can be
+/// many thousands of frames, which would force a whole-file rewrite on
+/// every write (and an all-or-nothing read) under JsonAdapter; DuckDB's
+/// columnar storage and native range queries are exactly the shape this
+/// data needs, and typiql's ordinary relation-field machinery makes the
+/// cross-adapter join (JSON parent, DuckDB children) transparent — see
+/// [[project_typiql_rs]] / the DuckDB adapter plan for the full rationale.
+#[typiql_type]
+pub struct Recording {
+    #[typiql(key)]
+    pub id: String,
+    pub name: String,
+    /// Unix seconds, as a string — same convention as ConnectedClient.last_seen.
+    pub created_at: String,
+    pub duration_ms: i64,
+    pub frame_count: i32,
+    pub sample_rate_hz: f32,
+    /// Convenience for the recordings list — the car name seen during the
+    /// session, captured once at stop time from the first frame that had one.
+    pub car: Option<String>,
+    #[typiql(relation(local = "id", op = "eq", foreign = "recording_id"))]
+    pub frames: Vec<RecordingFrame>,
+}
+
+/// One recorded telemetry frame. DuckDB-backed (`adapter = "duckdb"`) —
+/// columnar/range-query storage fits a recording's shape far better than
+/// one JSON blob per session (see `Recording`'s doc comment). A real typiql
+/// type like any other: gets free `getRecordingFrames`/`addRecordingFrame`/
+/// etc. CRUD via the standard macro-generated resolvers, so
+/// `graphql/recording.rs` only needs `add_many`/list-filter calls, not a
+/// hand-written frame-storage resolver.
+///
+/// Every `TelemetryFrame` field is flattened directly onto this struct;
+/// `TyreData`'s 4-tyre `Vec` (`[FL, FR, RL, RR]`, per `TelemetryFrame`'s own
+/// doc comment) is flattened into 32 `<corner>_<field>` columns — the same
+/// flattening `chartUtils.ts` used to do client-side on every chart load,
+/// now done once at write time instead.
+#[typiql_type(adapter = "duckdb")]
+pub struct RecordingFrame {
+    #[typiql(key)]
+    pub id: String,
+    pub recording_id: String,
+    pub frame_index: i32,
+
+    // Status
+    pub sim_status: SimStatus,
+    pub simon: bool,
+    pub car: String,
+    pub track: String,
+    pub driver: String,
+    pub tyre_compound: String,
+
+    // Motion
+    pub g_lat: f32,
+    pub g_lon: f32,
+    pub g_vert: f32,
+    pub heading: f64,
+    pub pitch: f64,
+    pub roll: f64,
+
+    // Drivetrain
+    pub speed: f64,
+    pub rpm: u32,
+    pub max_rpm: u32,
+    pub idle_rpm: u32,
+    pub gear: i32,
+    pub max_gears: u32,
+    pub throttle: f64,
+    pub brake: f64,
+    pub clutch: f64,
+    pub steering: f64,
+    pub handbrake: f64,
+    pub abs: f64,
+    pub brake_bias: f64,
+
+    // Fuel & engine
+    pub fuel: f64,
+    pub fuel_capacity: f64,
+    pub turbo_boost: f64,
+    pub turbo_pct: f64,
+
+    // Tyres — flattened [FL, FR, RL, RR]
+    pub fl_temp: f64,
+    pub fl_pressure: f64,
+    pub fl_slip_ratio: f64,
+    pub fl_slip_angle: f64,
+    pub fl_wear: f64,
+    pub fl_brake_temp: f64,
+    pub fl_rps: f64,
+    pub fl_diameter: f64,
+
+    pub fr_temp: f64,
+    pub fr_pressure: f64,
+    pub fr_slip_ratio: f64,
+    pub fr_slip_angle: f64,
+    pub fr_wear: f64,
+    pub fr_brake_temp: f64,
+    pub fr_rps: f64,
+    pub fr_diameter: f64,
+
+    pub rl_temp: f64,
+    pub rl_pressure: f64,
+    pub rl_slip_ratio: f64,
+    pub rl_slip_angle: f64,
+    pub rl_wear: f64,
+    pub rl_brake_temp: f64,
+    pub rl_rps: f64,
+    pub rl_diameter: f64,
+
+    pub rr_temp: f64,
+    pub rr_pressure: f64,
+    pub rr_slip_ratio: f64,
+    pub rr_slip_angle: f64,
+    pub rr_wear: f64,
+    pub rr_brake_temp: f64,
+    pub rr_rps: f64,
+    pub rr_diameter: f64,
+
+    // Environment
+    pub air_temp: f64,
+    pub track_temp: f64,
+    pub air_density: f64,
+
+    // Session
+    pub lap: u32,
+    pub position: u32,
+    pub num_laps: u32,
+    pub num_cars: u32,
+    pub course_flag: CourseFlag,
+    pub lap_is_valid: bool,
+    pub in_pit: bool,
+    pub current_lap_seconds: u32,
+    pub last_lap_seconds: u32,
+    pub sector1_time: f64,
+    pub sector2_time: f64,
 }
 
 typiql_schema!(
@@ -446,8 +601,8 @@ typiql_schema!(
     MonocoqueShiftLight, ShiftLightProfile,
     MonocoqueSimWindDevice, SimWindDeviceProfile,
     DashTemplate, ConnectedClient, DashGroup, KnownCar, DeviceDefault,
-    Car, File, NightMode, CarDashPan, PreviewCar, DashboardEntry;
+    Car, File, NightMode, CarDashPan, PreviewCar, DashboardEntry, Recording, RecordingFrame;
     AppConfigQuery, DashboardFileSyncQuery, BuiltinTemplatesQuery, CarPhotoSyncQuery, ShakerDspQuery, QueryRoot;
-    AppConfigMutation, DashboardFileUploadMutation, ClientsMutation, CarFileMutation, DashTemplateThumbnailMutation, DashboardMutation, GamepadMutation, ShakerDspMutation;
+    AppConfigMutation, DashboardFileUploadMutation, ClientsMutation, CarFileMutation, DashTemplateThumbnailMutation, DashboardMutation, GamepadMutation, ShakerDspMutation, RecordingControlMutation;
     SubscriptionRoot
 );

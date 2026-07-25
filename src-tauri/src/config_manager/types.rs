@@ -1,5 +1,5 @@
-use serde::{Serialize, Deserialize};
-use async_graphql::{SimpleObject, InputObject, MaybeUndefined};
+use async_graphql::{InputObject, MaybeUndefined, SimpleObject};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[derive(SimpleObject, Clone)]
@@ -81,21 +81,6 @@ pub struct GqlAppConfig {
     pub applications: Vec<GqlAppEntry>,
 }
 
-#[derive(InputObject)]
-pub struct AppLinkInput {
-    pub path: String,
-    pub text: String,
-}
-
-#[derive(InputObject)]
-pub struct AppEntryInput {
-    pub name: String,
-    pub path: String,
-    pub front_end: String,
-    pub default_route: String,
-    pub links: Vec<AppLinkInput>,
-}
-
 /// Every field is `MaybeUndefined<T>` (not `Option<T>`, not a plain
 /// required value) — omitted means "leave untouched", explicit `null` means
 /// "clear", a value means "set". This applies uniformly even to fields
@@ -125,10 +110,6 @@ pub struct AppSettingsInput {
     pub shaker_lfe_lpf_hz: MaybeUndefined<f32>,
 }
 
-#[derive(InputObject)]
-pub struct AppConfigInput {
-    pub settings: Option<AppSettingsInput>,
-}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppLink {
     pub path: String,

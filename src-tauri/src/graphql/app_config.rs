@@ -1,9 +1,9 @@
-use async_graphql::{Context, MaybeUndefined, Object, Result as GqlResult};
 use crate::config_manager::{
-    types::{AppConfig, AppSettings, AppSettingsInput, GamepadMapping, GqlAppConfig},
-    to_gql_config, to_gql_entry,
     app_config::{applications, read_app_config, write_app_config},
+    to_gql_config, to_gql_entry,
+    types::{AppConfig, AppSettings, AppSettingsInput, GamepadMapping, GqlAppConfig},
 };
+use async_graphql::{Context, MaybeUndefined, Object, Result as GqlResult};
 
 /// For fields backed by an `Option<T>` on `AppSettings` — Undefined keeps
 /// the existing value, Null clears it to None, Value sets it.
@@ -58,28 +58,46 @@ impl AppConfigMutation {
                 font_size: merge_required(s.font_size, existing.settings.font_size),
                 launch_page: merge_required(s.launch_page, existing.settings.launch_page),
                 device_map: merge_optional(s.device_map, existing.settings.device_map),
-                typiql_data_dir: merge_optional(s.typiql_data_dir, existing.settings.typiql_data_dir),
+                typiql_data_dir: merge_optional(
+                    s.typiql_data_dir,
+                    existing.settings.typiql_data_dir,
+                ),
                 steer_max_deg: merge_optional(s.steer_max_deg, existing.settings.steer_max_deg),
                 setup_complete: merge_required(s.setup_complete, existing.settings.setup_complete),
                 gamepad_mappings: match s.gamepad_mappings {
                     MaybeUndefined::Undefined => existing.settings.gamepad_mappings,
                     MaybeUndefined::Null => None,
-                    MaybeUndefined::Value(ms) => Some(ms.into_iter().map(|m| GamepadMapping {
-                        id: m.id,
-                        name: m.name,
-                        mapping_type: m.mapping_type,
-                        index: m.index,
-                    }).collect()),
+                    MaybeUndefined::Value(ms) => Some(
+                        ms.into_iter()
+                            .map(|m| GamepadMapping {
+                                id: m.id,
+                                name: m.name,
+                                mapping_type: m.mapping_type,
+                                index: m.index,
+                            })
+                            .collect(),
+                    ),
                 },
-                shaker_dsp_enabled: merge_required(s.shaker_dsp_enabled, existing.settings.shaker_dsp_enabled),
-                shaker_lfe_source_device: merge_optional(s.shaker_lfe_source_device, existing.settings.shaker_lfe_source_device),
-                shaker_lfe_lpf_hz: merge_optional(s.shaker_lfe_lpf_hz, existing.settings.shaker_lfe_lpf_hz),
+                shaker_dsp_enabled: merge_required(
+                    s.shaker_dsp_enabled,
+                    existing.settings.shaker_dsp_enabled,
+                ),
+                shaker_lfe_source_device: merge_optional(
+                    s.shaker_lfe_source_device,
+                    existing.settings.shaker_lfe_source_device,
+                ),
+                shaker_lfe_lpf_hz: merge_optional(
+                    s.shaker_lfe_lpf_hz,
+                    existing.settings.shaker_lfe_lpf_hz,
+                ),
             }
         } else {
             existing.settings
         };
 
-        let app_config = AppConfig { settings: new_settings };
+        let app_config = AppConfig {
+            settings: new_settings,
+        };
         write_app_config(&app_config).map_err(async_graphql::Error::new)?;
 
         let mut gql = to_gql_config(app_config);

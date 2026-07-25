@@ -1,11 +1,10 @@
+use evdev::{
+    uinput::VirtualDeviceBuilder, AbsInfo, AbsoluteAxisType, AttributeSet, EventType, InputEvent,
+    Key, UinputAbsSetup,
+};
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
-use evdev::{
-    uinput::VirtualDeviceBuilder, AttributeSet, Key,
-    UinputAbsSetup, AbsoluteAxisType, AbsInfo,
-    InputEvent, EventType,
-};
 
 // The 0x130..0x13E block ("BTN_GAMEPAD_BASE.." in Linux's input-event-codes)
 // contains 15 codes, but only 13 of them are buttons any standard Xbox-style
@@ -67,7 +66,9 @@ const AXES: [AbsoluteAxisType; 6] = [
 
 static DEVICE: Mutex<Option<evdev::uinput::VirtualDevice>> = Mutex::new(None);
 
-fn ensure_device(guard: &mut std::sync::MutexGuard<Option<evdev::uinput::VirtualDevice>>) -> Result<(), String> {
+fn ensure_device(
+    guard: &mut std::sync::MutexGuard<Option<evdev::uinput::VirtualDevice>>,
+) -> Result<(), String> {
     if guard.is_some() {
         return Ok(());
     }
@@ -86,7 +87,8 @@ fn ensure_device(guard: &mut std::sync::MutexGuard<Option<evdev::uinput::Virtual
         .map_err(|e| e.to_string())?;
 
     for &axis in &AXES {
-        builder = builder.with_absolute_axis(&UinputAbsSetup::new(axis, axis_info))
+        builder = builder
+            .with_absolute_axis(&UinputAbsSetup::new(axis, axis_info))
             .map_err(|e| e.to_string())?;
     }
 
@@ -121,7 +123,8 @@ pub fn setup_gamepad_udev() -> Result<String, String> {
 
     let status = std::process::Command::new("pkexec")
         .args([
-            "sh", "-c",
+            "sh",
+            "-c",
             &format!(
                 "cp {tmp} {dst} && udevadm control --reload-rules && udevadm trigger",
                 tmp = tmp,
@@ -198,7 +201,8 @@ pub fn set_axis(axis_index: u8, value: f32) -> Result<(), String> {
 // index → last-heartbeat time, for buttons currently held with watchdog
 // protection on. Axes have no on/off state to get stuck in, so they're
 // never tracked here — see the `set_button` doc comment above.
-static WATCHDOG: LazyLock<Mutex<HashMap<u8, Instant>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+static WATCHDOG: LazyLock<Mutex<HashMap<u8, Instant>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 const WATCHDOG_TIMEOUT: Duration = Duration::from_millis(600);
 const WATCHDOG_POLL_INTERVAL: Duration = Duration::from_millis(150);
@@ -253,14 +257,23 @@ mod tests {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
             set_button(6, true, true).expect("watchdog-tracked press should succeed");
-            assert!(WATCHDOG.lock().unwrap().contains_key(&6), "button should be tracked immediately after a watchdog press");
+            assert!(
+                WATCHDOG.lock().unwrap().contains_key(&6),
+                "button should be tracked immediately after a watchdog press"
+            );
 
             let handle = tokio::spawn(run_watchdog());
             tokio::time::sleep(WATCHDOG_TIMEOUT + WATCHDOG_POLL_INTERVAL * 2).await;
             handle.abort();
 
-            assert!(!WATCHDOG.lock().unwrap().contains_key(&6), "watchdog should have force-released the stale button");
-            println!("watchdog correctly force-released button 6 after {:?} of silence", WATCHDOG_TIMEOUT);
+            assert!(
+                !WATCHDOG.lock().unwrap().contains_key(&6),
+                "watchdog should have force-released the stale button"
+            );
+            println!(
+                "watchdog correctly force-released button 6 after {:?} of silence",
+                WATCHDOG_TIMEOUT
+            );
         });
     }
 
@@ -286,7 +299,10 @@ mod tests {
         if let Ok(procdump) = std::fs::read_to_string("/proc/bus/input/devices") {
             if let Some(idx) = procdump.find("DDController") {
                 let start = procdump[..idx].rfind("\n\n").map(|p| p + 2).unwrap_or(0);
-                let end = procdump[idx..].find("\n\n").map(|p| idx + p).unwrap_or(procdump.len());
+                let end = procdump[idx..]
+                    .find("\n\n")
+                    .map(|p| idx + p)
+                    .unwrap_or(procdump.len());
                 println!("{}", &procdump[start..end]);
             } else {
                 println!("(no DDController entry found in /proc/bus/input/devices at all)");
@@ -294,7 +310,10 @@ mod tests {
         }
 
         let devices: Vec<_> = evdev::enumerate().collect();
-        println!("evdev::enumerate() found {} openable device(s):", devices.len());
+        println!(
+            "evdev::enumerate() found {} openable device(s):",
+            devices.len()
+        );
         for (path, d) in &devices {
             println!("  {} -> {:?}", path.display(), d.name());
         }
@@ -314,13 +333,23 @@ mod tests {
         println!("DDController advertises {} button codes, ascending order (= js/DirectInput button numbering):", codes.len());
         for (js_index, &code) in codes.iter().enumerate() {
             let our_index = (0..BUTTON_COUNT).find(|&i| button_key_code(i) == code);
-            println!("  js button {js_index}: raw code 0x{code:03x} <- our index {:?}", our_index);
+            println!(
+                "  js button {js_index}: raw code 0x{code:03x} <- our index {:?}",
+                our_index
+            );
         }
 
-        assert_eq!(codes.len(), BUTTON_COUNT as usize, "should advertise exactly BUTTON_COUNT distinct button codes");
+        assert_eq!(
+            codes.len(),
+            BUTTON_COUNT as usize,
+            "should advertise exactly BUTTON_COUNT distinct button codes"
+        );
         for (js_index, &code) in codes.iter().enumerate() {
             assert_eq!(button_key_code(js_index as u16), code, "js button {js_index} should be our index {js_index}'s code — ascending order must match our index scheme 1:1");
         }
-        println!("Confirmed: js/DirectInput button N == our index N for all {} buttons.", BUTTON_COUNT);
+        println!(
+            "Confirmed: js/DirectInput button N == our index N for all {} buttons.",
+            BUTTON_COUNT
+        );
     }
 }

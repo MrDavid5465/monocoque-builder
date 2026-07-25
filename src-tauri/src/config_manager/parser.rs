@@ -1,9 +1,9 @@
-use std::collections::HashMap;
 use regex::Regex;
+use std::collections::HashMap;
 
 /// One physical channel parsed out of a real Monocoque config, with every
 /// effect block that shared its `pan` — mirrors the app's own ShakerChannel
-/// + MonocoqueSoundDevice split (see typiql_types.rs), used only to seed
+/// and MonocoqueSoundDevice split (see typiql_types.rs), used only to seed
 /// that storage from an existing hand-written config on first run (see
 /// graphql::shaker_dsp::seed_from_monocoque_config_if_empty).
 pub struct ParsedChannel {
@@ -47,11 +47,15 @@ pub fn parse_shaker_channels(text: &str) -> Vec<ParsedChannel> {
         let channels: u8 = extract(block, "channels").parse().unwrap_or(4);
         let tyre = extract_opt(block, "tyre");
 
-        if !by_pan.contains_key(&pan) {
+        let entry = by_pan.entry(pan).or_insert_with(|| {
             order.push(pan);
-            by_pan.insert(pan, ParsedChannel { devid, channels, position: None, effects: Vec::new() });
-        }
-        let entry = by_pan.get_mut(&pan).unwrap();
+            ParsedChannel {
+                devid,
+                channels,
+                position: None,
+                effects: Vec::new(),
+            }
+        });
         // First tyre value found for this pan wins — matches
         // buildChannels()'s pre-ShakerChannel "most common tyre" heuristic
         // closely enough (real configs are consistent per corner in
@@ -72,7 +76,10 @@ pub fn parse_shaker_channels(text: &str) -> Vec<ParsedChannel> {
         });
     }
 
-    order.into_iter().filter_map(|pan| by_pan.remove(&pan)).collect()
+    order
+        .into_iter()
+        .filter_map(|pan| by_pan.remove(&pan))
+        .collect()
 }
 
 fn extract(block: &str, key: &str) -> String {

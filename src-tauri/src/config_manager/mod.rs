@@ -1,15 +1,9 @@
+pub mod app_config;
 pub mod parser;
 pub mod types;
-pub mod app_config;
 
 use types::{
-    AppConfig,
-    AppEntry,
-    AppSettings,
-    GqlAppConfig,
-    GqlAppEntry,
-    GqlAppLink,
-    GqlAppSettings,
+    AppConfig, AppEntry, AppSettings, GqlAppConfig, GqlAppEntry, GqlAppLink, GqlAppSettings,
     GqlGamepadMapping,
 };
 
@@ -32,14 +26,6 @@ pub fn write_monocoque_config(new_config: String) -> Result<(), String> {
     let path = config_path();
     fs::write(path, new_config).map_err(|e| e.to_string())
 }
-pub fn write_monocoque_config_file_name(new_config: String, file_name: String) -> Result<(), String> {
-    let path = dirs::config_dir()
-        .unwrap()
-        .join("monocoque")
-        .join(file_name);
-    fs::write(path, new_config).map_err(|e| e.to_string())
-}
-
 pub fn reload_monocoque() -> Result<(), String> {
     Command::new("pkill")
         .arg("-HUP")
@@ -65,12 +51,14 @@ pub fn to_gql_settings(s: AppSettings) -> GqlAppSettings {
         steer_max_deg: s.steer_max_deg,
         setup_complete: s.setup_complete,
         gamepad_mappings: s.gamepad_mappings.map(|ms| {
-            ms.into_iter().map(|m| GqlGamepadMapping {
-                id: m.id,
-                name: m.name,
-                mapping_type: m.mapping_type,
-                index: m.index,
-            }).collect()
+            ms.into_iter()
+                .map(|m| GqlGamepadMapping {
+                    id: m.id,
+                    name: m.name,
+                    mapping_type: m.mapping_type,
+                    index: m.index,
+                })
+                .collect()
         }),
         shaker_dsp_enabled: s.shaker_dsp_enabled,
         shaker_lfe_source_device: s.shaker_lfe_source_device,
@@ -83,9 +71,13 @@ pub fn to_gql_entry(a: AppEntry) -> GqlAppEntry {
         path: a.path,
         front_end: a.front_end,
         default_route: a.default_route,
-        links: a.links.into_iter().map(|l| GqlAppLink {
-            path: l.path,
-            text: l.text,
-        }).collect(),
+        links: a
+            .links
+            .into_iter()
+            .map(|l| GqlAppLink {
+                path: l.path,
+                text: l.text,
+            })
+            .collect(),
     }
 }

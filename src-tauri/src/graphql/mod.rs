@@ -1,25 +1,45 @@
 pub mod app_config;
 pub mod builtin_templates;
-pub mod dashboard_files;
-pub mod clients;
 pub mod car;
-pub mod templates;
+pub mod clients;
 pub mod dashboard_entry;
+pub mod dashboard_files;
 pub mod gamepad;
+pub mod recording;
 pub mod shaker_dsp;
+pub mod templates;
 pub use car::{CarFileMutation, CarPhotoSyncQuery};
-pub use templates::DashTemplateThumbnailMutation;
 pub use dashboard_entry::DashboardMutation;
 pub use gamepad::GamepadMutation;
+pub use recording::RecordingControlMutation;
 pub use shaker_dsp::{ShakerDspMutation, ShakerDspQuery};
+pub use templates::DashTemplateThumbnailMutation;
 
-use async_graphql::{Object, Subscription};
-use futures_util::stream::{Stream, StreamExt, select};
-use tokio_stream::wrappers::IntervalStream;
+use crate::telemetry::recording as telemetry_recording;
+use crate::telemetry::{build_frame, read_simdata, types::TelemetryFrame};
+use crate::typiql_types::{DashTemplateChanged, DashboardEntryChanged, DeviceDefaultChanged};
+use async_graphql::{Context, Object, SimpleObject, Subscription};
+use futures_util::stream::{select, Stream, StreamExt};
+use std::sync::Arc;
 use std::time::Duration;
-use crate::telemetry::{types::{SimStatus, TelemetryFrame, TyreData, CourseFlag}, simdata::SimData, read_simdata};
-use crate::typiql_types::{DashboardEntryChanged, DashTemplateChanged, DeviceDefaultChanged};
-use typiql::TypiQLBroker;
+use tokio_stream::wrappers::IntervalStream;
+use typiql::{AdapterMap, TypiQLAdapter, TypiQLBroker};
+
+/// Every hand-written resolver in this app operates on JSON-backed types
+/// (Car, Dashboard, templates, clients, shaker DSP config, Recording
+/// metadata) — only the macro-generated `RecordingFrame` CRUD (see
+/// `typiql_types::RecordingFrame`) uses the `"duckdb"` adapter, and it never
+/// needs a hand-written resolver to reach it. So every hand-written resolver
+/// that used to do `ctx.data::<Arc<dyn TypiQLAdapter>>()` against the old
+/// single-adapter context now goes through this instead of repeating the
+/// `"default"`-lookup boilerplate at each of the ~20 call sites.
+pub fn default_adapter(ctx: &Context<'_>) -> async_graphql::Result<Arc<dyn TypiQLAdapter>> {
+    let adapters = ctx.data::<AdapterMap>()?;
+    adapters
+        .get("default")
+        .cloned()
+        .ok_or_else(|| async_graphql::Error::new("no adapter registered under name \"default\""))
+}
 
 #[derive(async_graphql::SimpleObject, Clone)]
 pub struct TelemetryEvent {
@@ -34,85 +54,19 @@ enum DashboardUpdateEvent {
     Telemetry(TelemetryEvent),
 }
 
-fn build_frame(d: SimData) -> TelemetryFrame {
-    TelemetryFrame {
-        sim_status: match d.simstatus {
-            1 => SimStatus::Menu,
-            2 => SimStatus::Active,
-            _ => SimStatus::Off,
-        },
-        simon:    d.simon,
-        car:      d.car_name().to_string(),
-        track:    d.track_name().to_string(),
-        driver:   d.driver_name().to_string(),
-        tyre_compound: std::ffi::CStr::from_bytes_until_nul(&d.tyre_compound)
-            .map(|s| s.to_str().unwrap_or("").to_string())
-            .unwrap_or_default(),
+#[derive(SimpleObject)]
+pub struct RecordingStatus {
+    pub is_recording: bool,
+    pub is_playing: bool,
+    pub recording_id: Option<String>,
+    pub playing_id: Option<String>,
+}
 
-        g_lat:    d.g_lat(),
-        g_lon:    d.g_lon(),
-        g_vert:   d.g_vert(),
-        heading:  d.heading,
-        pitch:    d.pitch,
-        roll:     d.roll,
-
-        speed:      d.velocity as f64,
-        rpm:        d.rpms,
-        max_rpm:    d.maxrpm,
-        idle_rpm:   d.idlerpm,
-        gear:       d.gear_display(),
-        max_gears:  d.maxgears,
-        throttle:   d.gas,
-        brake:      d.brake,
-        clutch:     d.clutch,
-        steering:   d.steer,
-        handbrake:  d.handbrake,
-        abs:        d.abs,
-        brake_bias: d.brakebias,
-
-        fuel:          d.fuel,
-        fuel_capacity: d.fuelcapacity,
-        turbo_boost:   d.turboboost,
-        turbo_pct:     d.turboboostperct,
-
-        tyres: (0..4).map(|i| TyreData {
-            temp:       d.tyre_temp[i],
-            pressure:   d.tyre_pressure[i],
-            slip_ratio: d.tyre_slip_ratio[i],
-            slip_angle: d.tyre_slip_angle[i],
-            wear:       d.tyre_wear[i],
-            brake_temp: d.brake_temp[i],
-            rps:        d.tyre_rps[i],
-            diameter:   d.tyre_diameter[i],
-        }).collect(),
-
-        air_temp:    d.air_temp,
-        track_temp:  d.track_temp,
-        air_density: d.air_density,
-
-        lap:       d.lap,
-        position:  d.position,
-        num_laps:  d.numlaps,
-        num_cars:  d.numcars,
-        course_flag: match d.course_flag {
-            1 => CourseFlag::Yellow,
-            2 => CourseFlag::Red,
-            3 => CourseFlag::Chequered,
-            4 => CourseFlag::Blue,
-            5 => CourseFlag::White,
-            6 => CourseFlag::Black,
-            7 => CourseFlag::BlackWhite,
-            8 => CourseFlag::BlackOrange,
-            9 => CourseFlag::Orange,
-            _ => CourseFlag::Green,
-        },
-        lap_is_valid:         d.lap_is_valid,
-        in_pit:               d.cars[0].inpit,
-        current_lap_seconds:  d.current_lap_seconds,
-        last_lap_seconds:     d.last_lap_seconds,
-        sector1_time:         d.sector1_time,
-        sector2_time:         d.sector2_time,
-    }
+/// What every telemetry subscriber/query should currently see: a recorded
+/// playback frame if one is active, otherwise a live read — identical to
+/// the pre-recording-feature behavior when no playback is armed.
+fn current_frame() -> Option<TelemetryFrame> {
+    telemetry_recording::current_playback_frame().or_else(|| read_simdata().map(build_frame))
 }
 
 #[derive(Default)]
@@ -121,7 +75,16 @@ pub struct QueryRoot;
 #[Object]
 impl QueryRoot {
     async fn telemetry_snapshot(&self) -> Option<TelemetryFrame> {
-        read_simdata().map(build_frame)
+        current_frame()
+    }
+
+    async fn recording_status(&self) -> RecordingStatus {
+        RecordingStatus {
+            is_recording: telemetry_recording::is_recording(),
+            is_playing: telemetry_recording::is_playing(),
+            recording_id: telemetry_recording::recording_id(),
+            playing_id: telemetry_recording::playing_id(),
+        }
     }
 }
 
@@ -137,16 +100,21 @@ impl SubscriptionRoot {
     }
     async fn telemetry(&self) -> impl Stream<Item = Option<TelemetryFrame>> {
         IntervalStream::new(tokio::time::interval(Duration::from_millis(33)))
-            .map(|_| read_simdata().map(build_frame))
+            .map(|_| current_frame())
     }
 
     async fn dashboard_updates(&self) -> impl Stream<Item = DashboardUpdateEvent> {
-        let s1 = TypiQLBroker::<DashboardEntryChanged>::subscribe().map(DashboardUpdateEvent::Dashboard);
-        let s2 = TypiQLBroker::<DashTemplateChanged>::subscribe().map(DashboardUpdateEvent::Template);
-        let s3 = TypiQLBroker::<DeviceDefaultChanged>::subscribe().map(DashboardUpdateEvent::DeviceDefault);
-        let s4 = IntervalStream::new(tokio::time::interval(Duration::from_millis(16)))
-            .map(|_| DashboardUpdateEvent::Telemetry(TelemetryEvent { frame: read_simdata().map(build_frame) }));
+        let s1 =
+            TypiQLBroker::<DashboardEntryChanged>::subscribe().map(DashboardUpdateEvent::Dashboard);
+        let s2 =
+            TypiQLBroker::<DashTemplateChanged>::subscribe().map(DashboardUpdateEvent::Template);
+        let s3 = TypiQLBroker::<DeviceDefaultChanged>::subscribe()
+            .map(DashboardUpdateEvent::DeviceDefault);
+        let s4 = IntervalStream::new(tokio::time::interval(Duration::from_millis(16))).map(|_| {
+            DashboardUpdateEvent::Telemetry(TelemetryEvent {
+                frame: current_frame(),
+            })
+        });
         select(s4, select(s1, select(s2, s3)))
     }
 }
-

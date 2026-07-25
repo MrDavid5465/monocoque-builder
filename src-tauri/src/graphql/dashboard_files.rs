@@ -1,10 +1,9 @@
-use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use crate::typiql_types::{DashboardEntry, File};
 use async_graphql::{Context, Object, Result as GqlResult};
 use serde_json::{json, Value};
-use typiql::{Location, TypiQLAdapter};
-use crate::typiql_types::{DashboardEntry, File};
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
+use typiql::Location;
 
 #[derive(Default)]
 pub struct DashboardFileSyncQuery;
@@ -29,10 +28,14 @@ impl DashboardFileSyncQuery {
         ctx: &Context<'_>,
         dashboard_id: String,
     ) -> GqlResult<Vec<File>> {
-        let adapter = ctx.data::<Arc<dyn TypiQLAdapter>>()?;
+        let adapter = crate::graphql::default_adapter(ctx)?;
 
         let entry: DashboardEntry = adapter
-            .get_one(Location::Named("dashboard_entries".to_string()), "id", &dashboard_id)
+            .get_one(
+                Location::Named("dashboard_entries".to_string()),
+                "id",
+                &dashboard_id,
+            )
             .await
             .ok_or_else(|| async_graphql::Error::new("Dashboard not found"))
             .and_then(|v| {
@@ -40,7 +43,10 @@ impl DashboardFileSyncQuery {
             })?;
 
         let base_path = expand_tilde(&entry.path);
-        let files_location = || Location::At { file: content_file(&entry.path), table: "files".to_string() };
+        let files_location = || Location::At {
+            file: content_file(&entry.path),
+            table: "files".to_string(),
+        };
 
         // Maintain a symlink so the static file server can serve assets without
         // exposing arbitrary filesystem paths via /file-proxy.
@@ -63,9 +69,8 @@ impl DashboardFileSyncQuery {
         // Those symlinks are inside Tauri's watched tree and trigger spurious rebuilds.
         #[cfg(debug_assertions)]
         {
-            let old_link = PathBuf::from(
-                concat!(env!("CARGO_MANIFEST_DIR"), "/data/dash-assets")
-            ).join(&dashboard_id);
+            let old_link = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/data/dash-assets"))
+                .join(&dashboard_id);
             if old_link.is_symlink() || old_link.exists() {
                 std::fs::remove_file(&old_link).ok();
             }
@@ -76,9 +81,13 @@ impl DashboardFileSyncQuery {
 
         // Walk the directory; seed with mock sprites if no images are present yet.
         let mut disk_files = walk_dir(&base_path, &base_path);
-        let image_exts: HashSet<&str> = ["png","jpg","jpeg","webp","svg","gif"].iter().copied().collect();
+        let image_exts: HashSet<&str> = ["png", "jpg", "jpeg", "webp", "svg", "gif"]
+            .iter()
+            .copied()
+            .collect();
         let has_images = disk_files.iter().any(|f| {
-            Path::new(f).extension()
+            Path::new(f)
+                .extension()
                 .and_then(|e| e.to_str())
                 .map(|e| image_exts.contains(e.to_lowercase().as_str()))
                 .unwrap_or(false)
@@ -154,10 +163,13 @@ impl DashboardFileSyncQuery {
         let existing_matches = existing.len() == current.len()
             && current.iter().all(|c| {
                 let path = c.get("path").and_then(Value::as_str).unwrap_or_default();
-                existing.get(path).map(|f| {
-                    f.id == c.get("id").and_then(Value::as_str).unwrap_or_default()
-                        && f.mtime == c.get("mtime").and_then(Value::as_i64)
-                }).unwrap_or(false)
+                existing
+                    .get(path)
+                    .map(|f| {
+                        f.id == c.get("id").and_then(Value::as_str).unwrap_or_default()
+                            && f.mtime == c.get("mtime").and_then(Value::as_i64)
+                    })
+                    .unwrap_or(false)
             });
         if !existing_matches {
             adapter.set_table(files_location(), current).await;
@@ -194,10 +206,14 @@ impl DashboardFileUploadMutation {
         data: String,
         #[graphql(default)] _file_type: Option<String>,
     ) -> GqlResult<File> {
-        let adapter = ctx.data::<Arc<dyn TypiQLAdapter>>()?;
+        let adapter = crate::graphql::default_adapter(ctx)?;
 
         let entry: DashboardEntry = adapter
-            .get_one(Location::Named("dashboard_entries".to_string()), "id", &dashboard_id)
+            .get_one(
+                Location::Named("dashboard_entries".to_string()),
+                "id",
+                &dashboard_id,
+            )
             .await
             .ok_or_else(|| async_graphql::Error::new("Dashboard not found"))
             .and_then(|v| {
@@ -221,8 +237,7 @@ impl DashboardFileUploadMutation {
             std::fs::create_dir_all(parent)
                 .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         }
-        std::fs::write(&file_path, &bytes)
-            .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        std::fs::write(&file_path, &bytes).map_err(|e| async_graphql::Error::new(e.to_string()))?;
 
         use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
@@ -232,10 +247,14 @@ impl DashboardFileUploadMutation {
         let url = format!("/dash-assets/{}/{}", dashboard_id, name);
         let mtime = file_mtime_secs(&file_path);
 
-        let files_location = Location::At { file: content_file(&entry.path), table: "files".to_string() };
+        let files_location = Location::At {
+            file: content_file(&entry.path),
+            table: "files".to_string(),
+        };
         let mut rows = adapter.get_many(files_location.clone(), vec![]).await;
         rows.retain(|v| v.get("path").and_then(Value::as_str) != Some(path_str.as_str()));
-        let new_row = json!({ "path": path_str, "id": hash, "filename": name, "url": url, "mtime": mtime });
+        let new_row =
+            json!({ "path": path_str, "id": hash, "filename": name, "url": url, "mtime": mtime });
         rows.push(new_row.clone());
         adapter.set_table(files_location, rows).await;
 
@@ -255,15 +274,20 @@ impl DashboardFileUploadMutation {
         day_data: Option<String>,
         night_data: Option<String>,
     ) -> GqlResult<crate::typiql_types::Dashboard> {
-        let adapter = ctx.data::<Arc<dyn TypiQLAdapter>>()?;
+        let adapter = crate::graphql::default_adapter(ctx)?;
 
         let entry: DashboardEntry = adapter
             .get_one(Location::Named("dashboard_entries".to_string()), "id", &id)
             .await
             .ok_or_else(|| async_graphql::Error::new("Dashboard not found"))
-            .and_then(|v| serde_json::from_value(v).map_err(|e| async_graphql::Error::new(e.to_string())))?;
+            .and_then(|v| {
+                serde_json::from_value(v).map_err(|e| async_graphql::Error::new(e.to_string()))
+            })?;
 
-        let content_location = Location::At { file: content_file(&entry.path), table: "dashboard".to_string() };
+        let content_location = Location::At {
+            file: content_file(&entry.path),
+            table: "dashboard".to_string(),
+        };
         let mut content = adapter
             .get_many(content_location.clone(), vec![])
             .await
@@ -272,8 +296,7 @@ impl DashboardFileUploadMutation {
             .unwrap_or_else(|| Value::Object(Default::default()));
 
         let dir = crate::graphql::car::thumbnails_dir();
-        std::fs::create_dir_all(&dir)
-            .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        std::fs::create_dir_all(&dir).map_err(|e| async_graphql::Error::new(e.to_string()))?;
 
         let mut changed = false;
         if let Some(data) = day_data {
@@ -294,7 +317,9 @@ impl DashboardFileUploadMutation {
         }
 
         if changed {
-            adapter.set_table(content_location, vec![content.clone()]).await;
+            adapter
+                .set_table(content_location, vec![content.clone()])
+                .await;
         }
 
         serde_json::from_value(content).map_err(|e| async_graphql::Error::new(e.to_string()))
@@ -306,13 +331,19 @@ impl DashboardFileUploadMutation {
         dashboard_id: String,
         path: String,
     ) -> GqlResult<bool> {
-        let adapter = ctx.data::<Arc<dyn TypiQLAdapter>>()?;
+        let adapter = crate::graphql::default_adapter(ctx)?;
 
         let entry: DashboardEntry = adapter
-            .get_one(Location::Named("dashboard_entries".to_string()), "id", &dashboard_id)
+            .get_one(
+                Location::Named("dashboard_entries".to_string()),
+                "id",
+                &dashboard_id,
+            )
             .await
             .ok_or_else(|| async_graphql::Error::new("Dashboard not found"))
-            .and_then(|v| serde_json::from_value(v).map_err(|e| async_graphql::Error::new(e.to_string())))?;
+            .and_then(|v| {
+                serde_json::from_value(v).map_err(|e| async_graphql::Error::new(e.to_string()))
+            })?;
 
         let file_path = PathBuf::from(&path);
         if file_path.exists() {
@@ -320,7 +351,10 @@ impl DashboardFileUploadMutation {
                 .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         }
 
-        let files_location = Location::At { file: content_file(&entry.path), table: "files".to_string() };
+        let files_location = Location::At {
+            file: content_file(&entry.path),
+            table: "files".to_string(),
+        };
         let mut rows = adapter.get_many(files_location.clone(), vec![]).await;
         rows.retain(|v| v.get("path").and_then(Value::as_str) != Some(path.as_str()));
         adapter.set_table(files_location, rows).await;
@@ -362,23 +396,32 @@ fn write_thumbnail_file(
         .unwrap_or(0);
     let filename = format!("{}-{}-{}.png", id, tag, nanos);
     let file_path = dir.join(&filename);
-    std::fs::write(&file_path, &bytes)
-        .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+    std::fs::write(&file_path, &bytes).map_err(|e| async_graphql::Error::new(e.to_string()))?;
     Ok(filename)
 }
 
 fn mock_sprites_dir() -> PathBuf {
     #[cfg(debug_assertions)]
-    { PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../public/dash-sprites")) }
+    {
+        PathBuf::from(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../public/dash-sprites"
+        ))
+    }
     #[cfg(not(debug_assertions))]
-    { PathBuf::from("dist/dash-sprites") }
+    {
+        PathBuf::from("dist/dash-sprites")
+    }
 }
 
 /// A cheap `stat()`-only check (no content read) used to skip re-hashing a
 /// file's full content when nothing about it has changed since the last sync.
 fn file_mtime_secs(path: &Path) -> Option<i64> {
     let modified = std::fs::metadata(path).ok()?.modified().ok()?;
-    modified.duration_since(std::time::UNIX_EPOCH).ok().map(|d| d.as_secs() as i64)
+    modified
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .map(|d| d.as_secs() as i64)
 }
 
 /// Expand a leading `~` to the current user's home directory.

@@ -1,9 +1,10 @@
-use std::path::PathBuf;
-use std::sync::Arc;
+use crate::typiql_types::{
+    Dashboard, DashboardEntry, DashboardEntryChanged, DashboardEntryInput, DashboardInput,
+};
 use async_graphql::{Context, Object, Result as GqlResult};
 use serde_json::Value;
-use typiql::{resolve_add, Location, TypiQLAdapter, TypiQLBroker};
-use crate::typiql_types::{Dashboard, DashboardEntry, DashboardEntryChanged, DashboardEntryInput, DashboardInput};
+use std::path::PathBuf;
+use typiql::{resolve_add, Location, TypiQLBroker};
 
 /// Expand a leading `~` to the current user's home directory. Duplicated
 /// privately per-module elsewhere in this codebase (car.rs, dashboard_files.rs,
@@ -28,9 +29,9 @@ fn content_file(dash_path: &str) -> PathBuf {
 
 fn strip_nulls(v: Value) -> Value {
     match v {
-        Value::Object(map) => Value::Object(
-            map.into_iter().filter(|(_, v)| !v.is_null()).collect(),
-        ),
+        Value::Object(map) => {
+            Value::Object(map.into_iter().filter(|(_, v)| !v.is_null()).collect())
+        }
         other => other,
     }
 }
@@ -65,7 +66,7 @@ impl DashboardMutation {
         entry: DashboardEntryInput,
         content: DashboardInput,
     ) -> GqlResult<DashboardEntry> {
-        let adapter = ctx.data::<Arc<dyn TypiQLAdapter>>()?;
+        let adapter = crate::graphql::default_adapter(ctx)?;
 
         let created_entry = resolve_add::<DashboardEntry>(ctx, entry).await?;
         TypiQLBroker::publish(DashboardEntryChanged {
@@ -73,11 +74,15 @@ impl DashboardMutation {
             value: created_entry.clone(),
         });
 
-        let content_value = serde_json::to_value(&content).map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        let content_value =
+            serde_json::to_value(&content).map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let content_value = strip_nulls(content_value);
         adapter
             .set_table(
-                Location::At { file: content_file(&created_entry.path), table: "dashboard".to_string() },
+                Location::At {
+                    file: content_file(&created_entry.path),
+                    table: "dashboard".to_string(),
+                },
                 vec![content_value],
             )
             .await;
@@ -104,26 +109,43 @@ impl DashboardMutation {
         id: String,
         update: DashboardInput,
     ) -> GqlResult<Option<Dashboard>> {
-        let adapter = ctx.data::<Arc<dyn TypiQLAdapter>>()?;
+        let adapter = crate::graphql::default_adapter(ctx)?;
 
-        let Some(entry_val) = adapter.get_one(Location::Named("dashboard_entries".to_string()), "id", &id).await else {
+        let Some(entry_val) = adapter
+            .get_one(Location::Named("dashboard_entries".to_string()), "id", &id)
+            .await
+        else {
             return Ok(None);
         };
-        let entry: DashboardEntry = serde_json::from_value(entry_val).map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        let entry: DashboardEntry = serde_json::from_value(entry_val)
+            .map_err(|e| async_graphql::Error::new(e.to_string()))?;
 
         let file = content_file(&entry.path);
         let existing = adapter
-            .get_many(Location::At { file: file.clone(), table: "dashboard".to_string() }, vec![])
+            .get_many(
+                Location::At {
+                    file: file.clone(),
+                    table: "dashboard".to_string(),
+                },
+                vec![],
+            )
             .await
             .into_iter()
             .next()
             .unwrap_or_else(|| Value::Object(Default::default()));
 
-        let patch = serde_json::to_value(&update).map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        let patch =
+            serde_json::to_value(&update).map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let merged = merge_objects(existing, patch);
 
         adapter
-            .set_table(Location::At { file, table: "dashboard".to_string() }, vec![merged.clone()])
+            .set_table(
+                Location::At {
+                    file,
+                    table: "dashboard".to_string(),
+                },
+                vec![merged.clone()],
+            )
             .await;
 
         TypiQLBroker::publish(DashboardEntryChanged {
@@ -131,7 +153,8 @@ impl DashboardMutation {
             value: entry,
         });
 
-        let dashboard: Dashboard = serde_json::from_value(merged).map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        let dashboard: Dashboard =
+            serde_json::from_value(merged).map_err(|e| async_graphql::Error::new(e.to_string()))?;
         Ok(Some(dashboard))
     }
 }

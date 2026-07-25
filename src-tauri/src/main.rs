@@ -4,17 +4,16 @@
 // per merged type — adding File pushed the schema's type count past rustc's
 // default query recursion limit (128).
 #![recursion_limit = "256"]
-mod config_manager;
 mod api;
+mod config_manager;
+mod gamepad;
 mod graphql;
+mod pipewire_dsp;
 mod telemetry;
 mod typiql_types;
-mod gamepad;
-mod pipewire_dsp;
 
-use std::net::SocketAddr;
-use axum::extract::connect_info::IntoMakeServiceWithConnectInfo;
 use axum::serve;
+use std::net::SocketAddr;
 use tokio::runtime::Runtime;
 fn main() {
     std::panic::set_hook(Box::new(|info| {
@@ -36,15 +35,16 @@ fn main() {
                     let app = api::build_router().await;
 
                     println!("Starting API on http://0.0.0.0:9000");
-                    let listener = tokio::net::TcpListener::bind("0.0.0.0:9000")
-                        .await
-                        .unwrap();
+                    let listener = tokio::net::TcpListener::bind("0.0.0.0:9000").await.unwrap();
 
-                    if let Err(e) = serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await {
+                    if let Err(e) = serve(
+                        listener,
+                        app.into_make_service_with_connect_info::<SocketAddr>(),
+                    )
+                    .await
+                    {
                         eprintln!("Axum serve error: {e:?}");
                     }
-
-
                 });
             });
 
