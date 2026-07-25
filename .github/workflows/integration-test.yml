@@ -49,11 +49,18 @@ jobs:
         run: chown -R builder:builder "$GITHUB_WORKSPACE"
 
       - name: Build an AUR helper (paru) — none ship in the official repos
+        # Building from source (not paru-bin) deliberately: paru-bin ships a
+        # prebuilt binary linked against whatever libalpm SONAME was current
+        # when it was last published, which drifts out of sync with
+        # archlinux:latest after `pacman -Syu` fully updates the rolling
+        # release — hit exactly this in practice ("paru: error while loading
+        # shared libraries: libalpm.so.15: cannot open shared object file").
+        # Compiling from source links against whatever's actually installed.
         run: |
           su builder -c '
             set -e
-            git clone https://aur.archlinux.org/paru-bin.git /tmp/paru-bin
-            cd /tmp/paru-bin
+            git clone https://aur.archlinux.org/paru.git /tmp/paru
+            cd /tmp/paru
             makepkg -si --noconfirm
           '
 
