@@ -39,7 +39,12 @@ jobs:
         # because one wasn't specified explicitly, and no default is
         # configured" from paru's build() step.
         run: |
-          pacman -Syu --noconfirm base-devel git sudo webkit2gtk-4.1 nodejs npm rustup jq
+          # portaudio isn't in monocoque's own makedepends (upstream PKGBUILD
+          # only lists git+cmake) even though its CMake build unconditionally
+          # compiles a bundled pa_devs test tool against portaudio.h — a gap
+          # in the third-party AUR package, not ours, worked around here by
+          # installing it ourselves before paru ever builds monocoque.
+          pacman -Syu --noconfirm base-devel git sudo webkit2gtk-4.1 nodejs npm rustup jq portaudio
           rustup default stable
           useradd -m builder
           echo 'builder ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/builder
