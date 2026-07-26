@@ -4,7 +4,7 @@
     ".": {
       "release-type": "node",
       "package-name": "telemetry-admin",
-      "draft": true,
+      "draft": false,
       "extra-files": [
         { "type": "json", "path": "src-tauri/tauri.conf.json", "jsonpath": "$.version" },
         { "type": "toml", "path": "src-tauri/Cargo.toml", "jsonpath": "$.package.version" }
