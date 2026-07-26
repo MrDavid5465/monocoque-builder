@@ -62,35 +62,27 @@ jobs:
         run: su builder -c "cd '$GITHUB_WORKSPACE/typiql-tauri/typiql/pkg/aur' && makepkg --printsrcinfo > .SRCINFO"
 
       - name: Set up SSH for the AUR
-        # ssh-keyscan pre-seeding known_hosts turned out unreliable here
-        # (confirmed by a real run: key present and valid, but git's SSH
-        # transport still reported "Host key verification failed") —
-        # accept-new is the standard low-risk substitute for a scripted CI
-        # connection to one well-known host: it still verifies and pins the
-        # key on first connect within this run, just without the separate
-        # keyscan step that wasn't actually landing a usable entry.
+        # Two real runs' worth of ssh -vvv output showed the actual root
+        # cause: this container's $HOME env var (/github/home) is what the
+        # shell uses to expand `~`, but plain `ssh`/git-over-ssh with no
+        # explicit flags looks up its default config/identity/known_hosts
+        # via the passwd-database home for the running user (root ->
+        # /root) instead, completely ignoring $HOME. Writing to `~/.ssh/`
+        # and relying on ~/.ssh/config's Host-block matching therefore
+        # silently wrote files ssh's own default lookup never saw — no
+        # IdentityFile found -> "Permission denied (publickey)" even
+        # though the key itself is valid and correctly registered
+        # (confirmed: an explicit `-i $HOME/.ssh/aur` connection succeeds
+        # and gets AUR's real welcome banner). Fix: don't rely on ssh's
+        # default path discovery at all — point git at the key directly
+        # via GIT_SSH_COMMAND, built from $HOME so it matches wherever
+        # this same script actually wrote the file.
         run: |
-          mkdir -p ~/.ssh
-          chmod 700 ~/.ssh
-          echo "${{ secrets.AUR_SSH_PRIVATE_KEY }}" > ~/.ssh/aur
-          chmod 600 ~/.ssh/aur
-          cat > ~/.ssh/config <<'EOF'
-          Host aur.archlinux.org
-            IdentityFile ~/.ssh/aur
-            User aur
-            StrictHostKeyChecking accept-new
-          EOF
-          chmod 600 ~/.ssh/config
-
-      # TEMPORARY diagnostic: accept-new should have made the previous
-      # "Host key verification failed" impossible, but it recurred anyway
-      # on a real run with this exact config present — dump the real SSH
-      # handshake instead of guessing at a third fix blind. `ssh -T` to a
-      # git-only AUR account always exits non-zero (no shell access), so
-      # `|| true` just lets us see the verbose output without failing the
-      # step early.
-      - name: Diagnose SSH handshake
-        run: ssh -vvv -o StrictHostKeyChecking=accept-new -i ~/.ssh/aur aur@aur.archlinux.org 2>&1 || true
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          echo "${{ secrets.AUR_SSH_PRIVATE_KEY }}" > "$HOME/.ssh/aur"
+          chmod 600 "$HOME/.ssh/aur"
+          echo "GIT_SSH_COMMAND=ssh -i $HOME/.ssh/aur -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$HOME/.ssh/known_hosts" >> "$GITHUB_ENV"
 
       - name: Push PKGBUILD to the AUR
         run: |
@@ -99,6 +91,9 @@ jobs:
           cd /tmp/aur-telemetry-admin
           git config user.name "David Scott"
           git config user.email "david@davidallanscott.ca"
+          # AUR only accepts pushes to a branch literally named master —
+          # not guaranteed to be this container git's default init branch.
+          git branch -M master
           git add PKGBUILD .SRCINFO
           git commit -m "Update to ${{ inputs.pkgver }}"
-          git push
+          git push -u origin master
