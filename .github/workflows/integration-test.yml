@@ -258,10 +258,24 @@ jobs:
         # playwright.config.ts's webServer runs `npm run dev` (Vite only)
         # and the suite mocks GraphQL (e2e/helpers/mock-gql.ts) — it doesn't
         # touch the downloaded binary at all, just needs node_modules.
+        #
+        # --with-deps shells out to apt-get to install OS-level libs for
+        # the browser — always fails here ("apt-get: command not found",
+        # this is Arch) since it only supports Debian/Ubuntu. Confirmed the
+        # actual browser binary still failed to install because of that
+        # (the two commands weren't &&-chained, so the suite ran anyway
+        # against a nonexistent browser and every test failed identically
+        # with "Executable doesn't exist"). Just download the browser
+        # itself; if webkit2gtk-4.1's own dependency chain (already
+        # installed above for the app itself) turns out not to cover
+        # everything headless Chromium needs, the next failure will name
+        # the exact missing library instead of this making us guess a
+        # package list now.
         run: |
           su builder -c "
+            set -e
             cd '$GITHUB_WORKSPACE/typiql-tauri/typiql'
-            npx playwright install --with-deps chromium
+            npx playwright install chromium
             npm run test:e2e
           "
 
