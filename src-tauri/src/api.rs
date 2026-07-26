@@ -152,8 +152,7 @@ pub async fn build_router() -> Router {
     );
 
     #[cfg(not(debug_assertions))]
-    let router = router.nest_service(
-        "/",
+    let router = router.fallback_service(
         tower_http::services::ServeDir::new("dist")
             .not_found_service(tower_http::services::ServeFile::new("dist/index.html")),
     );
