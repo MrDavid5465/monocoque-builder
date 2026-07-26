@@ -11,10 +11,9 @@ name: Publish to AUR
 # with a second tool — makepkg refuses to run as root even for this, so
 # it needs the same non-root builder-user setup.
 #
-# Needs a secret this repo doesn't have yet: AUR_SSH_PRIVATE_KEY, the
-# private half of an SSH key registered under aur.archlinux.org -> My
-# Account -> SSH Public Key. Not created yet — do that yourself before
-# ever running this workflow for real.
+# Needs AUR_SSH_PRIVATE_KEY (already set as a repo secret): the private
+# half of an SSH key registered under aur.archlinux.org -> My Account ->
+# SSH Public Key.
 on:
   workflow_dispatch:
     inputs:
@@ -83,9 +82,9 @@ jobs:
 
       - name: Push PKGBUILD to the AUR
         run: |
-          git clone ssh://aur@aur.archlinux.org/typiql-bin.git /tmp/aur-typiql-bin
-          cp typiql-tauri/typiql/pkg/aur/PKGBUILD typiql-tauri/typiql/pkg/aur/.SRCINFO /tmp/aur-typiql-bin/
-          cd /tmp/aur-typiql-bin
+          git clone ssh://aur@aur.archlinux.org/telemetry-admin.git /tmp/aur-telemetry-admin
+          cp typiql-tauri/typiql/pkg/aur/PKGBUILD typiql-tauri/typiql/pkg/aur/.SRCINFO /tmp/aur-telemetry-admin/
+          cd /tmp/aur-telemetry-admin
           git config user.name "David Scott"
           git config user.email "david@davidallanscott.ca"
           git add PKGBUILD .SRCINFO
