@@ -130,7 +130,13 @@ jobs:
           # in the third-party AUR package, not ours, worked around here by
           # installing it ourselves before paru ever builds monocoque.
           # xorg-server-xvfb: see the job-level DISPLAY comment above.
-          pacman -Syu --noconfirm base-devel git sudo webkit2gtk-4.1 nodejs npm rustup jq portaudio xorg-server-xvfb
+          # nspr/nss: headless Chromium (installed later by `npx playwright
+          # install chromium`) needs these directly — confirmed by a real
+          # run failing to launch chrome-headless-shell with "error while
+          # loading shared libraries: libnspr4.so: cannot open shared object
+          # file". webkit2gtk-4.1's own dependency chain doesn't pull them
+          # in, since WebKit uses its own TLS/crypto stack, not NSS.
+          pacman -Syu --noconfirm base-devel git sudo webkit2gtk-4.1 nodejs npm rustup jq portaudio xorg-server-xvfb nspr nss
           rustup default stable
           useradd -m builder
           echo 'builder ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/builder
