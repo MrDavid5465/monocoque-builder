@@ -45,8 +45,12 @@ jobs:
         working-directory: typiql-tauri/typiql/pkg/aur
         run: |
           sed -i "s/^pkgver=.*/pkgver=${{ inputs.pkgver }}/" PKGBUILD
+          # release-please tags releases as {package-name}-v{version}
+          # (telemetry-admin-v0.1.1), not the plain v{version} this used to
+          # assume — confirmed against the real v0.1.1 release, which 404'd
+          # under the old URL.
           curl -fsSL -o typiql.deb \
-            "https://github.com/MrDavid5465/telemetry-admin/releases/download/v${{ inputs.pkgver }}/typiql_${{ inputs.pkgver }}_amd64.deb"
+            "https://github.com/MrDavid5465/telemetry-admin/releases/download/telemetry-admin-v${{ inputs.pkgver }}/typiql_${{ inputs.pkgver }}_amd64.deb"
           sum=$(sha256sum typiql.deb | cut -d' ' -f1)
           sed -i "s/^sha256sums=.*/sha256sums=('${sum}')/" PKGBUILD
           rm typiql.deb
