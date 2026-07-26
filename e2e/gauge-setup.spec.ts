@@ -26,7 +26,19 @@ async function openDesigner(page: Page, elements?: string) {
   const getErrors = trackConsoleErrors(page);
   await mockGraphQL(page, { elements });
   await gotoDesigner(page);
+  // A few more queries (cars, dash-pans, sprite sync) resolve just after the
+  // "Loading dashboard..." indicator hides, each triggering its own
+  // re-render — clicking immediately risks racing one of those and hitting
+  // a momentarily-detached node.
+  await page.waitForTimeout(500);
   return getErrors;
+}
+
+/** Open the ComponentPicker (right panel) — types like "Text Gauge" only
+ * render once this is open; it starts closed (ObjectExplorer's `pickerOpen`
+ * state defaults to false). */
+async function openComponentPicker(page: Page) {
+  await page.click('button[title="Add component"]');
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -39,7 +51,7 @@ const FREEFORM_TYPES: Array<[string, string]> = [
   ['sprite-arc-gauge-face', 'Sprite Arc Gauge Face'],
   ['graph-bar-gauge',      'Graph Bar Gauge'],
   ['flag-display',         'Flag Display'],
-  ['flag-display-sprite',  'Flag Display Sprite'],
+  ['flag-display-sprite',  'Flag Display (Sprite)'],
   ['button-control',       'Button Control'],
   ['slider-control',       'Slider Control'],
   ['encoder-control',      'Encoder Control'],
@@ -51,6 +63,7 @@ for (const [, label] of FREEFORM_TYPES) {
     const getErrors = await openDesigner(page);
 
     // Select the type in ComponentPicker (right panel)
+    await openComponentPicker(page);
     await page.click(`text=${label}`);
     // Click the freeform add button that appears below the type list
     await page.click(`button:has-text("+ Add ${label}")`);
@@ -84,6 +97,7 @@ for (const label of SPRITE_TYPES) {
     const getErrors = await openDesigner(page);
 
     // Select the sprite type in ComponentPicker to see the sprite list
+    await openComponentPicker(page);
     await page.click(`text=${label}`);
 
     // "Add" button appears next to the mock sprite "test-sprite"
@@ -135,9 +149,20 @@ test('opening ObjectExplorer dashboard properties does not error', async ({ page
 test('adding a node then editing its name field does not error', async ({ page }) => {
   const getErrors = await openDesigner(page);
 
-  // Add a text-gauge so its properties panel opens (addNode calls setSelectedId)
+  // Add a text-gauge (this selects it via addNode's setSelectedId, but the
+  // picker itself stays open — ObjectExplorer's pickerOpen/propertiesOpen
+  // are separate state, only handleNodeClick flips propertiesOpen). Close
+  // the picker and click the new node in the tree to actually open its
+  // properties panel, matching the real user flow.
+  await openComponentPicker(page);
   await page.click('text=Text Gauge');
   await page.click('button:has-text("+ Add Text Gauge")');
+  await page.click('button[title="Close"]');
+  await page.waitForTimeout(200);
+  // New node's default name is its schema label ("Text Gauge"), not its
+  // type slug — see ComponentPicker's addNode: `name: schema.label`. The
+  // picker is closed by now so this only matches the tree row.
+  await page.click('text=Text Gauge');
   await page.waitForTimeout(200);
 
   // The node's properties panel opens with a Name input field; type into it
