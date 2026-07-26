@@ -71,6 +71,7 @@ jobs:
         # keyscan step that wasn't actually landing a usable entry.
         run: |
           mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
           echo "${{ secrets.AUR_SSH_PRIVATE_KEY }}" > ~/.ssh/aur
           chmod 600 ~/.ssh/aur
           cat > ~/.ssh/config <<'EOF'
@@ -79,6 +80,17 @@ jobs:
             User aur
             StrictHostKeyChecking accept-new
           EOF
+          chmod 600 ~/.ssh/config
+
+      # TEMPORARY diagnostic: accept-new should have made the previous
+      # "Host key verification failed" impossible, but it recurred anyway
+      # on a real run with this exact config present — dump the real SSH
+      # handshake instead of guessing at a third fix blind. `ssh -T` to a
+      # git-only AUR account always exits non-zero (no shell access), so
+      # `|| true` just lets us see the verbose output without failing the
+      # step early.
+      - name: Diagnose SSH handshake
+        run: ssh -vvv -o StrictHostKeyChecking=accept-new -i ~/.ssh/aur aur@aur.archlinux.org 2>&1 || true
 
       - name: Push PKGBUILD to the AUR
         run: |
