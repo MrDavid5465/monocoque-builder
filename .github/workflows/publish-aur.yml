@@ -63,15 +63,22 @@ jobs:
         run: su builder -c "cd '$GITHUB_WORKSPACE/typiql-tauri/typiql/pkg/aur' && makepkg --printsrcinfo > .SRCINFO"
 
       - name: Set up SSH for the AUR
+        # ssh-keyscan pre-seeding known_hosts turned out unreliable here
+        # (confirmed by a real run: key present and valid, but git's SSH
+        # transport still reported "Host key verification failed") —
+        # accept-new is the standard low-risk substitute for a scripted CI
+        # connection to one well-known host: it still verifies and pins the
+        # key on first connect within this run, just without the separate
+        # keyscan step that wasn't actually landing a usable entry.
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.AUR_SSH_PRIVATE_KEY }}" > ~/.ssh/aur
           chmod 600 ~/.ssh/aur
-          ssh-keyscan -H aur.archlinux.org >> ~/.ssh/known_hosts
           cat > ~/.ssh/config <<'EOF'
           Host aur.archlinux.org
             IdentityFile ~/.ssh/aur
             User aur
+            StrictHostKeyChecking accept-new
           EOF
 
       - name: Push PKGBUILD to the AUR
