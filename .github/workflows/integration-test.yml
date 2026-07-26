@@ -212,7 +212,22 @@ jobs:
 
           monocoque test &
           monocoque_pid=$!
-          sleep 3
+
+          # First real run of this smoke test ever hit a timing race here:
+          # a fixed 3s sleep wasn't always enough for monocoque to finish
+          # opening/publishing /dev/shm/SIMAPI.DAT before the query ran
+          # ("Failed to open SIMAPI.DAT: No such file or directory"). Poll
+          # for the actual file instead of guessing a fixed delay, and log
+          # whether it's there either way for easier diagnosis if this
+          # still isn't enough.
+          for i in $(seq 1 20); do
+            if [ -e /dev/shm/SIMAPI.DAT ]; then
+              echo "SIMAPI.DAT appeared after $((i * 500))ms"
+              break
+            fi
+            sleep 0.5
+          done
+          ls -la /dev/shm/ || true
 
           snapshot=$(curl -sf http://localhost:9000/typiql/graphql \
             -H "Content-Type: application/json" \
