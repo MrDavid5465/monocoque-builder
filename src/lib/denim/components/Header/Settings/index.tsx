@@ -100,7 +100,13 @@ const Index: React.FC<Props> = ({ isOpen, dismissModal, settings }) => {
   // Local edit state: deviceName → { dash, group }
   const [localDefaults, setLocalDefaults] = useState<Record<string, { dash: string; group: string }>>({});
 
-  const [updateSettings] = useMutation(dispatcher.updateSettings);
+  // refetchQueries is required, not just nice-to-have: `AppSettings` has no
+  // `id` field, so Apollo's normalized cache can't merge this mutation's
+  // response into the separately-cached `my` query on its own — without
+  // this, the theme (and everything else here) only took effect after a
+  // full page reload. Same fix already applied to this same dispatcher's
+  // updateSettings call in ShakerMatrix.tsx.
+  const [updateSettings] = useMutation(dispatcher.updateSettings, { refetchQueries: [{ query: dispatcher.my }] });
   const [addDefault] = useMutation(ADD_DEVICE_DEFAULT);
   const [updateDefault] = useMutation(UPDATE_DEVICE_DEFAULT);
   const [removeDefault] = useMutation(REMOVE_DEVICE_DEFAULT);

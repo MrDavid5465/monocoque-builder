@@ -1,5 +1,7 @@
 import React, { useRef } from 'react';
+import { IconButton, Icon } from '@fluentui/react';
 import { Form } from '../../lib/denim/lib';
+import { getTheme } from '../../lib/denim/lib';
 import { lfeSchema } from './schemas';
 import { LfeChannel } from './lfeQueries';
 
@@ -13,9 +15,13 @@ interface LfeRowProps {
 // Mirrors EffectRow's Form + drag-commit-gating + identity-only-key pattern
 // (see EffectRow.tsx's own doc comments for the full reasoning), but much
 // smaller: LFE has no tyre/lpf/advanced fields of its own, just
-// enabled/mute/fader.
+// enabled/fader in the Form, plus a standalone top-right Mute icon button
+// (see EffectRow.tsx's own mute button for the same rationale — it commits
+// directly via onUpdate rather than through this Form's own commit-diffing).
 export const LfeRow: React.FC<LfeRowProps> = ({ channel, onToggle, onUpdate }) => {
+  const theme = getTheme();
   const enabled = channel !== null;
+  const muted = channel?.muted ?? false;
 
   const dragging = useRef(false);
   const pending = useRef<any>(null);
@@ -57,8 +63,8 @@ export const LfeRow: React.FC<LfeRowProps> = ({ channel, onToggle, onUpdate }) =
       return;
     }
 
-    if (clean.muted !== prev.muted || clean.fader !== prev.fader) {
-      onUpdate({ fader: clean.fader, muted: clean.muted });
+    if (clean.fader !== prev.fader) {
+      onUpdate({ fader: clean.fader });
     }
 
     prevRef.current = clean;
@@ -73,21 +79,29 @@ export const LfeRow: React.FC<LfeRowProps> = ({ channel, onToggle, onUpdate }) =
 
   const initialValues = {
     enabled,
-    muted: channel?.muted ?? false,
     fader: channel?.fader ?? 100,
   };
 
   return (
-    <Form
-      key={identity}
-      form={schema}
-      name="lfe"
-      initialValues={initialValues}
-      onChange={(_name: string, { clean }: any) => {
-        pending.current = clean;
-        if (skipFirst.current) { skipFirst.current = false; prevRef.current = clean; return; }
-        if (!dragging.current) commit(clean);
-      }}
-    />
+    <div style={{ position: 'relative' }}>
+      <Form
+        key={identity}
+        form={schema}
+        name="lfe"
+        initialValues={initialValues}
+        onChange={(_name: string, { clean }: any) => {
+          pending.current = clean;
+          if (skipFirst.current) { skipFirst.current = false; prevRef.current = clean; return; }
+          if (!dragging.current) commit(clean);
+        }}
+      />
+      {enabled && (
+        <div style={{ position: 'absolute', top: 0, right: 0 }}>
+          <IconButton title={muted ? 'Unmute' : 'Mute'} onClick={() => onUpdate({ muted: !muted })}>
+            <Icon iconName={muted ? 'Volume0' : 'Volume3'} style={{ color: muted ? theme.palette.redDark : undefined }} />
+          </IconButton>
+        </div>
+      )}
+    </div>
   );
 };

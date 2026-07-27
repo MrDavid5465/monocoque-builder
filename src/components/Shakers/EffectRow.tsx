@@ -1,9 +1,9 @@
 import React, { useRef } from 'react';
+import { IconButton, Icon } from '@fluentui/react';
 import { Form } from '../../lib/denim/lib';
-import { cornersToConfig, configToCorners } from './shakerUtils';
+import { getTheme } from '../../lib/denim/lib';
 import { dspOffSchema, dspOnSchema } from './schemas';
 import { ShakerDspChannel } from './dspQueries';
-export { cornersToConfig, configToCorners };
 
 export interface ShakerRec {
   id: string;
@@ -65,8 +65,10 @@ interface EffectRowProps {
 const ADVANCED_FIELDS = ['modulation', 'frequency', 'frequencyMax', 'amplitude', 'amplitudeMax'] as const;
 
 export const EffectRow: React.FC<EffectRowProps> = ({ rec, label, onToggle, onUpdate, dspChannel, onDspChange, dspEnabled = false }) => {
+  const theme = getTheme();
   const enabled = rec !== null;
   const showDsp = enabled && !!onDspChange && rec!.dspSlot != null && dspEnabled;
+  const muted = dspChannel?.muted ?? false;
 
   // Shared by every slider in this one Form (volume, fader, LPF Hz, and the
   // four advanced fields) — only ONE can be dragged at a time, so a single
@@ -125,8 +127,8 @@ export const EffectRow: React.FC<EffectRowProps> = ({ rec, label, onToggle, onUp
     if ('fader' in clean) {
       const lpfHzOut = clean.lpfOn ? clean.lpfHz : null;
       const prevLpfHzOut = prev.lpfOn ? prev.lpfHz : null;
-      if (clean.muted !== prev.muted || clean.fader !== prev.fader || lpfHzOut !== prevLpfHzOut) {
-        onDspChange!({ lpfHz: lpfHzOut, fader: clean.fader, muted: clean.muted });
+      if (clean.fader !== prev.fader || lpfHzOut !== prevLpfHzOut) {
+        onDspChange!({ lpfHz: lpfHzOut, fader: clean.fader });
       }
     }
 
@@ -152,7 +154,6 @@ export const EffectRow: React.FC<EffectRowProps> = ({ rec, label, onToggle, onUp
   const initialValues = {
     enabled,
     volume: rec?.volume ?? 100,
-    muted: dspChannel?.muted ?? false,
     fader: dspChannel?.fader ?? 100,
     lpfOn: dspChannel?.lpfHz != null,
     lpfHz: dspChannel?.lpfHz ?? 200,
@@ -164,31 +165,40 @@ export const EffectRow: React.FC<EffectRowProps> = ({ rec, label, onToggle, onUp
   };
 
   return (
-    <Form
-      // Identity-only — deliberately NOT tied to any editable field's
-      // *value* (fader/lpfHz/muted/volume/tyre/...). Remounting on every
-      // value change was the original design (to pick up external updates,
-      // since per-form's Form only reads `initialValues` once at mount —
-      // see useForm.ts), but it back fired: our own commits echo straight
-      // back down as new props, so editing a value immediately remounted
-      // the very Form the user was editing — collapsing any open Section
-      // (its own open/closed state resets on remount) and, worse, racing
-      // against in-flight local state like lpfOnLocal. Row/channel *rows*
-      // being created or swapped (toggling a cell on/off, switching
-      // profiles, loading a different mix) still change `rec?.id`/
-      // `dspChannel?.id`, so a real remount-worthy identity change is still
-      // caught — just not routine edits to a row that already exists.
-      // dspEnabled/showDsp still forces a remount since that swaps the
-      // schema shape entirely (dspOnSchema vs dspOffSchema).
-      key={identity}
-      form={schema}
-      name="effect"
-      initialValues={initialValues}
-      onChange={(_name: string, { clean }: any) => {
-        pending.current = clean;
-        if (skipFirst.current) { skipFirst.current = false; prevRef.current = clean; return; }
-        if (!dragging.current) commit(clean);
-      }}
-    />
+    <div style={{ position: 'relative' }}>
+      <Form
+        // Identity-only — deliberately NOT tied to any editable field's
+        // *value* (fader/lpfHz/volume/tyre/...). Remounting on every value
+        // change was the original design (to pick up external updates,
+        // since per-form's Form only reads `initialValues` once at mount —
+        // see useForm.ts), but it back fired: our own commits echo straight
+        // back down as new props, so editing a value immediately remounted
+        // the very Form the user was editing — collapsing any open Section
+        // (its own open/closed state resets on remount) and, worse, racing
+        // against in-flight local state like lpfOnLocal. Row/channel *rows*
+        // being created or swapped (toggling a cell on/off, switching
+        // profiles, loading a different mix) still change `rec?.id`/
+        // `dspChannel?.id`, so a real remount-worthy identity change is still
+        // caught — just not routine edits to a row that already exists.
+        // dspEnabled/showDsp still forces a remount since that swaps the
+        // schema shape entirely (dspOnSchema vs dspOffSchema).
+        key={identity}
+        form={schema}
+        name="effect"
+        initialValues={initialValues}
+        onChange={(_name: string, { clean }: any) => {
+          pending.current = clean;
+          if (skipFirst.current) { skipFirst.current = false; prevRef.current = clean; return; }
+          if (!dragging.current) commit(clean);
+        }}
+      />
+      {showDsp && (
+        <div style={{ position: 'absolute', top: 0, right: 0 }}>
+          <IconButton title={muted ? 'Unmute' : 'Mute'} onClick={() => onDspChange!({ muted: !muted })}>
+            <Icon iconName={muted ? 'Volume0' : 'Volume3'} style={{ color: muted ? theme.palette.redDark : undefined }} />
+          </IconButton>
+        </div>
+      )}
+    </div>
   );
 };

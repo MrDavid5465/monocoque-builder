@@ -3,13 +3,14 @@ import { Stack, Name, useQuery, useLocation, useNavigate } from './lib';
 import DetailsList from './lib/List';
 
 import Links from './Links';
-import { IDispatcher, DisplaySchema, IComponents } from '../typical-admin';
+import { IDispatcher, ListSchema, IComponents } from '../typical-admin';
 import Subscriber from '../typical-admin/Subscriber';
+import { ColumnVisibilityStore } from './lib/columnVisibilityStore';
 
 interface Props {
   dispatcher: IDispatcher;
   name: Name;
-  schemaDefinition: DisplaySchema<any>;
+  schemaDefinition: ListSchema<any>;
   pageSize?: number;
   components?: IComponents;
   // Overrides the query's result field — defaults to `get${name.plural}`.
@@ -23,6 +24,11 @@ interface Props {
   // Mirrors CardList's same-named prop, e.g. for records keyed by a
   // human-readable name elsewhere in the app.
   idField?: string;
+  // Passed straight through to ./lib/List — see its own doc comments.
+  columnSelectable?: boolean;
+  storageKey?: string;
+  columnVisibilityStore?: ColumnVisibilityStore;
+  alwaysVisibleColumns?: string[];
 }
 
 const List: React.FC<Props> = ({
@@ -34,6 +40,10 @@ const List: React.FC<Props> = ({
   queryResultKey,
   hideHeader,
   idField,
+  columnSelectable,
+  storageKey,
+  columnVisibilityStore,
+  alwaysVisibleColumns,
 }) => {
   const {pathname} =  useLocation();
   const navigate = useNavigate();
@@ -74,11 +84,16 @@ const List: React.FC<Props> = ({
       <DetailsList
         pageSize={pageSize}
         name={name.plural}
-        schema={schemaDefinition}
+        schema={schemaDefinition.columns}
         onSelect={(item) => {
           navigate(`${pathname}/${item[idField ?? 'id']}/show`, item);
         }}
         items={items[queryName] || []}
+        columnSelectable={columnSelectable}
+        storageKey={storageKey}
+        columnVisibilityStore={columnVisibilityStore}
+        alwaysVisibleColumns={alwaysVisibleColumns}
+        onAdd={schemaDefinition.buttons?.add && dispatcher.new ? () => navigate(`${pathname}/new`) : undefined}
       />
       <br />
     </Stack>

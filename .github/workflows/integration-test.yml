@@ -43,9 +43,19 @@ name: Integration test (Arch + monocoque)
 # smoke test's own logic lives in a real script file (not an inline
 # `su -c "..."` string) specifically to avoid nested-quoting the GraphQL
 # JSON payload inside a shell string.
+#
+# The pull_request trigger runs this same full smoke test on every PR
+# against master (in addition to the existing tag-push/dispatch triggers)
+# but it is deliberately NOT a required status check on master's branch
+# protection — only ci.yml's fast frontend/rust jobs are required. This job
+# is slow (build + a disposable Arch container + AUR install + Playwright
+# e2e) and still explicitly experimental (see above); it's signal on the
+# PR, not a merge gate, until it's proven reliable across enough real runs.
 on:
   push:
     tags: ['v*']
+  pull_request:
+    branches: [master]
   workflow_dispatch: {}
 
 jobs:

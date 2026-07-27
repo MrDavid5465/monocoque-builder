@@ -40,12 +40,18 @@ function parseDashBasePan(elements: string | undefined): Pan {
   }
 }
 
-const PAN_SCHEMA = {
-  yaw:   { type: 'slider' as const, label: 'Yaw (°)',      min: -360, max: 360, step: 1 },
-  pitch: { type: 'slider' as const, label: 'Pitch (°)',    min: -85,  max: 85,  step: 1 },
-  fov:   { type: 'slider' as const, label: 'Zoom (FOV °)', min: 5,    max: 120, step: 1 },
-  roll:  { type: 'slider' as const, label: 'Roll (°)',     min: -180, max: 180, step: 1 },
-};
+// The dash picker lives in the same form as the pan sliders (rather than a
+// separate form below) so picking a dashboard and nudging its pan read as
+// one cohesive control, not two disconnected ones — the sliders are simply
+// disabled (not hidden) while dashName is '' (freelook), since there's
+// nothing dashboard-specific to persist in that state.
+const buildDashPanSchema = (dashOptions: Array<{ text: string; value: string }>, disabled: boolean) => ({
+  dashName: { type: 'select' as const, label: 'Dashboard', options: dashOptions },
+  yaw:   { type: 'slider' as const, label: 'Yaw (°)',      min: -360, max: 360, step: 1, disabled },
+  pitch: { type: 'slider' as const, label: 'Pitch (°)',    min: -85,  max: 85,  step: 1, disabled },
+  fov:   { type: 'slider' as const, label: 'Zoom (FOV °)', min: 5,    max: 120, step: 1, disabled },
+  roll:  { type: 'slider' as const, label: 'Roll (°)',     min: -180, max: 180, step: 1, disabled },
+});
 
 // One viewer + slider session for a single (dashboard, override) pairing. Remounted
 // (via the parent's `key`) only when the dashboard selection changes or the override
@@ -54,6 +60,8 @@ const PAN_SCHEMA = {
 const PanSession: React.FC<{
   carId: string;
   dashName: string; // '' = freelook, nothing persisted
+  dashOptions: Array<{ text: string; value: string }>;
+  onDashNameChange: (name: string) => void;
   photoUrl: string;
   nightPhotoUrl?: string;
   isNight: boolean;
@@ -67,8 +75,8 @@ const PanSession: React.FC<{
   hasThumbnail?: boolean;
   onThumbnailChanged?: () => void;
 }> = ({
-  carId, dashName, photoUrl, nightPhotoUrl, isNight, onToggleNightMode, width, height, initialPan, existingId, onPersisted,
-  photoId, hasThumbnail, onThumbnailChanged,
+  carId, dashName, dashOptions, onDashNameChange, photoUrl, nightPhotoUrl, isNight, onToggleNightMode, width, height,
+  initialPan, existingId, onPersisted, photoId, hasThumbnail, onThumbnailChanged,
 }) => {
   const [pan, setPan] = useState<Pan>(initialPan);
   const idRef = useRef(existingId);
@@ -104,6 +112,18 @@ const PanSession: React.FC<{
     const next = { yaw, pitch, fov, roll };
     setPan(next);
     persist(next);
+  };
+
+  // Same multi-field onChange convention as CarDetail's own forms: fires on
+  // ANY field change with the full raw values, so branch by comparing each
+  // tracked field against its current known value rather than the form name.
+  const handleDashPanFormChange = (_n: string, { raw }: any) => {
+    const newDashName = String(raw.dashName ?? '');
+    if (newDashName !== dashName) {
+      onDashNameChange(newDashName);
+      return;
+    }
+    handleChange(Number(raw.yaw ?? 0), Number(raw.pitch ?? 0), Number(raw.fov ?? 90), Number(raw.roll ?? 0));
   };
 
   const fullscreenRef = useRef<HTMLDivElement>(null);
@@ -221,17 +241,13 @@ const PanSession: React.FC<{
           >{isFullscreen ? '⤡' : '⤢'}</button>
         </Stack>
       </div>
-      {dashName && (
-        <Form
-          key="pan-form"
-          form={PAN_SCHEMA}
-          name="carDashPan"
-          initialValues={pan}
-          onChange={(_n: string, { raw }: any) => handleChange(
-            Number(raw.yaw ?? 0), Number(raw.pitch ?? 0), Number(raw.fov ?? 90), Number(raw.roll ?? 0),
-          )}
-        />
-      )}
+      <Form
+        key="dash-pan-form"
+        form={buildDashPanSchema(dashOptions, !dashName)}
+        name="carDashPan"
+        initialValues={{ dashName, ...pan }}
+        onChange={handleDashPanFormChange}
+      />
     </Stack>
   );
 };
@@ -286,14 +302,28 @@ const DashPanEditor: React.FC<Props> = ({ carId, photoId, photoUrl, nightPhotoUr
     setResetCounter(c => c + 1);
   };
 
+  const dashOptions = [
+    { text: '— look around freely —', value: '' },
+    ...dash360s.map(d => ({ text: d.name, value: d.name })),
+  ];
+
   return (
-    <Stack tokens={{ childrenGap: 8 }} style={{ marginTop: '1.5em' }}>
-      <Stack tokens={{ childrenGap: 4 }}>
-        <span style={{ fontWeight: 600, fontSize: '0.95em' }}>Per-Dashboard Pan</span>
-        <span style={{ fontSize: '0.82em', opacity: 0.6 }}>
-          The same dashboard can be reused across cars whose photos don't line up identically.
-          Pick a dashboard to nudge this car's pan; leave it unselected to just look around.
-        </span>
+    <Stack tokens={{ childrenGap: 8 }}>
+      <Stack horizontal horizontalAlign="space-between" verticalAlign="start">
+        <Stack tokens={{ childrenGap: 4 }}>
+          <span style={{ fontWeight: 600, fontSize: '0.95em' }}>Per-Dashboard Pan</span>
+          <span style={{ fontSize: '0.82em', opacity: 0.6 }}>
+            The same dashboard can be reused across cars whose photos don't line up identically.
+            Pick a dashboard to nudge this car's pan; leave it unselected to just look around.
+          </span>
+        </Stack>
+        {selectedDashName && override && (
+          <IconButton
+            iconProps={{ iconName: 'Delete' }}
+            title="Reset to dashboard default"
+            onClick={handleReset}
+          />
+        )}
       </Stack>
 
       <div ref={containerRef} style={{ width: '100%' }}>
@@ -302,6 +332,8 @@ const DashPanEditor: React.FC<Props> = ({ carId, photoId, photoUrl, nightPhotoUr
             key={`${selectedDashName}-${resetCounter}`}
             carId={carId}
             dashName={selectedDashName}
+            dashOptions={dashOptions}
+            onDashNameChange={setSelectedDashName}
             photoUrl={photoUrl}
             nightPhotoUrl={nightPhotoUrl}
             isNight={isNight}
@@ -325,34 +357,6 @@ const DashPanEditor: React.FC<Props> = ({ carId, photoId, photoUrl, nightPhotoUr
           </Stack>
         )}
       </div>
-
-      <Stack horizontal verticalAlign="end" tokens={{ childrenGap: 8 }}>
-        <Stack style={{ flex: 1 }}>
-          <Form
-            key="dash-picker"
-            form={{
-              dashName: {
-                type: 'select' as const,
-                label: 'Dashboard',
-                options: [
-                  { text: '— look around freely —', value: '' },
-                  ...dash360s.map(d => ({ text: d.name, value: d.name })),
-                ],
-              },
-            }}
-            name="dashPicker"
-            initialValues={{ dashName: selectedDashName }}
-            onChange={(_n: string, { raw }: any) => setSelectedDashName(String(raw.dashName ?? ''))}
-          />
-        </Stack>
-        {selectedDashName && override && (
-          <IconButton
-            iconProps={{ iconName: 'Delete' }}
-            title="Reset to dashboard default"
-            onClick={handleReset}
-          />
-        )}
-      </Stack>
     </Stack>
   );
 };

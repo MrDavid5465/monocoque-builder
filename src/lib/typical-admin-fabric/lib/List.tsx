@@ -4,11 +4,13 @@ import {
   getStyle,
   Stack,
   IndexableObject,
-  IconButton,
-  Icon,
   DetailsList,
   SelectionMode,
+  IconButton,
+  Icon,
 } from '.';
+import ListControls, { ListButtonConfig } from './ListControls';
+import { ColumnVisibilityStore, localStorageColumnVisibilityStore } from './columnVisibilityStore';
 import { IColumn, CheckboxVisibility } from '@fluentui/react';
 import { matchSorter } from 'match-sorter';
 // import { CSVLink } from 'react-csv';
@@ -21,21 +23,61 @@ interface Props {
   name: string;
   csvHeaders?: Array<{ label: string; key: string }>;
   pageSize?: number;
+  // Opts in to a "Columns" picker (checkbox Form, one checkbox per schema
+  // key) letting the user hide/show columns — off by default so every
+  // existing caller renders exactly as before.
+  columnSelectable?: boolean;
+  // Namespace for the saved hidden-column set; only read/used when
+  // columnSelectable is true. Falls back to `name`, but callers should pass
+  // an explicit key since `name` isn't guaranteed unique across every List
+  // instance in the app.
+  storageKey?: string;
+  // Where the hidden-column set is persisted — defaults to localStorage.
+  // Swap in a different implementation (e.g. a backend-backed one) without
+  // touching any of the selection/filtering logic below.
+  columnVisibilityStore?: ColumnVisibilityStore;
+  // Schema keys that can never be hidden (e.g. an identity column).
+  alwaysVisibleColumns?: string[];
+  // Renders a grid-level "Add" control (see ListControls) when provided —
+  // undefined means the caller's schema didn't opt in (ListSchema.buttons.add),
+  // so nothing renders. The wrapper List.tsx computes this from dispatcher.new
+  // + navigate; this component just renders whatever it's handed.
+  onAdd?: () => void;
+  // Arbitrary grid-level actions beyond add/columns (see ListControls).
+  customButtons?: ListButtonConfig[];
 }
 
 const List: React.FC<Props> = ({
   items,
   schema,
   onSelect,
-  name: _name,
+  name,
   csvHeaders: _csvHeaders,
   pageSize,
+  columnSelectable,
+  storageKey,
+  columnVisibilityStore = localStorageColumnVisibilityStore,
+  alwaysVisibleColumns,
+  onAdd,
+  customButtons,
 }) => {
   const [filters, setFilters] = useState<IndexableObject>({});
   const [sort, setSort] = useState<IndexableObject>({});
   let filteredItems = items;
   const style = getStyle();
   const [page, setPage] = useState(0);
+
+  const resolvedStorageKey = storageKey ?? name;
+  const [hiddenColumns, setHiddenColumns] = useState<Set<string>>(
+    () => (columnSelectable ? columnVisibilityStore.readHidden(resolvedStorageKey) : new Set())
+  );
+  const pickableKeys = Object.keys(schema).filter(k => !(alwaysVisibleColumns ?? []).includes(k));
+  const visibleCount = pickableKeys.filter(k => !hiddenColumns.has(k)).length + (alwaysVisibleColumns?.length ?? 0);
+  const totalCount = Object.keys(schema).length;
+  const columnSelectSchema = pickableKeys.reduce((acc, k) => {
+    acc[k] = { type: 'checkbox', label: (schema as any)[k].label };
+    return acc;
+  }, {} as Record<string, any>);
   function handleSelect(item?: any) {
     onSelect && onSelect(item);
   }
@@ -177,43 +219,61 @@ const List: React.FC<Props> = ({
           </Stack>
         )} */}
 
-        <DetailsList
-          onActiveItemChanged={handleSelect}
-          onRenderRow={(props: any, defaultRender: any) => {
-            return handleSelect !== null && handleSelect !== undefined ? (
-              <div style={{ cursor: 'pointer' }}>{defaultRender(props)}</div>
-            ) : (
-              defaultRender(props)
-            );
-          }}
-          items={
-            pageSize
-              ? filteredItems.slice(page * pageSize, (page + 1) * pageSize)
-              : filteredItems
-          }
-          checkboxVisibility={CheckboxVisibility.hidden}
-          selectionMode={
-            !handleSelect ? SelectionMode.none : SelectionMode.single
-          }
-          columns={Object.entries(schema).map(([k, v]: any) => {
-            const col: IColumn = {
-              key: k,
-              name: v.label,
-              minWidth: 100,
-              maxWidth: 200,
-              isMultiline: true,
-              isResizable: true,
-              isFiltered: filters[k] !== '' && filters[k] !== undefined,
-              onColumnClick: handleSort,
-              isSorted: sort[k] && sort[k] !== '',
-              isSortedDescending: sort[k] && sort[k] === 'des',
-            };
+        <div style={{ position: 'relative', paddingTop: (columnSelectable || onAdd || customButtons?.length) ? 36 : 0 }}>
+          <ListControls
+            columnSelectable={columnSelectable}
+            visibleCount={visibleCount}
+            totalCount={totalCount}
+            columnSelectSchema={columnSelectSchema}
+            initialValues={Object.fromEntries(pickableKeys.map(k => [k, !hiddenColumns.has(k)]))}
+            pickableKeys={pickableKeys}
+            onColumnsChange={(nextHidden) => {
+              setHiddenColumns(nextHidden);
+              columnVisibilityStore.writeHidden(resolvedStorageKey, nextHidden);
+            }}
+            onAdd={onAdd}
+            customButtons={customButtons}
+          />
+          <DetailsList
+            onActiveItemChanged={handleSelect}
+            onRenderRow={(props: any, defaultRender: any) => {
+              return handleSelect !== null && handleSelect !== undefined ? (
+                <div style={{ cursor: 'pointer' }}>{defaultRender(props)}</div>
+              ) : (
+                defaultRender(props)
+              );
+            }}
+            items={
+              pageSize
+                ? filteredItems.slice(page * pageSize, (page + 1) * pageSize)
+                : filteredItems
+            }
+            checkboxVisibility={CheckboxVisibility.hidden}
+            selectionMode={
+              !handleSelect ? SelectionMode.none : SelectionMode.single
+            }
+            columns={Object.entries(schema)
+              .filter(([k]) => !columnSelectable || (alwaysVisibleColumns ?? []).includes(k) || !hiddenColumns.has(k))
+              .map(([k, v]: any) => {
+                const col: IColumn = {
+                  key: k,
+                  name: v.label,
+                  minWidth: v.options?.minWidth ?? 100,
+                  maxWidth: v.options?.maxWidth ?? 200,
+                  isMultiline: true,
+                  isResizable: true,
+                  isFiltered: filters[k] !== '' && filters[k] !== undefined,
+                  onColumnClick: handleSort,
+                  isSorted: sort[k] && sort[k] !== '',
+                  isSortedDescending: sort[k] && sort[k] === 'des',
+                };
 
-            col.onRender = (values) =>
-              v.onRender ? v.onRender({ values, value: values[k] }) : values[k];
-            return col;
-          })}
-        />
+                col.onRender = (values) =>
+                  v.onRender ? v.onRender({ values, value: values[k] }) : values[k];
+                return col;
+              })}
+          />
+        </div>
         {pageSize && (
           <Stack horizontal horizontalAlign={'end'} verticalAlign={'center'}>
             <IconButton disabled={page === 0} onClick={() => setPage(page - 1)}>

@@ -43,8 +43,12 @@ const ThumbnailCard: React.FC<ThumbnailCardProps> = ({
     <Stack
       style={{
         width,
-        borderRadius: 8,
         overflow: 'hidden',
+        // Same accent-line + shadow signature as FormCard, its sibling in
+        // this folder — square corners to match, not rounded.
+        borderTop: `0.25em solid ${theme.palette.themePrimary}`,
+        boxShadow:
+          'rgba(0, 0, 0, 0.133) 0em 0.22em 0.3em 0em, rgba(0, 0, 0, 0.11) 0em 0.05em 0.10em 0em',
       }}
     >
       <Stack

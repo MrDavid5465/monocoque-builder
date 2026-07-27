@@ -3,7 +3,8 @@ import { Stack, IconButton, getTheme } from './lib';
 import List from './List';
 import CardList from './CardList';
 import Links from './Links';
-import { IDispatcher, DisplaySchema, IComponents, Name } from '../typical-admin';
+import { IDispatcher, ListSchema, IComponents, Name } from '../typical-admin';
+import { ColumnVisibilityStore } from './lib/columnVisibilityStore';
 
 type ViewMode = 'list' | 'card';
 
@@ -21,7 +22,7 @@ function readStoredView(name: Name, fallback: ViewMode): ViewMode {
 interface Props {
   dispatcher: IDispatcher;
   name: Name;
-  schemaDefinition: DisplaySchema<any>;
+  schemaDefinition: ListSchema<any>;
   components?: IComponents;
   pageSize?: number;
   queryResultKey?: string;
@@ -32,6 +33,13 @@ interface Props {
   cardWidth?: number;
   thumbnailHeight?: number;
   defaultView?: ViewMode;
+  // List-view-only — forwarded straight through to lib/List, see its own
+  // doc comments. Card view has no notion of columns, so these are simply
+  // unused there.
+  columnSelectable?: boolean;
+  storageKey?: string;
+  columnVisibilityStore?: ColumnVisibilityStore;
+  alwaysVisibleColumns?: string[];
 }
 
 // Drop-in for ReactiveAdmin's `list` slot (same contract as List.tsx/CardList.tsx)
@@ -53,6 +61,10 @@ const SwitchableList: React.FC<Props> = ({
   cardWidth,
   thumbnailHeight,
   defaultView = 'list',
+  columnSelectable,
+  storageKey,
+  columnVisibilityStore,
+  alwaysVisibleColumns,
 }) => {
   const theme = getTheme();
   const [view, setView] = useState<ViewMode>(() => readStoredView(name, defaultView));
@@ -91,7 +103,7 @@ const SwitchableList: React.FC<Props> = ({
         <CardList
           dispatcher={dispatcher}
           name={name}
-          schemaDefinition={schemaDefinition}
+          schemaDefinition={schemaDefinition.columns}
           components={components}
           pageSize={pageSize}
           queryResultKey={queryResultKey}
@@ -112,6 +124,10 @@ const SwitchableList: React.FC<Props> = ({
           queryResultKey={queryResultKey}
           idField={idField}
           hideHeader
+          columnSelectable={columnSelectable}
+          storageKey={storageKey}
+          columnVisibilityStore={columnVisibilityStore}
+          alwaysVisibleColumns={alwaysVisibleColumns}
         />
       )}
     </Stack>

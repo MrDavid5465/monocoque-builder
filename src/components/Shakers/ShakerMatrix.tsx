@@ -1,13 +1,13 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { useQuery, useMutation, useSubscription } from '@apollo/client/react';
-import { Checkbox, Dropdown, IDropdownOption, TextField } from '@fluentui/react';
-import { getTheme } from '../../lib/denim/lib';
+import { PrimaryButton } from '@fluentui/react';
+import { getTheme, Form, FormCard } from '../../lib/denim/lib';
 import settingsDispatcher from '../../lib/denim/lib/queries';
 import { confirmAsync } from '../../lib/denim/components/ConfirmDialog';
 import { GET_ITEMS, UPDATE_ITEM, CREATE_ITEM, REMOVE_ITEM, ITEM_CHANGED } from './queries';
-import { EffectRow, EFFECTS, EFFECT_LABELS, TYRE_EFFECTS, TYRE_SHORT, ShakerRec } from './EffectRow';
+import { EffectRow, EFFECTS, EFFECT_LABELS, TYRE_EFFECTS, ShakerRec } from './EffectRow';
 import { LfeRow } from './LfeRow';
-import TyreGrid from './TyreGrid';
+import ChannelHeader from './ChannelHeader';
 import {
   GET_AUDIO_SINKS, ENABLE_SHAKER_DSP, DISABLE_SHAKER_DSP,
   WRITE_MONOCOQUE_CONFIG, RELOAD_MONOCOQUE, APPLY_DSP_CHANNEL_LIVE,
@@ -22,6 +22,9 @@ import {
   GET_SHAKER_CHANNELS, ADD_SHAKER_CHANNEL, UPDATE_SHAKER_CHANNEL, REMOVE_SHAKER_CHANNEL,
   SHAKER_CHANNEL_CHANGED, ShakerChannel,
 } from './channelQueries';
+import { ADD_PROFILE, GET_PROFILES, SoundDeviceProfile } from './Profiles/queries';
+import DetailsGrid from '../../lib/typical-admin-fabric/lib/List';
+import { DisplaySchema } from '../../lib/typical-admin';
 
 const TYRE_ORDER = ['FrontLeft', 'FrontRight', 'RearLeft', 'RearRight', 'Front', 'Rear', 'Left', 'Right', 'All'];
 
@@ -118,12 +121,6 @@ export function toInput(r: ShakerRec, override: Partial<ShakerRec> = {}) {
   };
 }
 
-const btnStyle = (primary: boolean, theme: ReturnType<typeof getTheme>): React.CSSProperties => ({
-  padding: '6px 14px', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: '0.875em',
-  background: primary ? theme.palette.themePrimary : theme.palette.neutralLight,
-  color: primary ? '#fff' : theme.palette.neutralPrimary,
-});
-
 const ShakerMatrix: React.FC<{ profileId?: string | null }> = ({ profileId = null }) => {
   const theme = getTheme();
   const [exportStatus, setExportStatus] = React.useState<string | null>(null);
@@ -181,10 +178,20 @@ const ShakerMatrix: React.FC<{ profileId?: string | null }> = ({ profileId = nul
 
   const dspEnabled: boolean = (myData as any)?.my?.settings?.shakerDspEnabled ?? false;
   const audioSinks: AudioSinkInfo[] = (sinksData as any)?.getAudioSinks ?? [];
-  const sinkOptions: IDropdownOption[] = [
-    { key: '', text: '— Select output device —' },
-    ...audioSinks.map(s => ({ key: s.name, text: `${s.description} (${s.channels}ch)` })),
+  // {text, value} shape for Fabric.tsx's 'select' field type — see
+  // ChannelHeader.tsx's device options for the same pattern.
+  const sinkSelectOptions = [
+    { text: '— Select output device —', value: '' },
+    ...audioSinks.map(s => ({ text: `${s.description} (${s.channels}ch)`, value: s.name })),
   ];
+
+  // Bumped whenever a confirmAsync toggle is cancelled — dspEnabled itself
+  // doesn't change in that case, but the DSP-mode Form's internal checkbox
+  // state already flipped optimistically the instant the user clicked (Form
+  // is uncontrolled after mount, unlike the plain Fluent Checkbox this used
+  // to be), so the key needs a nudge to force a remount back to the real
+  // value. See the Form's own key prop below.
+  const [dspFormNonce, setDspFormNonce] = React.useState(0);
 
   const handleToggleDsp = async (checked: boolean) => {
     if (checked) {
@@ -192,7 +199,7 @@ const ShakerMatrix: React.FC<{ profileId?: string | null }> = ({ profileId = nul
         'Enabling DSP will route every active shaker channel through the DSP sink. Continue?',
         { danger: true, confirmText: 'Enable DSP' },
       );
-      if (!ok) return;
+      if (!ok) { setDspFormNonce(n => n + 1); return; }
       setDspStatus('Enabling…');
       try {
         await enableDsp();
@@ -205,7 +212,7 @@ const ShakerMatrix: React.FC<{ profileId?: string | null }> = ({ profileId = nul
         'Disable DSP and return to Monocoque\'s own direct output?',
         { confirmText: 'Disable DSP' },
       );
-      if (!ok) return;
+      if (!ok) { setDspFormNonce(n => n + 1); return; }
       setDspStatus('Disabling…');
       try {
         await disableDsp();
@@ -287,6 +294,17 @@ const ShakerMatrix: React.FC<{ profileId?: string | null }> = ({ profileId = nul
       }
     }
   };
+
+  // Diffing refs for the LFE settings Form below — same immediate-commit,
+  // diff-against-previous-snapshot shape as ChannelHeader.tsx (no drag
+  // gating needed, these are a select/checkbox/slider, not continuous
+  // drags). `lpfHz` is always present in the schema alongside `lpfOn` (never
+  // conditionally included based on lpfOn's own value) for the same reason
+  // documented on dspOnSchema in schemas.ts — only the *effective* value
+  // sent to the backend (null while lpfOn is off) is conditional, not the
+  // field's existence.
+  const lfeSettingsPrevRef = useRef<any>(null);
+  const lfeSettingsSkipFirst = useRef(true);
 
   const { data: lfeChannelsData } = useQuery(GET_LFE_CHANNELS);
   useSubscription(LFE_CHANNEL_CHANGED);
@@ -456,18 +474,254 @@ const ShakerMatrix: React.FC<{ profileId?: string | null }> = ({ profileId = nul
     }
   };
 
-  const border = `1px solid ${theme.palette.neutralTertiaryAlt}`;
+  // ── Grid schema — rows = channels, columns = controls, rendered via the
+  // shared list component (src/lib/typical-admin-fabric/lib/List.tsx)
+  // instead of a hand-rolled <table>, so this follows the same styling and
+  // column-selection mechanism as every other admin list view. `channel`
+  // bundles everything the old per-column <th> header used to show
+  // (device/pan/position/remove); one column per EFFECTS entry renders the
+  // exact same <EffectRow> cell content as before, just relocated from a
+  // <td> into a schema onRender; `lfe` likewise wraps <LfeRow> unchanged.
+  // Synthetic column keys (channel/engine/.../lfe) aren't real ShakerChannel
+  // fields, so this is typed DisplaySchema<any> — matching how List.tsx's
+  // own `schema` prop already accepts it — not DisplaySchema<ShakerChannel>.
+  const matrixSchema: DisplaySchema<any> = {
+    channel: {
+      label: 'Channel',
+      options: { minWidth: 220, maxWidth: 260 },
+      onRender: ({ values }) => {
+        const ch: ShakerChannel = values;
+        return (
+          <ChannelHeader
+            channel={ch}
+            audioSinks={audioSinks}
+            onDevidChange={devid => handleChannelDevidChange(ch, devid)}
+            onPanChange={pan => handleChannelPanChange(ch, pan)}
+            onPositionChange={pos => handleChannelPositionChange(ch, pos)}
+            onRemove={() => handleRemoveChannel(ch)}
+          />
+        );
+      },
+    },
+    ...EFFECTS.reduce((acc, eff) => {
+      acc[eff] = {
+        label: EFFECT_LABELS[eff],
+        options: { minWidth: 200, maxWidth: 320 },
+        onRender: ({ values }) => {
+          const ch: ShakerChannel = values;
+          const rec = matrix[eff]?.[ch.id] ?? null;
+          return (
+            <EffectRow
+              rec={rec}
+              onToggle={() => handleToggle(eff, ch, rec)}
+              onUpdate={override => rec && handleUpdate(rec, override)}
+              dspChannel={rec?.dspSlot != null ? dspChannelsBySlot.get(rec.dspSlot) ?? null : null}
+              onDspChange={override => rec?.dspSlot != null && handleDspChannelChange(rec.dspSlot, override)}
+              dspEnabled={dspEnabled}
+            />
+          );
+        },
+      };
+      return acc;
+    }, {} as DisplaySchema<any>),
+    lfe: {
+      label: 'LFE',
+      options: { minWidth: 200, maxWidth: 320 },
+      onRender: ({ values }) => {
+        const ch: ShakerChannel = values;
+        const lfeChannel = lfeChannelsByChannelId.get(ch.id) ?? null;
+        return (
+          <LfeRow
+            channel={lfeChannel}
+            onToggle={() => handleLfeToggle(ch, lfeChannel)}
+            onUpdate={override => lfeChannel && handleLfeUpdate(lfeChannel, override)}
+          />
+        );
+      },
+    },
+  };
 
-  const cellStyle: React.CSSProperties = {
-    padding: '10px 12px', border, verticalAlign: 'top',
+  // ── Profile save/load card — a plain FormCard (see FormCard.tsx's own doc
+  // comment) holding a Form + a Save button, not a separately-named
+  // component: giving this composition its own "-Card" name would imply a
+  // distinct visual variant needing its own styling upkeep, which it isn't
+  // (see the hand-rolled-components skill). A profile is a saved snapshot
+  // of the live shaker configuration — the idea is fine-tuning per car (see
+  // SoundDeviceProfile.carId's backend doc comment; the car-side of that
+  // link is wired from the Car configuration page, not here). One combobox
+  // does double duty: picking an existing profile loads it into the live
+  // scope immediately, and it's also the upsert target for Save — typing a
+  // name that matches an existing profile overwrites it, typing one that
+  // doesn't creates a new profile. Reuses this component's own
+  // records/shakerChannels/addRec/removeRec/addShakerChannel/
+  // removeShakerChannel (already scoped to profileId === null here, since
+  // this card only renders in that branch below) rather than re-querying —
+  // this used to be a separate ProfileCard component with its own
+  // duplicate hooks before that consolidation.
+  const [activeProfileId, setActiveProfileId] = useState<string | null>(() => {
+    try { return JSON.parse(localStorage.getItem('shaker_active_profile') ?? 'null')?.id ?? null; }
+    catch { return null; }
+  });
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileStatus, setProfileStatus] = useState<string | null>(null);
+  // Current combobox value — Save acts on this (not activeProfileId), so a
+  // freshly-typed, not-yet-saved name is still saveable.
+  const [profileTypedName, setProfileTypedName] = useState('');
+  const profileSkipFirst = useRef(true);
+  const profilePrevRef = useRef('');
+
+  // Deliberately no useSubscription(PROFILE_CHANGED) here — this page
+  // already holds several long-lived subscriptions (ITEM_CHANGED,
+  // SHAKER_CHANNEL_CHANGED, DSP_CHANNEL_CHANGED, LFE_CHANNEL_CHANGED, plus
+  // global ones elsewhere), and the browser's per-origin HTTP/1.1
+  // connection limit (6) means one more can silently starve out every
+  // other request on the page, including this card's own mutations.
+  // refetchQueries on each mutation below keeps the list fresh without one.
+  const { data: profilesData } = useQuery(GET_PROFILES);
+  const [addProfile] = useMutation(ADD_PROFILE, { refetchQueries: [{ query: GET_PROFILES }] });
+
+  const profiles: SoundDeviceProfile[] = (profilesData as any)?.getSoundDeviceProfiles ?? [];
+  const activeProfile = profiles.find(p => p.id === activeProfileId) ?? null;
+
+  // Clones the current live scope's channels + effect rows into `profileId`,
+  // replacing whatever that profile currently holds. Channels must be cloned
+  // first, with their new ids captured — effect rows reference their channel
+  // by id (channelId), not by pan (no longer globally unique — see
+  // ShakerChannel.pan's backend doc comment), so there's no way to
+  // re-derive the mapping after the fact. Sequential (not Promise.all) since
+  // each add's result is needed before the next step can use it.
+  const cloneLiveInto = async (profileId: string) => {
+    const existingDevices = allRecords.filter(r => r.profileId === profileId);
+    await Promise.all(existingDevices.map(r => removeRec({ variables: { id: r.id } })));
+    const existingChannels = allShakerChannels.filter(c => c.profileId === profileId);
+    await Promise.all(existingChannels.map(c => removeShakerChannel({ variables: { id: c.id } })));
+
+    const channelIdMap = new Map<string, string>();
+    for (const c of shakerChannels) {
+      const result = await addShakerChannel({
+        variables: {
+          values: { pan: c.pan, devid: c.devid, channels: c.channels, position: c.position ?? null, profileId },
+        },
+      });
+      const newId = (result.data as any)?.addShakerChannel?.id;
+      if (newId) channelIdMap.set(c.id, newId);
+    }
+
+    await Promise.all(records.map(r => {
+      const newChannelId = channelIdMap.get(r.channelId);
+      if (!newChannelId) return Promise.resolve();
+      return addRec({
+        variables: {
+          values: {
+            device: r.device, effect: r.effect, channelId: newChannelId, volume: r.volume,
+            modulation: r.modulation, frequency: r.frequency ?? null,
+            frequencyMax: r.frequencyMax ?? null, amplitude: r.amplitude ?? null,
+            amplitudeMax: r.amplitudeMax ?? null, profileId,
+          },
+        },
+      });
+    }));
+  };
+
+  // Inverse direction — clones `profile`'s channels + effect rows into the
+  // live scope, replacing whatever's currently live. Same shape as
+  // ProfilesList.tsx's own handleLoad (its "Load" button does the same
+  // thing); kept separate rather than shared since each call site already
+  // scopes its own queries/mutations, matching this file's prior convention.
+  const cloneIntoLive = async (profile: SoundDeviceProfile) => {
+    const profileDevices = allRecords.filter(r => r.profileId === profile.id);
+    const profileChannels = allShakerChannels.filter(c => c.profileId === profile.id);
+    if (profileChannels.length === 0) return; // nothing saved for this profile yet
+
+    await Promise.all(records.map(r => removeRec({ variables: { id: r.id } })));
+    await Promise.all(shakerChannels.map(c => removeShakerChannel({ variables: { id: c.id } })));
+
+    const channelIdMap = new Map<string, string>();
+    for (const c of profileChannels) {
+      const result = await addShakerChannel({
+        variables: {
+          values: { pan: c.pan, devid: c.devid, channels: c.channels, position: c.position ?? null, profileId: null },
+        },
+      });
+      const newId = (result.data as any)?.addShakerChannel?.id;
+      if (newId) channelIdMap.set(c.id, newId);
+    }
+
+    await Promise.all(profileDevices.map(r => {
+      const newChannelId = channelIdMap.get(r.channelId);
+      if (!newChannelId) return Promise.resolve();
+      return addRec({
+        variables: {
+          values: {
+            device: r.device, effect: r.effect, channelId: newChannelId, volume: r.volume,
+            modulation: r.modulation, frequency: r.frequency ?? null,
+            frequencyMax: r.frequencyMax ?? null, amplitude: r.amplitude ?? null,
+            amplitudeMax: r.amplitudeMax ?? null, profileId: null,
+          },
+        },
+      });
+    }));
+  };
+
+  const setActiveProfile = (profile: SoundDeviceProfile) => {
+    localStorage.setItem('shaker_active_profile', JSON.stringify({ id: profile.id, name: profile.name }));
+    setActiveProfileId(profile.id);
+  };
+
+  const profileSchema = {
+    profile: {
+      type: 'combobox' as const,
+      label: 'Profile',
+      placeholder: 'Type or select a profile…',
+      options: profiles.map(p => ({ text: p.name, value: p.name })),
+    },
+  };
+
+  const handleProfileSave = async () => {
+    const name = profileTypedName.trim();
+    if (!name) return;
+    setProfileSaving(true);
+    setProfileStatus(null);
+    try {
+      const found = profiles.find(p => p.name === name);
+      if (found) {
+        await cloneLiveInto(found.id);
+        setActiveProfile(found);
+        setProfileStatus(`Saved "${name}".`);
+      } else {
+        const result = await addProfile({ variables: { values: { name } } });
+        const newId = (result.data as any)?.addSoundDeviceProfile?.id;
+        if (newId) {
+          await cloneLiveInto(newId);
+          setActiveProfile({ id: newId, name });
+          setProfileStatus(`Saved new profile "${name}".`);
+        }
+      }
+    } finally {
+      setProfileSaving(false);
+    }
+  };
+
+  // ── Settings cards (DSP mode / LFE) — AppSettings-backed, profileId-
+  // agnostic, so only shown for the live (profileId === null) scope. Each is
+  // its own Form now instead of hand-wired Fluent controls, wrapped in
+  // FormCard (ported from the original davidallanscott.ca app's ServerCard —
+  // see FormCard.tsx's own doc comment) instead of a one-off styled div.
+  const cardStyle: React.CSSProperties = { flex: '1 1 320px', minWidth: 280 };
+
+  const dspSchema = {
+    enabled: { type: 'checkbox', label: 'DSP mode (LPF + fader via PipeWire)' },
+  };
+
+  const lfeSettingsSchema = {
+    sourceDevice: { type: 'select', label: 'LFE source device (monitored, requires DSP mode)', options: sinkSelectOptions },
+    lpfOn: { type: 'checkbox', label: 'LFE LPF' },
+    lpfHz: { type: 'slider', label: 'LFE LPF Hz', min: 20, max: 2000, step: 10 },
   };
 
   return (
     <div style={{ padding: 16, overflowX: 'auto', color: theme.palette.neutralPrimary }}>
       <div style={{ display: 'flex', gap: 8, marginBottom: 16, alignItems: 'center' }}>
-        <button style={btnStyle(true, theme)} onClick={handleAddChannel}>Add Channel</button>
-        <button style={btnStyle(true, theme)} onClick={handleExport}>Export to Config</button>
-        <button style={btnStyle(false, theme)} onClick={handleRestart}>Restart Monocoque</button>
         {exportStatus && <span style={{ fontSize: '0.8em', opacity: 0.6 }}>{exportStatus}</span>}
         <span style={{ marginLeft: 'auto', fontSize: '0.75em', opacity: 0.4 }}>
           Changes persist to TyPiQL immediately. Export writes the .config file.
@@ -475,143 +729,104 @@ const ShakerMatrix: React.FC<{ profileId?: string | null }> = ({ profileId = nul
       </div>
 
       {profileId === null && (
-        <div style={{
-          display: 'flex', gap: 16, alignItems: 'flex-end', flexWrap: 'wrap',
-          marginBottom: 16, padding: '10px 14px', borderRadius: 4,
-          background: theme.palette.neutralLighterAlt,
-          border: `1px solid ${theme.palette.neutralTertiaryAlt}`,
-        }}>
-          <Checkbox
-            label="DSP mode (LPF + fader via PipeWire)"
-            checked={dspEnabled}
-            onChange={(_, checked) => handleToggleDsp(!!checked)}
-          />
-          <span style={{ fontSize: '0.75em', opacity: 0.5 }}>
-            One filter-chain per device in use — set via each channel's own device picker below.
-          </span>
-          {dspStatus && <span style={{ fontSize: '0.8em', opacity: 0.6 }}>{dspStatus}</span>}
-        </div>
-      )}
+        <div style={{ display: 'flex', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
+          <FormCard style={cardStyle}>
+            <Form
+              // Remounts when the active profile identity changes (a real
+              // reset — switching which profile the combobox reflects), not
+              // on every keystroke — see the per-form Form-remount
+              // convention used throughout this app (EffectRow.tsx's own
+              // `key` doc comment).
+              key={activeProfile?.id ?? 'none'}
+              form={profileSchema}
+              name="profileSelect"
+              initialValues={{ profile: activeProfile?.name ?? '' }}
+              onChange={(_: string, { clean }: any) => {
+                const val = clean.profile ?? '';
+                setProfileTypedName(val);
+                if (profileSkipFirst.current) { profileSkipFirst.current = false; profilePrevRef.current = val; return; }
+                if (val === profilePrevRef.current) return;
+                profilePrevRef.current = val;
 
-      {profileId === null && (
-        <div style={{
-          display: 'flex', gap: 16, alignItems: 'flex-end', flexWrap: 'wrap',
-          marginBottom: 16, padding: '10px 14px', borderRadius: 4,
-          background: theme.palette.neutralLighterAlt,
-          border: `1px solid ${theme.palette.neutralTertiaryAlt}`,
-        }}>
-          <Dropdown
-            label="LFE source device (monitored, requires DSP mode)"
-            selectedKey={lfeSourceDevice}
-            options={sinkOptions}
-            onChange={(_, opt) => handleLfeSourceChange((opt?.key as string) ?? '')}
-            styles={{ root: { minWidth: 260 } }}
-          />
-          <Checkbox
-            label="LFE LPF"
-            checked={lfeLpfHz != null}
-            onChange={(_, checked) => handleLfeLpfChange(checked ? lastLfeLpfHz : null)}
-          />
-          {lfeLpfHz != null && (
-            <TextField
-              label="LFE LPF Hz"
-              type="number"
-              value={String(lfeLpfHz)}
-              onChange={(_, v) => {
-                const n = Number(v);
-                if (!Number.isNaN(n)) handleLfeLpfChange(n);
+                const found = profiles.find(p => p.name === val);
+                if (found && found.id !== activeProfileId) {
+                  cloneIntoLive(found).then(() => setActiveProfile(found));
+                }
               }}
-              styles={{ root: { width: 100 } }}
             />
-          )}
+            <PrimaryButton
+              text={profileSaving ? 'Saving…' : 'Save'}
+              onClick={handleProfileSave}
+              disabled={!profileTypedName.trim() || profileSaving}
+            />
+            {profileStatus && <div style={{ fontSize: '0.8em', opacity: 0.6, marginTop: 6 }}>{profileStatus}</div>}
+          </FormCard>
+
+          <FormCard style={cardStyle}>
+            <Form
+              // Keyed on the *confirmed* value plus a cancel-only nonce (see
+              // dspFormNonce's own doc comment) — remounts to reset the
+              // checkbox's visual state whenever the real value changes,
+              // including "changed back" via a cancelled confirm dialog.
+              key={`${dspEnabled}-${dspFormNonce}`}
+              form={dspSchema}
+              name="dsp"
+              initialValues={{ enabled: dspEnabled }}
+              onChange={(_: string, { clean }: any) => {
+                if (clean.enabled !== dspEnabled) handleToggleDsp(clean.enabled);
+              }}
+            />
+            <span style={{ fontSize: '0.75em', opacity: 0.5 }}>
+              One filter-chain per device in use — set via each channel's own device picker below.
+            </span>
+            {dspStatus && <div style={{ fontSize: '0.8em', opacity: 0.6, marginTop: 4 }}>{dspStatus}</div>}
+          </FormCard>
+
+          <FormCard style={cardStyle}>
+            <Form
+              form={lfeSettingsSchema}
+              name="lfeSettings"
+              initialValues={{
+                sourceDevice: lfeSourceDevice,
+                lpfOn: lfeLpfHz != null,
+                lpfHz: lfeLpfHz ?? lastLfeLpfHz,
+              }}
+              onChange={(_: string, { clean }: any) => {
+                if (lfeSettingsSkipFirst.current) {
+                  lfeSettingsSkipFirst.current = false;
+                  lfeSettingsPrevRef.current = clean;
+                  return;
+                }
+                const prev = lfeSettingsPrevRef.current;
+                if (clean.sourceDevice !== prev.sourceDevice) handleLfeSourceChange(clean.sourceDevice);
+                const lpfHzOut = clean.lpfOn ? clean.lpfHz : null;
+                const prevLpfHzOut = prev.lpfOn ? prev.lpfHz : null;
+                if (lpfHzOut !== prevLpfHzOut) handleLfeLpfChange(lpfHzOut);
+                lfeSettingsPrevRef.current = clean;
+              }}
+            />
+          </FormCard>
         </div>
       )}
 
-      {sortedChannels.length === 0 ? (
-        <div style={{ padding: 24, opacity: 0.5 }}>
-          No channels configured yet — click "Add Channel" to get started.
+      {sortedChannels.length === 0 && (
+        <div style={{ padding: '0 0 12px', opacity: 0.5 }}>
+          No channels configured yet — click "Add Channel" (top-right of the grid) to get started.
         </div>
-      ) : (
-        <table style={{ borderCollapse: 'collapse', width: '100%' }}>
-          <thead>
-            <tr>
-              <th style={{ ...cellStyle, background: theme.palette.neutralLight, textAlign: 'left', minWidth: 110 }}>
-                Effect
-              </th>
-              {sortedChannels.map(ch => (
-                <th key={ch.id} style={{ ...cellStyle, background: theme.palette.neutralLight, textAlign: 'center', minWidth: 190 }}>
-                  <div style={{ fontWeight: 700, fontSize: '1.15em' }}>{TYRE_SHORT[ch.position ?? ''] ?? `Ch${ch.pan}`}</div>
-                  <Dropdown
-                    selectedKey={ch.devid}
-                    options={sinkOptions}
-                    onChange={(_, opt) => handleChannelDevidChange(ch, (opt?.key as string) ?? '')}
-                    styles={{ root: { minWidth: 160, textAlign: 'left', margin: '6px auto 0' } }}
-                  />
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, marginTop: 6 }}>
-                    <span style={{ fontSize: '0.72em', opacity: 0.55 }}>Pan</span>
-                    <input
-                      type="number" min={0} max={Math.max(0, ch.channels - 1)}
-                      value={ch.pan}
-                      onChange={e => handleChannelPanChange(ch, Number(e.target.value))}
-                      style={{ width: 44, fontSize: '0.75em' }}
-                    />
-                  </div>
-                  <div style={{ marginTop: 8, display: 'flex', justifyContent: 'center' }}>
-                    <TyreGrid current={ch.position ?? null} onApply={pos => handleChannelPositionChange(ch, pos)} />
-                  </div>
-                  <button
-                    style={{ ...btnStyle(false, theme), marginTop: 8, fontSize: '0.72em', padding: '3px 10px' }}
-                    onClick={() => handleRemoveChannel(ch)}
-                  >
-                    Remove Channel
-                  </button>
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {EFFECTS.map((eff, i) => (
-              <tr key={eff} style={{ background: i % 2 === 0 ? 'transparent' : theme.palette.neutralLighter }}>
-                <td style={{ ...cellStyle }}>
-                  <div style={{ fontWeight: 600, fontSize: '0.9em' }}>{EFFECT_LABELS[eff]}</div>
-                </td>
-                {sortedChannels.map(ch => {
-                  const rec = matrix[eff]?.[ch.id] ?? null;
-                  return (
-                    <td key={ch.id} style={{ ...cellStyle }}>
-                      <EffectRow
-                        rec={rec}
-                        onToggle={() => handleToggle(eff, ch, rec)}
-                        onUpdate={override => rec && handleUpdate(rec, override)}
-                        dspChannel={rec?.dspSlot != null ? dspChannelsBySlot.get(rec.dspSlot) ?? null : null}
-                        onDspChange={override => rec?.dspSlot != null && handleDspChannelChange(rec.dspSlot, override)}
-                        dspEnabled={dspEnabled}
-                      />
-                    </td>
-                  );
-                })}
-              </tr>
-            ))}
-            <tr style={{ background: EFFECTS.length % 2 === 0 ? 'transparent' : theme.palette.neutralLighter }}>
-              <td style={{ ...cellStyle }}>
-                <div style={{ fontWeight: 600, fontSize: '0.9em' }}>LFE</div>
-              </td>
-              {sortedChannels.map(ch => {
-                const lfeChannel = lfeChannelsByChannelId.get(ch.id) ?? null;
-                return (
-                  <td key={ch.id} style={{ ...cellStyle }}>
-                    <LfeRow
-                      channel={lfeChannel}
-                      onToggle={() => handleLfeToggle(ch, lfeChannel)}
-                      onUpdate={override => lfeChannel && handleLfeUpdate(lfeChannel, override)}
-                    />
-                  </td>
-                );
-              })}
-            </tr>
-          </tbody>
-        </table>
       )}
+      <DetailsGrid
+        name="ShakerChannels"
+        items={sortedChannels}
+        schema={matrixSchema}
+        columnSelectable
+        storageKey="shaker-matrix-columns"
+        alwaysVisibleColumns={['channel']}
+        onAdd={handleAddChannel}
+        customButtons={[
+          { key: 'export', label: 'Export to Config', icon: 'CloudDownload', onClick: handleExport },
+          { key: 'restart', label: 'Restart Monocoque', icon: 'Refresh', onClick: handleRestart },
+        ]}
+      />
     </div>
   );
 };

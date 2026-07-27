@@ -17,6 +17,7 @@ import {
   DefaultButton,
 } from '@fluentui/react';
 import { format, parseISO } from 'date-fns';
+import { TyreGrid } from '../../../../components/shared/TyreGrid';
 interface IndexableObject {
   [key: string]: any;
 }
@@ -934,13 +935,14 @@ export default function Raw(props: any): ReactElement {
                 max={rest.max ?? 100}
                 step={rest.step ?? 1}
                 value={value ?? 0}
+                disabled={rest.disabled}
                 onChange={e => { const n = parseFloat(e.target.value); setRawNum(String(n)); onChange(name, n); }}
                 onPointerDown={rest.onActivate}
                 onPointerUp={rest.onDeactivate}
                 style={{
                   flex: 1,
                   accentColor: theme.palette.themePrimary,
-                  cursor: 'pointer',
+                  cursor: rest.disabled ? 'default' : 'pointer',
                   height: 20,
                   margin: 0,
                 }}
@@ -951,6 +953,7 @@ export default function Raw(props: any): ReactElement {
                 max={rest.max ?? 100}
                 step={rest.step ?? 1}
                 value={rawNum}
+                disabled={rest.disabled}
                 onFocus={() => { numFocused.current = true; }}
                 onChange={e => setRawNum(e.target.value)}
                 onBlur={e => {
@@ -1023,6 +1026,24 @@ export default function Raw(props: any): ReactElement {
                 {...rest}
               />
               <PrimaryButton onClick={sign}>Sign</PrimaryButton>
+            </Stack>
+          </Stack>
+        );
+      // Value shape: a Monocoque tyre-position string (e.g. "FrontLeft",
+      // "All") | null. The corner-grid UI itself (click corners, Apply)
+      // lives entirely in TyreGrid — this case just wires it into the
+      // standard onChange(name, value) contract every other field type uses.
+      case 'tyre-position':
+        return (
+          <Stack className={rest.className}>
+            {label && <Label>{label}</Label>}
+            <TyreGrid current={value ?? null} onApply={pos => onChange(name, pos)} />
+            <Stack className={style.errors}>
+              <Feedback
+                and={[!isValid, isTouched]}
+                errors={errors}
+                dirty={isDirty}
+              />
             </Stack>
           </Stack>
         );

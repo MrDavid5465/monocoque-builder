@@ -1,9 +1,9 @@
 import gql from 'graphql-tag';
 
-export interface SimWindDeviceProfile { id: string; name: string; car?: string | null; game?: string | null; }
+export interface SimWindDeviceProfile { id: string; name: string; car?: string | null; game?: string | null; carId?: string | null; }
 
 const n = { singular: 'SimWindDeviceProfile', plural: 'SimWindDeviceProfiles' };
-const fields = `id name car game`;
+const fields = `id name car game carId`;
 
 export const GET_PROFILES    = gql`query get${n.plural} { get${n.plural} { ${fields} } }`;
 export const GET_PROFILE     = gql`query get${n.singular}($id: String!) { get${n.singular}(id: $id) { ${fields} } }`;

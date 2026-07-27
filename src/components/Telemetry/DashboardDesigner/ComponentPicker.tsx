@@ -1,6 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { useQuery } from '@apollo/client/react';
-import { Stack, IconButton, Icon, getTheme } from '../../../lib/denim/lib';
+import { Stack, IconButton, Icon, PrimaryButton, DefaultButton, getTheme } from '../../../lib/denim/lib';
 import { DashboardConfig, ComponentNode, ComponentType } from '../../../types/dashboard';
 import { ALL_SCHEMAS, SPRITE_TYPES, FREEFORM_TYPES } from './components/registry';
 import { findNodeById } from './components/utils';
@@ -176,20 +176,18 @@ const ComponentPicker: React.FC<Props> = ({
 
       {/* Tab strip */}
       <Stack horizontal style={{ borderBottom: border, flexShrink: 0 }}>
-        {(['new', 'templates', 'builtin'] as PickerTab[]).map(t => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            style={{
-              flex: 1, padding: '5px 0', cursor: 'pointer', border: 'none', fontSize: '0.78em',
-              fontWeight: tab === t ? 600 : 400,
-              background: tab === t ? theme.palette.neutralQuaternaryAlt : 'transparent',
-              borderBottom: tab === t ? `2px solid ${theme.palette.themePrimary}` : '2px solid transparent',
-            }}
-          >
-            {t === 'new' ? 'New' : t === 'templates' ? `My${templates.length ? ` (${templates.length})` : ''}` : 'Built-in'}
-          </button>
-        ))}
+        {(['new', 'templates', 'builtin'] as PickerTab[]).map(t => {
+          const TabButton = tab === t ? PrimaryButton : DefaultButton;
+          return (
+            <TabButton
+              key={t}
+              onClick={() => setTab(t)}
+              styles={{ root: { flex: 1, height: 26, minWidth: 0, fontSize: '0.78em', border: 'none', borderRadius: 0 } }}
+            >
+              {t === 'new' ? 'New' : t === 'templates' ? `My${templates.length ? ` (${templates.length})` : ''}` : 'Built-in'}
+            </TabButton>
+          );
+        })}
       </Stack>
 
       {/* My Templates panel */}
@@ -220,13 +218,13 @@ const ComponentPicker: React.FC<Props> = ({
                   <span style={{ fontSize: '0.85em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{tmpl.name}</span>
                   <span style={{ fontSize: '0.75em', opacity: 0.6 }}>{meta.label}</span>
                 </Stack>
-                <button
-                  style={{ fontSize: '0.75em', padding: '2px 8px', cursor: 'pointer', flexShrink: 0 }}
+                <DefaultButton
+                  styles={{ root: { fontSize: '0.75em', height: 24, minWidth: 0, flexShrink: 0 } }}
                   onClick={() => { copyMissingSprites(tmpl.component); onAdd(deepCopyNode(tmpl.component), parentId()); }}
                   title={`Add copy of ${tmpl.name}`}
                 >
                   Use
-                </button>
+                </DefaultButton>
                 <IconButton
                   iconProps={{ iconName: 'Delete' }}
                   title={`Remove template "${tmpl.name}"`}
@@ -262,8 +260,8 @@ const ComponentPicker: React.FC<Props> = ({
                   <span style={{ fontSize: '0.85em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{tmpl.name}</span>
                   <span style={{ fontSize: '0.75em', opacity: 0.6 }}>{meta.label}</span>
                 </Stack>
-                <button
-                  style={{ fontSize: '0.75em', padding: '2px 8px', cursor: 'pointer', flexShrink: 0 }}
+                <DefaultButton
+                  styles={{ root: { fontSize: '0.75em', height: 24, minWidth: 0, flexShrink: 0 } }}
                   onClick={() => {
                     try {
                       const component = JSON.parse(tmpl.component) as ComponentNode;
@@ -274,7 +272,7 @@ const ComponentPicker: React.FC<Props> = ({
                   title={`Add ${tmpl.name}`}
                 >
                   Use
-                </button>
+                </DefaultButton>
               </Stack>
             );
           })}
@@ -319,12 +317,9 @@ const ComponentPicker: React.FC<Props> = ({
       {/* Freeform types: just a button */}
       {isFreeform && (
         <Stack style={{ padding: '0.5em' }}>
-          <button
-            onClick={() => addNode()}
-            style={{ padding: '6px 0', cursor: 'pointer', fontSize: '0.9em' }}
-          >
+          <PrimaryButton onClick={() => addNode()} styles={{ root: { height: 30 } }}>
             + Add {activeSchema.label}
-          </button>
+          </PrimaryButton>
         </Stack>
       )}
 
@@ -352,8 +347,8 @@ const ComponentPicker: React.FC<Props> = ({
               <span style={{ flex: 1, fontSize: '0.85em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
                 {sprite.label}
               </span>
-              <button
-                style={{ fontSize: '0.75em', padding: '2px 8px', cursor: 'pointer', flexShrink: 0 }}
+              <DefaultButton
+                styles={{ root: { fontSize: '0.75em', height: 24, minWidth: 0, flexShrink: 0 } }}
                 onClick={() => {
                   if (builtInSpriteFiles?.has(sprite.file) && onCopyBuiltinSprite) {
                     onCopyBuiltinSprite(sprite.file);
@@ -363,7 +358,7 @@ const ComponentPicker: React.FC<Props> = ({
                 title={`Add as ${activeSchema.label}`}
               >
                 Add
-              </button>
+              </DefaultButton>
               {onDeleteSprite && sprite.id && (
                 <IconButton
                   iconProps={{ iconName: 'Delete' }}

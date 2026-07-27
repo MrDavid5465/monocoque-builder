@@ -58,9 +58,12 @@ export function dspOffSchema(opts: { label: string; enabled: boolean; drag: Drag
   };
 }
 
-// DSP enabled: Enabled + Mute + Fader unsectioned (always visible), LPF in
-// its own collapsed section, Advanced fields below that in their own
-// collapsed section.
+// DSP enabled: Enabled + Fader unsectioned (always visible), LPF in its own
+// collapsed section, Advanced fields below that in their own collapsed
+// section. Mute is deliberately NOT a schema field — it's rendered as a
+// standalone icon button in the cell's top-right corner instead (see
+// EffectRow.tsx), committing directly via onDspChange rather than through
+// this Form's own commit-diffing.
 //
 // `lpfHz` is *always* present alongside `lpfOn` here — not conditionally
 // included only once lpfOn is checked. That conditional-inclusion design
@@ -81,7 +84,6 @@ export function dspOnSchema(opts: { label: string; enabled: boolean; drag: DragH
   return {
     enabled: { type: 'checkbox', label: 'Enabled' },
     ...(opts.enabled ? {
-      muted: { type: 'checkbox', label: 'Mute' },
       fader: {
         type: 'slider', label: 'Fader', min: 0, max: 100, step: 1,
         onActivate: opts.drag.onActivate, onDeactivate: opts.drag.onDeactivate,
@@ -96,16 +98,16 @@ export function dspOnSchema(opts: { label: string; enabled: boolean; drag: DragH
   };
 }
 
-// LFE's per-corner cell: just Enabled + Mute + Fader, unsectioned, no LPF
-// section and no Advanced section at all — LFE has no tyre/modulation/
-// frequency concept of its own (it's not a Monocoque effect), and its LPF is
-// one shared control across every corner (see ShakerMatrix's global LFE LPF
-// Hz control), not a per-cell one like the other 6 effects.
+// LFE's per-corner cell: Enabled + Fader, unsectioned, no LPF section and no
+// Advanced section at all — LFE has no tyre/modulation/frequency concept of
+// its own (it's not a Monocoque effect), and its LPF is one shared control
+// across every corner (see ShakerMatrix's global LFE LPF Hz control), not a
+// per-cell one like the other 6 effects. Mute is a standalone top-right icon
+// button (see LfeRow.tsx), same rationale as dspOnSchema above.
 export function lfeSchema(opts: { enabled: boolean; drag: DragHooks }): SchemaDefinition<any> {
   return {
     enabled: { type: 'checkbox', label: 'Enabled' },
     ...(opts.enabled ? {
-      muted: { type: 'checkbox', label: 'Mute' },
       fader: {
         type: 'slider', label: 'Fader', min: 0, max: 100, step: 1,
         onActivate: opts.drag.onActivate, onDeactivate: opts.drag.onDeactivate,

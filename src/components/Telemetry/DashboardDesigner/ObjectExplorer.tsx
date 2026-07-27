@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { Stack, IconButton, Icon, PrimaryButton, getTheme, useQuery, Form } from '../../../lib/denim/lib';
+import { Stack, IconButton, Icon, PrimaryButton, DefaultButton, getTheme, useQuery, Form } from '../../../lib/denim/lib';
 import { ComponentNode, DashboardConfig, ComponentType } from '../../../types/dashboard';
 import { SequenceConfig, DEFAULT_SWEEP_CONFIG, DEFAULT_SINE_CONFIG } from './useTelemetryPlayback';
 import { getSchema, ALL_SCHEMAS } from './components/registry';
@@ -465,6 +465,10 @@ const Photo360PanForm: React.FC<{
 // ---------------------------------------------------------------------------
 // Component properties panel
 // ---------------------------------------------------------------------------
+const TYPE_SELECT_SCHEMA = {
+  type: { type: 'select' as const, label: 'Type', options: ALL_SCHEMAS.map(s => ({ text: s.label, value: s.type })) },
+};
+
 const ComponentPropertiesPanel: React.FC<{
   node: ComponentNode;
   sprites: { file: string; label: string; thumbnail: string }[];
@@ -558,27 +562,22 @@ const ComponentPropertiesPanel: React.FC<{
   return (
     <Stack tokens={{ childrenGap: 8 }}>
       {/* Type selector */}
-      <Stack>
-        <label style={{ fontSize: '0.85em', marginBottom: 2 }}>Type</label>
-        <select
-          value={node.type}
-          onChange={e => handleTypeChange(e.target.value as ComponentType)}
-          style={{ width: '100%' }}
-        >
-          {ALL_SCHEMAS.map(s => (
-            <option key={s.type} value={s.type}>{s.label}</option>
-          ))}
-        </select>
-      </Stack>
+      <Form
+        key={`type-${node.id}`}
+        form={TYPE_SELECT_SCHEMA}
+        name="componentType"
+        initialValues={{ type: node.type }}
+        onChange={(_n: string, { raw }: any) => handleTypeChange(raw.type as ComponentType)}
+      />
 
       {node.type === 'group' && onSaveAsTemplate && (
-        <button
+        <DefaultButton
           onClick={onSaveAsTemplate}
-          style={{ padding: '4px 8px', cursor: 'pointer', alignSelf: 'flex-start', fontSize: '0.82em' }}
           title="Save this group as a reusable global template"
+          styles={{ root: { alignSelf: 'flex-start', height: 28, fontSize: '0.82em' } }}
         >
           Save as Template
-        </button>
+        </DefaultButton>
       )}
 
       <div style={{ borderTop: `1px solid ${theme.palette.neutralLight}` }} />
@@ -602,20 +601,28 @@ const ComponentPropertiesPanel: React.FC<{
             {Array.from({ length: count }, (_, i) => (
               <Stack key={i} horizontal verticalAlign="center" tokens={{ childrenGap: 6 }}>
                 <span style={{ fontSize: '0.8em', minWidth: 56 }}>Position {i + 1}</span>
-                <select
-                  value={ids[i] ?? ''}
-                  onChange={e => {
-                    const next = [...ids];
-                    next[i] = e.target.value;
-                    onUpdate({ encoderMappingIds: next });
-                  }}
-                  style={{ flex: 1, fontSize: '0.82em' }}
-                >
-                  <option value="">— unassigned —</option>
-                  {btnMappings.map(m => (
-                    <option key={m.id} value={m.id}>{m.name} (btn {m.index})</option>
-                  ))}
-                </select>
+                <Stack style={{ flex: 1 }}>
+                  <Form
+                    key={`${node.id}-encoder-${i}`}
+                    form={{
+                      mapping: {
+                        type: 'select' as const,
+                        label: '',
+                        options: [
+                          { text: '— unassigned —', value: '' },
+                          ...btnMappings.map(m => ({ text: `${m.name} (btn ${m.index})`, value: m.id })),
+                        ],
+                      },
+                    }}
+                    name={`encoderPos-${i}`}
+                    initialValues={{ mapping: ids[i] ?? '' }}
+                    onChange={(_n: string, { raw }: any) => {
+                      const next = [...ids];
+                      next[i] = String(raw.mapping ?? '');
+                      onUpdate({ encoderMappingIds: next });
+                    }}
+                  />
+                </Stack>
               </Stack>
             ))}
           </Stack>
@@ -852,21 +859,20 @@ const DashboardPropertiesPanel: React.FC<{
           {groups.map((group) => {
             const checked = (dashboard.groupIds ?? []).includes(group.id);
             return (
-              <Stack key={group.id} horizontal verticalAlign="center" tokens={{ childrenGap: 8 }}>
-                <input
-                  type="checkbox"
-                  checked={checked}
-                  onChange={e => {
-                    const current = dashboard.groupIds ?? [];
-                    onUpdate({
-                      groupIds: e.target.checked
-                        ? [...current, group.id]
-                        : current.filter((g: string) => g !== group.id),
-                    });
-                  }}
-                />
-                <span style={{ fontSize: '0.9em' }}>{group.name}</span>
-              </Stack>
+              <Form
+                key={`${formKey}-group-${group.id}`}
+                form={{ checked: { type: 'checkbox' as const, label: group.name } }}
+                name={`dashGroup-${group.id}`}
+                initialValues={{ checked }}
+                onChange={(_n: string, { raw }: any) => {
+                  const current = dashboard.groupIds ?? [];
+                  onUpdate({
+                    groupIds: raw.checked
+                      ? [...current, group.id]
+                      : current.filter((g: string) => g !== group.id),
+                  });
+                }}
+              />
             );
           })}
         </Section>
@@ -926,44 +932,38 @@ const PlaybackPanel: React.FC<{
   onTogglePlay: () => void;
   formKey?: string;
 }> = ({ config, onChange, playing, onTogglePlay, formKey = 'sequence' }) => {
-  const theme = getTheme();
-
   const switchType = (type: 'sweep' | 'sine') => {
     if (type === config.type) return;
     onChange(type === 'sweep' ? DEFAULT_SWEEP_CONFIG : DEFAULT_SINE_CONFIG);
   };
 
+  const PlayButton = playing ? DefaultButton : PrimaryButton;
+
   return (
     <Stack tokens={{ childrenGap: 8 }}>
       <Stack horizontal verticalAlign="center" horizontalAlign="end">
-        <button
+        <PlayButton
           onClick={onTogglePlay}
-          style={{
-            padding: '2px 10px', cursor: 'pointer', fontWeight: 600,
-            background: playing ? theme.palette.neutralLight : theme.palette.themePrimary,
-            color: playing ? theme.palette.neutralDark : '#fff',
-            border: 'none', borderRadius: 3,
-          }}
+          iconProps={{ iconName: playing ? 'Stop' : 'Play' }}
+          styles={{ root: { height: 28 } }}
         >
-          {playing ? '⏹ Stop' : '▶ Play'}
-        </button>
+          {playing ? 'Stop' : 'Play'}
+        </PlayButton>
       </Stack>
 
       <Stack horizontal tokens={{ childrenGap: 4 }}>
-        {(['sweep', 'sine'] as const).map(t => (
-          <button
-            key={t}
-            onClick={() => switchType(t)}
-            style={{
-              flex: 1, padding: '3px 0', cursor: 'pointer', borderRadius: 3,
-              background: config.type === t ? theme.palette.themePrimary : theme.palette.neutralLighter,
-              color: config.type === t ? '#fff' : theme.palette.neutralDark,
-              border: 'none', fontSize: '0.85em',
-            }}
-          >
-            {t === 'sweep' ? 'Gauge sweep' : 'Sine wave'}
-          </button>
-        ))}
+        {(['sweep', 'sine'] as const).map(t => {
+          const TypeButton = config.type === t ? PrimaryButton : DefaultButton;
+          return (
+            <TypeButton
+              key={t}
+              onClick={() => switchType(t)}
+              styles={{ root: { flex: 1, height: 26, fontSize: '0.85em', minWidth: 0 } }}
+            >
+              {t === 'sweep' ? 'Gauge sweep' : 'Sine wave'}
+            </TypeButton>
+          );
+        })}
       </Stack>
 
       {config.type === 'sweep' && (

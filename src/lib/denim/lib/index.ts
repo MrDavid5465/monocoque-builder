@@ -42,6 +42,7 @@ export { format } from "date-fns";
 export { default as Form } from "../../typical-admin-fabric/lib/templates/Form";
 export { default as List } from "../../typical-admin-fabric/lib/List";
 export { default as ThumbnailCard } from "../../typical-admin-fabric/lib/templates/ThumbnailCard";
+export { default as FormCard } from "../../typical-admin-fabric/lib/templates/FormCard";
 
 export const getStyle = () => mergeStyleSets(stylesJson(getTheme()));
 export const getCurrentApp = () => {

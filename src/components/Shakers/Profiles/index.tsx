@@ -5,9 +5,11 @@ import ProfilesList from './ProfilesList';
 
 const profileSchema = {
   list: {
-    name: { label: 'Name' },
-    car: { label: 'Car' },
-    game: { label: 'Game' },
+    columns: {
+      name: { label: 'Name' },
+      car: { label: 'Car' },
+      game: { label: 'Game' },
+    },
   },
   new: {
     name: { type: 'text', label: 'Name', required: true },

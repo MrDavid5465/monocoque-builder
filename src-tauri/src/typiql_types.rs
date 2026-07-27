@@ -167,6 +167,12 @@ pub struct SoundDeviceProfile {
     /// flag. At most one profile should have this true at a time — enforced
     /// by setDefaultSoundDeviceProfile, not by storage itself.
     pub is_default: bool,
+    /// Links this profile to a real Car record (Car.id), wired from the
+    /// Car's own configuration page (CarDetail.tsx) — the same entity
+    /// dashboards use for 360°/pan, not a free-text name like `car` above.
+    /// Softly enforced client-side that at most one profile points at a
+    /// given car at a time; None until the user links one.
+    pub car_id: Option<String>,
 }
 
 /// One row per (profile, DSP slot) — the PipeWire-side DSP settings for
@@ -433,6 +439,10 @@ pub struct LedsDeviceProfile {
     pub name: String,
     pub car: Option<String>,
     pub game: Option<String>,
+    /// Links this profile to a real Car record (Car.id), wired from the
+    /// Car's own configuration page — same convention as
+    /// SoundDeviceProfile.carId's doc comment. None until linked.
+    pub car_id: Option<String>,
 }
 
 /// Named profile for shift light configurations.
@@ -443,6 +453,10 @@ pub struct ShiftLightProfile {
     pub name: String,
     pub car: Option<String>,
     pub game: Option<String>,
+    /// Links this profile to a real Car record (Car.id), wired from the
+    /// Car's own configuration page — same convention as
+    /// SoundDeviceProfile.carId's doc comment. None until linked.
+    pub car_id: Option<String>,
 }
 
 /// Named profile for SimWind fan controller configurations.
@@ -453,6 +467,10 @@ pub struct SimWindDeviceProfile {
     pub name: String,
     pub car: Option<String>,
     pub game: Option<String>,
+    /// Links this profile to a real Car record (Car.id), wired from the
+    /// Car's own configuration page — same convention as
+    /// SoundDeviceProfile.carId's doc comment. None until linked.
+    pub car_id: Option<String>,
 }
 
 /// A recorded telemetry session's metadata — small and infrequently
