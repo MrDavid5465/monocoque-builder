@@ -33,8 +33,21 @@ export interface IDispatcher {
   subscribe?: any;
   subscribeToOne?: any;
 }
+export interface ListButtons {
+  // Explicit opt-in for a grid-level "Add" control (navigates to
+  // `${pathname}/new`, requires dispatcher.new) — declared here rather than
+  // inferred from dispatcher.new's truthiness the way the page-header Links
+  // "+" still is, so a list's grid-level buttons are always exactly what its
+  // schema says, not a side effect of which mutations the dispatcher happens
+  // to define.
+  add?: boolean;
+}
+export interface ListSchema<T> {
+  buttons?: ListButtons;
+  columns: DisplaySchema<T>;
+}
 export interface ITASchema {
-  list: DisplaySchema<any>;
+  list: ListSchema<any>;
   new?: SchemaDefinition<any>;
   show: DisplaySchema<any>;
   edit?: SchemaDefinition<any>;

@@ -1,10 +1,39 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { useQuery, useMutation, useSubscription } from '@apollo/client/react';
-import { getTheme } from '../../../lib/denim/lib';
+import { IconButton } from '@fluentui/react';
+import { getTheme, Form } from '../../../lib/denim/lib';
+import { confirmAsync } from '../../../lib/denim/components/ConfirmDialog';
+import DetailsGrid from '../../../lib/typical-admin-fabric/lib/List';
+import { DisplaySchema } from '../../../lib/typical-admin';
 import { GET_SIM_WINDS, CREATE_SIM_WIND, UPDATE_SIM_WIND, REMOVE_SIM_WIND, SIM_WIND_CHANGED, SimWindDeviceRec } from './queries';
 import { DEFAULT_SIM_WIND_DEVICE } from '../../../mock/simWindDeviceMock';
 
 interface Props { profileId?: string | null; enabled?: boolean; }
+
+// One tiny per-form Form per cell, committing immediately on change (diffed
+// directly against the row's own current value — no Save button needed, no
+// skipFirst dance required since there's only ever one field in play here).
+// Same "form in a grid cell" pattern as ChannelHeader.tsx, just simpler:
+// these rows have no composite/related fields that need to share one Form.
+// The field's own label is left blank — the grid's column header (built
+// from the same label, see the field() helper below) already shows it, and
+// Fabric.tsx renders a real <Label> above the input that would otherwise
+// duplicate it right inside the cell.
+const FieldCell: React.FC<{
+  rowId: string; field: string; label: string; value: string | number;
+  numeric?: boolean; onCommit: (v: string | number) => void;
+}> = ({ rowId, field, label, value, numeric, onCommit }) => (
+  <Form
+    key={`${rowId}-${field}`}
+    form={{ [field]: { label: '', placeholder: label } }}
+    name={`${field}-${rowId}`}
+    initialValues={{ [field]: value }}
+    onChange={(_: string, { clean }: any) => {
+      const next = numeric ? Number(clean[field]) : clean[field];
+      if (next !== value) onCommit(next);
+    }}
+  />
+);
 
 const SimWindDevices: React.FC<Props> = ({ profileId = null, enabled = true }) => {
   const theme = getTheme();
@@ -25,76 +54,45 @@ const SimWindDevices: React.FC<Props> = ({ profileId = null, enabled = true }) =
     create({ variables: { values: DEFAULT_SIM_WIND_DEVICE } });
   }, [enabled, profileId, loading, allRecords.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const th: React.CSSProperties = {
-    textAlign: 'left', padding: '6px 10px', fontSize: '0.78em', fontWeight: 600,
-    background: theme.palette.neutralLight,
-    borderBottom: `2px solid ${theme.palette.neutralTertiaryAlt}`,
+  const handleAdd = () => create({ variables: { values: { ...DEFAULT_SIM_WIND_DEVICE, profileId } } });
+  const handleRemove = async (r: SimWindDeviceRec) => {
+    const ok = await confirmAsync(`Remove this SimWind controller? This can't be undone.`, { danger: true, confirmText: 'Remove' });
+    if (!ok) return;
+    await remove({ variables: { id: r.id } });
+  };
+
+  const field = (key: keyof SimWindDeviceRec, label: string, numeric = false) => ({
+    label,
+    onRender: ({ values }: { values: SimWindDeviceRec }) => (
+      <FieldCell rowId={values.id} field={key} label={label} value={values[key] as string | number} numeric={numeric}
+        onCommit={v => update({ variables: { id: values.id, update: { [key]: v } } })} />
+    ),
+  });
+
+  const schema: DisplaySchema<any> = {
+    devpath: { ...field('devpath', 'Device Path'), options: { minWidth: 160, maxWidth: 220 } },
+    baud: field('baud', 'Baud', true),
+    fanPower: field('fanPower', 'Fan Power', true),
+    config: { ...field('config', 'Config'), options: { minWidth: 220, maxWidth: 360 } },
+    actions: {
+      label: '',
+      options: { minWidth: 40, maxWidth: 48 },
+      onRender: ({ values }: { values: SimWindDeviceRec }) => (
+        <IconButton iconProps={{ iconName: 'Delete' }} title="Remove" onClick={() => handleRemove(values)} />
+      ),
+    },
   };
 
   return (
     <div style={{ padding: profileId ? 0 : 16, color: theme.palette.neutralPrimary }}>
-      {!profileId && (
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-          <h3 style={{ margin: 0 }}>SimWind Controllers</h3>
-          <button
-            style={{ border: 'none', borderRadius: 4, cursor: 'pointer', padding: '5px 12px', background: theme.palette.themePrimary, color: '#fff', fontSize: '0.82em' }}
-            onClick={() => create({ variables: { values: { ...DEFAULT_SIM_WIND_DEVICE, profileId } } })}
-          >+ Add</button>
+      {!profileId && <h3 style={{ margin: '0 0 10px' }}>SimWind Controllers</h3>}
+      {records.length === 0 && (
+        <div style={{ opacity: 0.5, padding: '0 0 8px' }}>
+          No SimWind controllers configured yet — click "Add" (top-right of the grid) to get started.
         </div>
       )}
-
-      {records.length === 0 ? (
-        <div style={{ opacity: 0.5, padding: '8px 0' }}>No SimWind controllers configured.</div>
-      ) : (
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead>
-            <tr>{['Device Path', 'Baud', 'Fan Power', 'Config', ''].map(h => <th key={h} style={th}>{h}</th>)}</tr>
-          </thead>
-          <tbody>
-            {records.map(r => (
-              <SimWindRow key={r.id} rec={r}
-                onUpdate={vals => update({ variables: { id: r.id, update: { ...vals, profileId: r.profileId ?? null } } })}
-                onRemove={() => remove({ variables: { id: r.id } })}
-              />
-            ))}
-          </tbody>
-        </table>
-      )}
-      {profileId && (
-        <button
-          style={{ marginTop: 10, border: 'none', borderRadius: 4, cursor: 'pointer', padding: '5px 12px', background: theme.palette.themePrimary, color: '#fff', fontSize: '0.82em' }}
-          onClick={() => create({ variables: { values: { ...DEFAULT_SIM_WIND_DEVICE, profileId } } })}
-        >+ Add</button>
-      )}
+      <DetailsGrid name="SimWindDevices" items={records} schema={schema} onAdd={handleAdd} />
     </div>
-  );
-};
-
-const SimWindRow: React.FC<{ rec: SimWindDeviceRec; onUpdate: (v: Partial<SimWindDeviceRec>) => void; onRemove: () => void }> = ({ rec, onUpdate, onRemove }) => {
-  const theme = getTheme();
-  const [draft, setDraft] = useState(rec);
-  useEffect(() => setDraft(rec), [rec]);
-  const changed = JSON.stringify(draft) !== JSON.stringify(rec);
-  const td: React.CSSProperties = { padding: '4px 6px', borderBottom: `1px solid ${theme.palette.neutralLighter}` };
-  const inp = (width = 100): React.CSSProperties => ({
-    width, background: theme.palette.neutralLighter, color: theme.palette.neutralPrimary,
-    border: `1px solid ${theme.palette.neutralTertiaryAlt}`, borderRadius: 3, padding: '2px 5px', fontSize: '0.8em',
-  });
-  return (
-    <tr>
-      <td style={td}><input style={inp(180)} value={draft.devpath} onChange={e => setDraft(d => ({ ...d, devpath: e.target.value }))} /></td>
-      <td style={td}><input style={inp(72)} type="number" value={draft.baud} onChange={e => setDraft(d => ({ ...d, baud: Number(e.target.value) }))} /></td>
-      <td style={td}><input style={inp(72)} type="number" step="0.05" min={0} max={1} value={draft.fanPower} onChange={e => setDraft(d => ({ ...d, fanPower: Number(e.target.value) }))} /></td>
-      <td style={td}><input style={inp(200)} value={draft.config} onChange={e => setDraft(d => ({ ...d, config: e.target.value }))} /></td>
-      <td style={{ ...td, whiteSpace: 'nowrap' }}>
-        {changed && (
-          <button onClick={() => onUpdate({ devpath: draft.devpath, baud: draft.baud, fanPower: draft.fanPower, config: draft.config })}
-            style={{ border: 'none', borderRadius: 3, cursor: 'pointer', padding: '3px 8px', fontSize: '0.78em', background: theme.palette.themePrimary, color: '#fff', marginRight: 4 }}
-          >Save</button>
-        )}
-        <button onClick={onRemove} style={{ border: 'none', borderRadius: 3, cursor: 'pointer', padding: '3px 8px', fontSize: '0.78em', background: theme.palette.neutralLight, color: theme.palette.redDark }}>×</button>
-      </td>
-    </tr>
   );
 };
 

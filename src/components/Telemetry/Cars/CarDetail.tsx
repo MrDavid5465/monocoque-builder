@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { useQuery, useMutation } from '@apollo/client/react';
-import { Stack, IconButton, Form, getTheme } from '../../../lib/denim/lib';
+import { Stack, IconButton, Form, FormCard } from '../../../lib/denim/lib';
 import { GET_KNOWN_CARS } from '../Groups/queries';
 import {
   GET_CARS, UPDATE_CAR, DELETE_CAR, UPLOAD_CAR_PHOTO, UPLOAD_CAR_PHOTO_NIGHT, DELETE_CAR_PHOTO_NIGHT,
@@ -9,6 +9,10 @@ import {
 import { useGlobalPreviewCar } from '../useGlobalPreviewCar';
 import DashPanEditor from './DashPanEditor';
 import { confirmAsync } from '../../../lib/denim/components/ConfirmDialog';
+import { GET_PROFILES as GET_SHAKER_PROFILES, UPDATE_PROFILE as UPDATE_SHAKER_PROFILE } from '../../Shakers/Profiles/queries';
+import { GET_PROFILES as GET_LEDS_PROFILES, UPDATE_PROFILE as UPDATE_LEDS_PROFILE, profileResultKey as ledsProfileResultKey } from '../../LedsDevices/Profiles/queries';
+import { GET_PROFILES as GET_SHIFT_LIGHT_PROFILES, UPDATE_PROFILE as UPDATE_SHIFT_LIGHT_PROFILE, profileResultKey as shiftLightProfileResultKey } from '../../ShiftLights/Profiles/queries';
+import { GET_PROFILES as GET_SIM_WIND_PROFILES, UPDATE_PROFILE as UPDATE_SIM_WIND_PROFILE, profileResultKey as simWindProfileResultKey } from '../../SimWindDevices/Profiles/queries';
 
 function apiBase() {
   return `http://${window.location.hostname}:9000`;
@@ -19,14 +23,14 @@ interface Props {
   onBack?: () => void;
 }
 
+type ProfileRef = { id: string; name: string; carId?: string | null };
+
 // The one shared detail/edit UI for a Car record — mounted both from the
 // existing #/telemetry/cars/:id page and from #/telemetryadmin/cars's show
 // and edit slots. Does its own data-fetching (fetch-whole-list-and-find-by-id,
 // same convention useDashboard.ts already uses) so both hosts can just pass
 // the record id and nothing else.
 const CarDetail: React.FC<Props> = ({ carRecordId, onBack }) => {
-  const theme = getTheme();
-
   const { data: carsData, refetch } = useQuery(GET_CARS, { fetchPolicy: 'cache-and-network' });
   const { data: knownCarsData } = useQuery(GET_KNOWN_CARS, { fetchPolicy: 'cache-and-network' });
   // Recomputes content-hash ids from whatever's actually on disk right now,
@@ -40,9 +44,36 @@ const CarDetail: React.FC<Props> = ({ carRecordId, onBack }) => {
   const [uploadCarPhotoNight] = useMutation(UPLOAD_CAR_PHOTO_NIGHT);
   const [deleteCarPhotoNight] = useMutation(DELETE_CAR_PHOTO_NIGHT);
 
+  // Wires this Car to a Shaker/LED/Shift Light/SimWind device profile for
+  // per-car fine-tuning (see SoundDeviceProfile.carId's backend doc comment)
+  // — the link lives on each profile's own carId, set/cleared from here.
+  // All 4 selects live in one Form (see the profile FormCard below), so the
+  // 4 profile lists/mutations are fetched here rather than behind a separate
+  // per-type component. No live subscriptions — refetchQueries keeps each
+  // list fresh, and stacking up subscriptions on one page risks starving
+  // other requests (see ShakerMatrix's own profile card, which hit exactly
+  // this: the browser's 6-connections-per-host HTTP/1.1 ceiling).
+  const { data: shakerProfilesData } = useQuery(GET_SHAKER_PROFILES);
+  const { data: ledsProfilesData } = useQuery(GET_LEDS_PROFILES);
+  const { data: shiftLightProfilesData } = useQuery(GET_SHIFT_LIGHT_PROFILES);
+  const { data: simWindProfilesData } = useQuery(GET_SIM_WIND_PROFILES);
+  const [updateShakerProfile] = useMutation(UPDATE_SHAKER_PROFILE, { refetchQueries: [{ query: GET_SHAKER_PROFILES }] });
+  const [updateLedsProfile] = useMutation(UPDATE_LEDS_PROFILE, { refetchQueries: [{ query: GET_LEDS_PROFILES }] });
+  const [updateShiftLightProfile] = useMutation(UPDATE_SHIFT_LIGHT_PROFILE, { refetchQueries: [{ query: GET_SHIFT_LIGHT_PROFILES }] });
+  const [updateSimWindProfile] = useMutation(UPDATE_SIM_WIND_PROFILE, { refetchQueries: [{ query: GET_SIM_WIND_PROFILES }] });
+
   const cars: CarRecord[] = (carsData as any)?.getCars ?? [];
   const car = cars.find(c => c.id === carRecordId);
   const knownCarIds: string[] = ((knownCarsData as any)?.getKnownCars ?? []).map((c: any) => c.id);
+
+  const shakerProfiles: ProfileRef[] = (shakerProfilesData as any)?.getSoundDeviceProfiles ?? [];
+  const ledsProfiles: ProfileRef[] = (ledsProfilesData as any)?.[ledsProfileResultKey] ?? [];
+  const shiftLightProfiles: ProfileRef[] = (shiftLightProfilesData as any)?.[shiftLightProfileResultKey] ?? [];
+  const simWindProfiles: ProfileRef[] = (simWindProfilesData as any)?.[simWindProfileResultKey] ?? [];
+  const linkedShakerProfile = shakerProfiles.find(p => p.carId === carRecordId) ?? null;
+  const linkedLedsProfile = ledsProfiles.find(p => p.carId === carRecordId) ?? null;
+  const linkedShiftLightProfile = shiftLightProfiles.find(p => p.carId === carRecordId) ?? null;
+  const linkedSimWindProfile = simWindProfiles.find(p => p.carId === carRecordId) ?? null;
 
   const claimedByOthers = new Set(
     cars.filter(c => c.id !== carRecordId).flatMap(parseCarIds)
@@ -74,13 +105,39 @@ const CarDetail: React.FC<Props> = ({ carRecordId, onBack }) => {
     return <span style={{ opacity: 0.6, padding: '1em' }}>Car not found.</span>;
   }
 
-  const carSchema = {
+  const identitySchema = {
     name: { label: 'Friendly name' },
     carIds: {
       type: 'multi-select' as const,
       label: 'Game car IDs',
       options: knownCarIds.map(id => ({ text: id, value: id, disabled: claimedByOthers.has(id) })),
     },
+  };
+
+  const profileSchema = {
+    shakerProfileId: {
+      type: 'select' as const,
+      label: 'Shaker Profile',
+      options: [{ text: '— None —', value: '' }, ...shakerProfiles.map(p => ({ text: p.name, value: p.id }))],
+    },
+    ledProfileId: {
+      type: 'select' as const,
+      label: 'LED Profile',
+      options: [{ text: '— None —', value: '' }, ...ledsProfiles.map(p => ({ text: p.name, value: p.id }))],
+    },
+    shiftLightProfileId: {
+      type: 'select' as const,
+      label: 'Shift Light Profile',
+      options: [{ text: '— None —', value: '' }, ...shiftLightProfiles.map(p => ({ text: p.name, value: p.id }))],
+    },
+    simWindProfileId: {
+      type: 'select' as const,
+      label: 'SimWind Profile',
+      options: [{ text: '— None —', value: '' }, ...simWindProfiles.map(p => ({ text: p.name, value: p.id }))],
+    },
+  };
+
+  const photoSchema = {
     dayPhoto: {
       type: 'image-upload' as const,
       label: '360° Day Photo',
@@ -110,7 +167,7 @@ const CarDetail: React.FC<Props> = ({ carRecordId, onBack }) => {
   // form's own name (not the field that changed) plus the full current raw
   // values — so every change is handled here by comparing each tracked field
   // against the car's current known value, not by branching on the first arg.
-  const handleFormChange = (_formName: string, { raw }: any) => {
+  const handleIdentityChange = (_formName: string, { raw }: any) => {
     if (raw.name && raw.name !== car.name) {
       updateCar({ variables: { id: car.id, update: { name: raw.name } } });
     }
@@ -118,6 +175,35 @@ const CarDetail: React.FC<Props> = ({ carRecordId, onBack }) => {
     if (rawCarIdsJson !== car.carIds) {
       updateCar({ variables: { id: car.id, update: { carIds: rawCarIdsJson } } });
     }
+  };
+
+  // The link lives on each profile (carId), not the car — so reassigning it
+  // means clearing the old profile's carId (if any, and if it's actually
+  // changing) before setting the new one, keeping it 1:1.
+  const handleProfileChange = (_formName: string, { raw }: any) => {
+    const newShakerId = raw.shakerProfileId || null;
+    if (newShakerId !== (linkedShakerProfile?.id ?? null)) {
+      if (linkedShakerProfile) updateShakerProfile({ variables: { id: linkedShakerProfile.id, update: { carId: null } } });
+      if (newShakerId) updateShakerProfile({ variables: { id: newShakerId, update: { carId: car.id } } });
+    }
+    const newLedsId = raw.ledProfileId || null;
+    if (newLedsId !== (linkedLedsProfile?.id ?? null)) {
+      if (linkedLedsProfile) updateLedsProfile({ variables: { id: linkedLedsProfile.id, update: { carId: null } } });
+      if (newLedsId) updateLedsProfile({ variables: { id: newLedsId, update: { carId: car.id } } });
+    }
+    const newShiftLightId = raw.shiftLightProfileId || null;
+    if (newShiftLightId !== (linkedShiftLightProfile?.id ?? null)) {
+      if (linkedShiftLightProfile) updateShiftLightProfile({ variables: { id: linkedShiftLightProfile.id, update: { carId: null } } });
+      if (newShiftLightId) updateShiftLightProfile({ variables: { id: newShiftLightId, update: { carId: car.id } } });
+    }
+    const newSimWindId = raw.simWindProfileId || null;
+    if (newSimWindId !== (linkedSimWindProfile?.id ?? null)) {
+      if (linkedSimWindProfile) updateSimWindProfile({ variables: { id: linkedSimWindProfile.id, update: { carId: null } } });
+      if (newSimWindId) updateSimWindProfile({ variables: { id: newSimWindId, update: { carId: car.id } } });
+    }
+  };
+
+  const handlePhotoChange = (_formName: string, { raw }: any) => {
     if (!raw.nightPhoto && nightPhoto) {
       deleteCarPhotoNight({ variables: { id: car.id } });
     }
@@ -131,10 +217,11 @@ const CarDetail: React.FC<Props> = ({ carRecordId, onBack }) => {
     onBack?.();
   };
 
-  const sep = `1px solid ${theme.palette.neutralLight}`;
+  // Same row-of-cards convention as ShakerMatrix's own DSP/LFE cards.
+  const cardStyle: React.CSSProperties = { flex: '1 1 260px', minWidth: 260 };
 
   return (
-    <div style={{ padding: '1.2em 1.5em', maxWidth: 720 }}>
+    <div style={{ padding: '1.2em 1.5em' }}>
       <Stack horizontal verticalAlign="center" horizontalAlign="space-between" style={{ marginBottom: '1em' }}>
         <Stack horizontal verticalAlign="center" tokens={{ childrenGap: 8 }}>
           {onBack && <IconButton iconProps={{ iconName: 'Back' }} onClick={onBack} title="Back" />}
@@ -143,24 +230,61 @@ const CarDetail: React.FC<Props> = ({ carRecordId, onBack }) => {
         <IconButton iconProps={{ iconName: 'Delete' }} title="Delete car" onClick={handleDeleteCar} />
       </Stack>
 
-      <Form
-        key={car.id}
-        form={carSchema}
-        name={`car-${car.id}`}
-        initialValues={{ name: car.name, carIds: rawIds, dayPhoto, nightPhoto }}
-        onChange={handleFormChange}
-      />
+      <Stack tokens={{ childrenGap: 16 }}>
+        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+          <FormCard style={cardStyle}>
+            <Form
+              key={car.id}
+              form={identitySchema}
+              name={`car-identity-${car.id}`}
+              initialValues={{ name: car.name, carIds: rawIds }}
+              onChange={handleIdentityChange}
+            />
+          </FormCard>
 
-      <div style={{ borderBottom: sep, marginTop: '1em' }} />
+          <FormCard style={cardStyle}>
+            <Form
+              // Keyed on all 4 linked profile ids too, not just car.id —
+              // profiles load via their own queries that can resolve after
+              // this Form's first mount, and per-form only reads
+              // initialValues once at mount (see the per-form gotchas this
+              // app has hit before), so without this the selects could seed
+              // blank on a slow/cold profiles fetch.
+              key={`${car.id}-${linkedShakerProfile?.id ?? 'none'}-${linkedLedsProfile?.id ?? 'none'}-${linkedShiftLightProfile?.id ?? 'none'}-${linkedSimWindProfile?.id ?? 'none'}`}
+              form={profileSchema}
+              name={`car-profiles-${car.id}`}
+              initialValues={{
+                shakerProfileId: linkedShakerProfile?.id ?? '',
+                ledProfileId: linkedLedsProfile?.id ?? '',
+                shiftLightProfileId: linkedShiftLightProfile?.id ?? '',
+                simWindProfileId: linkedSimWindProfile?.id ?? '',
+              }}
+              onChange={handleProfileChange}
+            />
+          </FormCard>
 
-      <DashPanEditor
-        carId={car.id}
-        photoId={car.id}
-        photoUrl={dayPhoto ? `${apiBase()}${dayPhoto.url}` : undefined}
-        nightPhotoUrl={nightPhoto ? `${apiBase()}${nightPhoto.url}` : undefined}
-        hasThumbnail={!!car.thumbnail}
-        onThumbnailChanged={refetch}
-      />
+          <FormCard style={cardStyle}>
+            <Form
+              key={car.id}
+              form={photoSchema}
+              name={`car-photos-${car.id}`}
+              initialValues={{ dayPhoto, nightPhoto }}
+              onChange={handlePhotoChange}
+            />
+          </FormCard>
+        </div>
+
+        <FormCard>
+          <DashPanEditor
+            carId={car.id}
+            photoId={car.id}
+            photoUrl={dayPhoto ? `${apiBase()}${dayPhoto.url}` : undefined}
+            nightPhotoUrl={nightPhoto ? `${apiBase()}${nightPhoto.url}` : undefined}
+            hasThumbnail={!!car.thumbnail}
+            onThumbnailChanged={refetch}
+          />
+        </FormCard>
+      </Stack>
     </div>
   );
 };

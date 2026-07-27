@@ -23,7 +23,7 @@ const carSchema = {
       value ? `${apiBase()}/thumbnails/${encodeURIComponent(value)}` : undefined,
   },
 };
-const schemaDefinition = { list: carSchema, show: carSchema, edit: {}, new: {} };
+const schemaDefinition = { list: { columns: carSchema, buttons: { add: true } }, show: carSchema, edit: {}, new: {} };
 
 const CarsAdmin: React.FC = () => (
   <ReactiveAdmin

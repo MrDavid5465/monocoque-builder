@@ -5,9 +5,10 @@ export interface SoundDeviceProfile {
   name: string;
   car?: string | null;
   game?: string | null;
+  carId?: string | null;
 }
 
-const fields = `id name car game`;
+const fields = `id name car game carId`;
 
 export const name = { singular: 'SoundDeviceProfile', plural: 'SoundDeviceProfiles' };
 

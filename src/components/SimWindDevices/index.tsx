@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import { Routes, Route, useParams, useNavigate } from 'react-router-dom';
+import { PrimaryButton } from '@fluentui/react';
 import ReactiveAdmin from '../../lib/typical-admin-fabric';
 import SimWindDeviceList from '../Shakers/SimWindDevices';
-import DeviceProfileSaveBar from '../shared/DeviceProfileSaveBar';
 import DeviceProfilesList from '../shared/DeviceProfilesList';
-import { getTheme } from '../../lib/denim/lib';
+import { useDeviceProfileCard } from '../shared/useDeviceProfileCard';
+import { getTheme, Form, FormCard } from '../../lib/denim/lib';
 import {
   GET_PROFILES, ADD_PROFILE, REMOVE_PROFILE, PROFILE_CHANGED,
   profileResultKey, addProfileResultKey, STORAGE_KEY,
@@ -19,7 +20,7 @@ function liveToInput(rec: SimWindDeviceRec, profileId: string | null) {
 }
 
 const profileSchema = {
-  list: { name: { label: 'Name' }, car: { label: 'Car' }, game: { label: 'Game' } },
+  list: { columns: { name: { label: 'Name' }, car: { label: 'Car' }, game: { label: 'Game' } } },
   new:  { name: { type: 'text', label: 'Name', required: true }, car: { type: 'text', label: 'Car (optional)' }, game: { type: 'text', label: 'Game (optional)' } },
   show: { name: { label: 'Name' }, car: { label: 'Car' }, game: { label: 'Game' } },
   edit: { name: { type: 'text', label: 'Name', required: true }, car: { type: 'text', label: 'Car (optional)' }, game: { type: 'text', label: 'Game (optional)' } },
@@ -71,14 +72,35 @@ const SimWindMain: React.FC = () => {
     localStorage.setItem(ENABLED_KEY, String(next));
   };
   const theme = getTheme();
+
+  // Just a FormCard holding a Form + a Save button (see ShakerMatrix.tsx's
+  // own profile-card doc comment) — the state/logic behind it is generic
+  // across LedsDevices/ShiftLights/SimWindDevices, so it's a shared hook,
+  // not a component.
+  const profileCard = useDeviceProfileCard({
+    addProfileMutation: ADD_PROFILE, getProfilesQuery: GET_PROFILES,
+    profilesResultKey: profileResultKey, addProfileResultKey,
+    getDevicesQuery: GET_SIM_WINDS, createDeviceMutation: CREATE_SIM_WIND, removeDeviceMutation: REMOVE_SIM_WIND,
+    devicesResultKey: 'getMonocoqueSimWindDevices', liveToInput, storageKey: STORAGE_KEY,
+  });
+
   return (
     <div>
-      <DeviceProfileSaveBar
-        addProfileMutation={ADD_PROFILE} getProfilesQuery={GET_PROFILES} addProfileResultKey={addProfileResultKey}
-        getDevicesQuery={GET_SIM_WINDS} createDeviceMutation={CREATE_SIM_WIND} removeDeviceMutation={REMOVE_SIM_WIND}
-        deviceChangedSubscription={SIM_WIND_CHANGED} devicesResultKey="getMonocoqueSimWindDevices"
-        liveToInput={(rec, pid) => liveToInput(rec, pid)} storageKey={STORAGE_KEY}
-      />
+      <FormCard style={{ maxWidth: 420, margin: 16 }}>
+        <Form
+          key={profileCard.formKey}
+          form={profileCard.schema}
+          name="profileSelect"
+          initialValues={profileCard.initialValues}
+          onChange={profileCard.handleChange}
+        />
+        <PrimaryButton
+          text={profileCard.saving ? 'Saving…' : 'Save'}
+          onClick={profileCard.handleSave}
+          disabled={!profileCard.typedName.trim() || profileCard.saving}
+        />
+        {profileCard.status && <div style={{ fontSize: '0.8em', opacity: 0.6, marginTop: 6 }}>{profileCard.status}</div>}
+      </FormCard>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 16px', background: theme.palette.neutralLighterAlt, borderBottom: `1px solid ${theme.palette.neutralTertiaryAlt}` }}>
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: '0.85em', color: theme.palette.neutralPrimary }}>
           <input type="checkbox" checked={enabled} onChange={toggle} />

@@ -25,7 +25,7 @@ const dashboardSchema = {
     onRender: ({ values }: { values: any }) => dashboardThumbnailUrl(values.dashboard?.thumbnailDay),
   },
 };
-const schemaDefinition = { list: dashboardSchema, show: dashboardSchema, edit: {}, new: {} };
+const schemaDefinition = { list: { columns: dashboardSchema, buttons: { add: true } }, show: dashboardSchema, edit: {}, new: {} };
 
 const DashboardsAdmin: React.FC = () => (
   <ReactiveAdmin

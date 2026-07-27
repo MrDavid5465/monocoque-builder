@@ -16,7 +16,7 @@ const groupSchema = {
   name: { label: 'Name' },
   defaultDash: { label: 'Default dashboard' },
 };
-const schemaDefinition = { list: groupSchema, show: {}, edit: {}, new: {} };
+const schemaDefinition = { list: { columns: groupSchema, buttons: { add: true } }, show: {}, edit: {}, new: {} };
 
 // No natural thumbnail for a group — table view, not the card/thumbnail view
 // DashboardsAdmin/CarsAdmin use.
@@ -26,7 +26,16 @@ const GroupsAdmin: React.FC = () => (
     name={name}
     schemaDefinition={schemaDefinition}
     components={{
-      list: (props: any) => <SwitchableList {...props} titleField="name" idField="id" defaultView="table" />,
+      list: (props: any) => (
+        <SwitchableList
+          {...props}
+          titleField="name"
+          idField="id"
+          defaultView="table"
+          columnSelectable
+          storageKey="groups-columns"
+        />
+      ),
       show: GroupEdit,
       edit: GroupEdit,
       new: GroupEdit,

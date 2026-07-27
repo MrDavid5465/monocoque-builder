@@ -12,6 +12,12 @@ vi.mock('../lib/denim/lib', () => ({
   IconButton: ({ onClick, title, iconProps }: any) => (
     <button onClick={onClick} title={title} aria-label={iconProps?.iconName}>{iconProps?.iconName}</button>
   ),
+  PrimaryButton: ({ onClick, title, children }: any) => (
+    <button onClick={onClick} title={title}>{children}</button>
+  ),
+  DefaultButton: ({ onClick, title, children }: any) => (
+    <button onClick={onClick} title={title}>{children}</button>
+  ),
   Icon: ({ iconName }: any) => <span>{iconName}</span>,
   getTheme: () => ({
     palette: {

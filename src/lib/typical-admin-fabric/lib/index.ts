@@ -3,6 +3,7 @@ import stylesJson from './getStyle';
 
 export { default as Form } from './templates/Form';
 export { default as ThumbnailCard } from './templates/ThumbnailCard';
+export { default as FormCard } from './templates/FormCard';
 export { useMutation, useQuery } from '@apollo/client/react';
 export {
   PrimaryButton,

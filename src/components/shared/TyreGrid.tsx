@@ -1,10 +1,16 @@
 import React, { useState, useEffect } from 'react';
+import { IconButton, Icon } from '@fluentui/react';
 import { getTheme } from '../../lib/denim/lib';
-import { cornersToConfig, configToCorners, type Corner } from './shakerUtils';
+import { cornersToConfig, configToCorners, type Corner } from './tyreGridUtils';
 
-// Extracted out of EffectRow.tsx so schemas.ts (plain .ts, no JSX) can embed
-// it as a per-form 'custom' field via React.createElement — there's no
-// standard per-form field type for a bespoke multi-button corner grid.
+// A bespoke multi-button corner-selector grid — no standard Fluent control
+// for this shape, so it's hand-rolled (see the hand-rolled-components
+// skill). Lives in components/shared/ rather than a single feature's folder
+// since it's generic within this app: used directly by Shakers'
+// ChannelHeader.tsx/CarLayout.tsx, and also wired into
+// typical-admin-fabric/lib/templates/Fabric.tsx as the 'tyre-position'
+// field type, so any per-form schema in this app can use it, not just
+// Shakers'.
 export const TyreGrid: React.FC<{ current?: string | null; onApply: (tyre: string) => void }> = ({ current, onApply }) => {
   const theme = getTheme();
   const [selected, setSelected] = useState<Set<Corner>>(() => configToCorners(current));
@@ -17,6 +23,7 @@ export const TyreGrid: React.FC<{ current?: string | null; onApply: (tyre: strin
   });
 
   const derived = cornersToConfig(selected);
+  const unchanged = derived === (current ?? null);
 
   const cellBtn = (c: Corner): React.CSSProperties => ({
     background: selected.has(c) ? theme.palette.themePrimary : theme.palette.neutralLight,
@@ -36,16 +43,19 @@ export const TyreGrid: React.FC<{ current?: string | null; onApply: (tyre: strin
         <span style={{ fontSize: '0.72em', color: derived ? theme.palette.neutralSecondary : theme.palette.redDark }}>
           {derived ?? 'Invalid'}
         </span>
-        <button
-          disabled={!derived}
+        <IconButton
+          title="Apply"
+          disabled={!derived || unchanged}
           onClick={() => derived && onApply(derived)}
-          style={{
-            border: 'none', borderRadius: 3, padding: '3px 8px',
-            fontSize: '0.75em', cursor: derived ? 'pointer' : 'not-allowed',
-            background: derived ? theme.palette.themePrimary : theme.palette.neutralLighter,
-            color: derived ? theme.palette.white : theme.palette.neutralTertiary,
+          styles={{
+            root: {
+              width: 24, height: 24,
+              background: derived && !unchanged ? theme.palette.themePrimary : undefined,
+            },
           }}
-        >Apply</button>
+        >
+          <Icon iconName="CheckMark" style={{ color: derived && !unchanged ? theme.palette.white : undefined }} />
+        </IconButton>
       </div>
     </div>
   );

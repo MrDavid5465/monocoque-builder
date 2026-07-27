@@ -1,10 +1,8 @@
 import React from 'react';
 import { useParams, useNavigate } from 'react-router';
 import { useQuery } from '@apollo/client/react';
-import { Pivot, PivotItem } from '@fluentui/react';
 import { getTheme } from '../../../lib/denim/lib';
 import ShakerMatrix from '../ShakerMatrix';
-import CarLayout from '../CarLayout';
 import { GET_PROFILE } from './queries';
 
 // ── ProfileEdit ───────────────────────────────────────────────────────────────
@@ -44,16 +42,7 @@ const ProfileEdit: React.FC = () => {
         {profile?.game && <span style={{ fontSize: '0.8em', opacity: 0.55 }}>{profile.game}</span>}
       </div>
 
-      {/* Matrix + Car Layout editors — each has its own Add/Remove Channel
-          controls now that channels are first-class (see ShakerChannel). */}
-      <Pivot>
-        <PivotItem headerText="Matrix">
-          <ShakerMatrix profileId={id ?? null} />
-        </PivotItem>
-        <PivotItem headerText="Car Layout">
-          <CarLayout profileId={id ?? null} />
-        </PivotItem>
-      </Pivot>
+      <ShakerMatrix profileId={id ?? null} />
     </div>
   );
 };

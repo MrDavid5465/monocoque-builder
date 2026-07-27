@@ -91,13 +91,53 @@ const App: React.FC<Props> = ({
   ExternalApps
 }) => {
   const { loading, data } : { loading?: boolean, data?: IMy } = useQuery(dispatcher.my);
+  const settings = (data && data.my && data.my.settings) || {};
+  // Bumped after every setTheme() call below to force one more render pass
+  // — see the effect's own comment for why this is necessary, not optional.
+  const [, forceRerender] = React.useReducer((n: number) => n + 1, 0);
+
+  // Fluent's loadTheme (inside setTheme) mutates a module-level global theme
+  // variable — it does NOT itself trigger React to re-render anything.
+  // Components that read getTheme()/getStyle() imperatively during their own
+  // render (Header, FormCard, etc., as opposed to Fluent's own components
+  // that subscribe via context) only ever pick up the new value on their
+  // *next* render. On the render that first sees new settings, this effect
+  // hasn't run yet (useLayoutEffect fires after render, before paint), so
+  // that render still uses the *old* global theme throughout — including
+  // anything remounted by the <Fabric key=.../> change below. Once this
+  // effect finally calls setTheme(), nothing forces a further render, so a
+  // component with no other reason to re-render (Header has no props/state
+  // that change; a few Fluent controls like Checkbox turned out to have the
+  // same issue) stays frozen showing the stale theme snapshot indefinitely,
+  // while something that happens to re-render again later for an unrelated
+  // reason (e.g. ShakerMatrix's own subscriptions ticking) self-corrects and
+  // makes the bug look inconsistent/partial rather than total. forceRerender
+  // triggers exactly one more render, still inside this same synchronous
+  // useLayoutEffect pass (so still before paint, no visible flash), so
+  // *everything* picks up the freshly-loaded theme together.
+  //
+  // Calling loadTheme directly in the render body (as this used to do) sidesteps
+  // this specific bug (the same render that reads getTheme() is the one after
+  // loadTheme ran) but trips React's "cannot update a component while
+  // rendering a different component" warning once settings actually change
+  // live, without a page reload in between (see Settings/index.tsx's
+  // updateSettings refetchQueries — before that fix, every theme change
+  // required a full reload, so loadTheme only ever ran once per fresh mount
+  // and neither this staleness bug nor that warning had a chance to surface).
+  React.useLayoutEffect(() => {
+    if (loading || !data) {
+      setTheme(readThemeCache() ?? { theme: "default", fontSize: 1 }, themes);
+    } else {
+      writeThemeCache(settings);
+      setTheme(settings, themes);
+    }
+    forceRerender();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, data, settings.theme, settings.fontSize]);
+
   if (loading || !data) {
-    setTheme(readThemeCache() ?? { theme: "default", fontSize: 1 }, themes);
     return <Splashscreen Icon={Logo} />;
   }
-  const settings = (data && data.my && data.my.settings) || {};
-  writeThemeCache(settings);
-  setTheme(settings || { theme: "default", fontSize: 1 }, themes);
   const style = getStyle();
   return (
     <Fabric

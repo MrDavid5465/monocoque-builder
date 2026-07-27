@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
-import { Stack, IconButton, getTheme, useQuery } from '../../../lib/denim/lib';
+import { Stack, IconButton, PrimaryButton, DefaultButton, getTheme, useQuery } from '../../../lib/denim/lib';
 import { useSubscription } from '@apollo/client/react';
 import dispatcher from '../../../lib/denim/lib/queries';
 import { useNavigate } from 'react-router';
@@ -446,58 +446,57 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
       {/* Floating toolbar */}
       <div style={{ position: 'absolute', top: 8, right: 8, zIndex: 10, display: 'flex', gap: 4 }}>
         {dashboard.baseDashType === '360' && !viewing360 && (
-          <button
+          <DefaultButton
             onClick={enter360Edit}
-            style={{ padding: '4px 10px', cursor: 'pointer', borderRadius: 4, background: 'rgba(0,0,0,0.6)', color: '#fff', border: 'none', fontSize: '0.82em' }}
             title="Open live 360° photo viewer to adjust pan/zoom"
+            styles={{ root: { height: 28, fontSize: '0.82em' } }}
           >
             Edit 360°
-          </button>
+          </DefaultButton>
         )}
         {viewing360 && (
           <>
-            <button
+            <PrimaryButton
               onClick={save360}
-              style={{ padding: '4px 10px', cursor: 'pointer', borderRadius: 4, background: '#c63', color: '#fff', border: 'none', fontSize: '0.82em' }}
               title="Capture current view as background image and exit"
+              styles={{ root: { height: 28, fontSize: '0.82em' } }}
             >
               Save
-            </button>
-            <button
+            </PrimaryButton>
+            <DefaultButton
               onClick={cancel360}
-              style={{ padding: '4px 10px', cursor: 'pointer', borderRadius: 4, background: 'rgba(0,0,0,0.6)', color: '#fff', border: 'none', fontSize: '0.82em' }}
               title="Exit 360° editing without saving"
+              styles={{ root: { height: 28, fontSize: '0.82em' } }}
             >
               Cancel
-            </button>
+            </DefaultButton>
           </>
         )}
-        {!show360 && dashboard.background && (
-          <button
-            onClick={() => setPanBgMode(m => !m)}
-            style={{
-              padding: '4px 10px', cursor: 'pointer', borderRadius: 4,
-              background: panBgMode ? '#4af' : 'rgba(0,0,0,0.6)',
-              color: '#fff', border: 'none', fontSize: '0.82em',
-            }}
-            title={panBgMode ? 'Stop panning background' : 'Drag to pan background image'}
-          >
-            Pan BG
-          </button>
-        )}
-        {dashboard.dayNight && !kioskMode && (
-          <button
-            onClick={toggleNightMode}
-            style={{
-              padding: '4px 10px', cursor: 'pointer', borderRadius: 4,
-              background: isNight ? '#339' : 'rgba(0,0,0,0.6)',
-              color: '#fff', border: 'none', fontSize: '0.82em',
-            }}
-            title={isNight ? 'Switch to day mode (all screens)' : 'Switch to night mode (all screens)'}
-          >
-            {isNight ? '☀ Day' : '🌙 Night'}
-          </button>
-        )}
+        {!show360 && dashboard.background && (() => {
+          const PanBgButton = panBgMode ? PrimaryButton : DefaultButton;
+          return (
+            <PanBgButton
+              onClick={() => setPanBgMode(m => !m)}
+              title={panBgMode ? 'Stop panning background' : 'Drag to pan background image'}
+              styles={{ root: { height: 28, fontSize: '0.82em' } }}
+            >
+              Pan BG
+            </PanBgButton>
+          );
+        })()}
+        {dashboard.dayNight && !kioskMode && (() => {
+          const NightButton = isNight ? PrimaryButton : DefaultButton;
+          return (
+            <NightButton
+              onClick={toggleNightMode}
+              title={isNight ? 'Switch to day mode (all screens)' : 'Switch to night mode (all screens)'}
+              iconProps={{ iconName: isNight ? 'ClearNight' : 'Sunny' }}
+              styles={{ root: { height: 28, fontSize: '0.82em' } }}
+            >
+              {isNight ? 'Day' : 'Night'}
+            </NightButton>
+          );
+        })()}
       </div>
       {show360 && !photoUrl ? (
         <div style={{

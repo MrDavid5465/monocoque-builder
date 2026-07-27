@@ -45,7 +45,7 @@ const recordingSchema = {
   sampleRateHz: { label: 'Rate (Hz)' },
   car: { label: 'Car' },
 };
-const schemaDefinition = { list: recordingSchema, show: {}, new: {} };
+const schemaDefinition = { list: { columns: recordingSchema, buttons: { add: true } }, show: {}, new: {} };
 
 const RecordingsAdmin: React.FC = () => (
   <ReactiveAdmin

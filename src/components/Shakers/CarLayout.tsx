@@ -5,7 +5,7 @@ import { confirmAsync } from '../../lib/denim/components/ConfirmDialog';
 import { GET_ITEMS, CREATE_ITEM, UPDATE_ITEM, REMOVE_ITEM, ITEM_CHANGED } from './queries';
 import { toInput, nextDspSlot, nextPan } from './ShakerMatrix';
 import { EffectRow, EFFECTS, EFFECT_LABELS, TYRE_SHORT, ShakerRec } from './EffectRow';
-import TyreGrid from './TyreGrid';
+import TyreGrid from '../shared/TyreGrid';
 import { GET_AUDIO_SINKS, AudioSinkInfo } from './dspQueries';
 import {
   GET_SHAKER_CHANNELS, ADD_SHAKER_CHANNEL, UPDATE_SHAKER_CHANNEL, REMOVE_SHAKER_CHANNEL,

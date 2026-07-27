@@ -6,7 +6,7 @@ import {
   Name,
   IDispatcher,
   ITACallBacks,
-  DisplaySchema,
+  ListSchema,
   IComponents,
 } from './';
 import Subscriber from './Subscriber';
@@ -14,7 +14,7 @@ interface Props {
   dispatcher: IDispatcher;
   // match?: any;
   name: Name;
-  schemaDefinition: DisplaySchema<any>;
+  schemaDefinition: ListSchema<any>;
   callBacks?: ITACallBacks;
   components?: IComponents;
 }
@@ -50,7 +50,7 @@ const List: React.FC<Props> = ({
       <table>
         <thead>
           <tr>
-            {Object.entries(schemaDefinition).map(([k, v]: any) => (
+            {Object.entries(schemaDefinition.columns).map(([k, v]: any) => (
               <th key={k}>{v.label}</th>
             ))}
           </tr>
@@ -59,7 +59,7 @@ const List: React.FC<Props> = ({
           {items[queryName].map((item: any, i: number) => {
             return (
               <tr key={item.id || i}>
-                {Object.entries(schemaDefinition).map(([k]: any) => (
+                {Object.entries(schemaDefinition.columns).map(([k]: any) => (
                   <td key={k}>
                     {item[k].onRender
                       ? item[k].onRender({ value: item[k], values: item })

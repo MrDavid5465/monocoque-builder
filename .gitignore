@@ -12,6 +12,9 @@ dist
 dist-ssr
 *.local
 
+# Playwright e2e artifacts
+/test-results/
+
 # Rust build output (src-tauri has its own .gitignore too, but this
 # covers the top level in case cargo is ever run from here)
 /src-tauri/target/

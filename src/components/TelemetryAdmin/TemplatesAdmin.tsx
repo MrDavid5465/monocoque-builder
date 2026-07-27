@@ -21,7 +21,7 @@ const templateSchema = {
     onRender: ({ value }: { value?: string }) => dashboardThumbnailUrl(value),
   },
 };
-const schemaDefinition = { list: templateSchema, show: {}, edit: {}, new: {} };
+const schemaDefinition = { list: { columns: templateSchema, buttons: { add: true } }, show: {}, edit: {}, new: {} };
 
 const TemplatesAdmin: React.FC = () => (
   <ReactiveAdmin
