@@ -32,6 +32,41 @@ form system on the frontend.
 - Storage: a single JSON document via `typiql-adapter-json`, no database
   required.
 
+## Releases & installation
+
+Every merge to `master` that includes a
+[Conventional Commits](https://www.conventionalcommits.org/)-style commit
+(`feat:`, `fix:`, etc.) is picked up by
+[release-please](https://github.com/googleapis/release-please), which opens
+a PR bumping the version and changelog; merging that PR tags a release and
+triggers a build that attaches Linux packages to the corresponding
+[GitHub Release](https://github.com/MrDavid5465/telemetry-admin/releases).
+Only Linux builds are produced today — no Windows/macOS packages yet.
+
+Install the latest release with whichever matches your distro:
+
+- **Arch Linux (AUR)**: `paru -S telemetry-admin` (or your AUR helper of
+  choice) — installs the `typiql` binary. The PKGBUILD is validated against
+  a real Arch container on every PR; publishing to the AUR itself is a
+  manual, deliberate step (see `.github/workflows/publish-aur.yml`).
+- **Debian/Ubuntu**: download the `.deb` asset from the
+  [latest release](https://github.com/MrDavid5465/telemetry-admin/releases/latest)
+  and `sudo dpkg -i typiql_*.deb` (then `sudo apt-get install -f` if it
+  reports missing dependencies).
+- **Fedora/RPM-based**: download the `.rpm` asset and
+  `sudo dnf install ./typiql-*.rpm` (or `rpm -i`).
+- **Any other Linux**: download the `.AppImage` asset, `chmod +x` it, and
+  run it directly — no install step required.
+
+All three package formats need `webkit2gtk-4.1`, `gtk3`, and
+`libayatana-appindicator` (or your distro's equivalent) available; the
+`.deb`/`.rpm` declare these as dependencies, the AppImage does not bundle
+them. The shaker DSP feature additionally needs PipeWire with
+`pactl`/`pw-cli`/`pw-dump`.
+
+A Flatpak build (`.github/workflows/flatpak.yml`) exists but is still
+best-effort and unverified — don't rely on it yet.
+
 ## Development
 
 Requires Node.js, Rust, and (for the shaker DSP feature) PipeWire with
