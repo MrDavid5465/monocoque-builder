@@ -105,10 +105,9 @@ describe('ALL_SCHEMAS', () => {
     }
   });
 
-  it('needle-gauge has binding and rotation-pivot fields', () => {
+  it('needle-gauge is bindable and has rotation-pivot fields', () => {
     const schema = getSchema('needle-gauge');
-    expect(schema.fields.binding).toBeDefined();
-    expect(schema.fields.binding.type).toBe('telemetry-binding');
+    expect(schema.bindable).toBe(true);
     expect(schema.fields.rotationX).toBeDefined();
     expect(schema.fields.rotationY).toBeDefined();
   });
