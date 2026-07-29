@@ -3,6 +3,9 @@ import { useQuery, useMutation, useSubscription } from '@apollo/client/react';
 import { useNavigate, useLocation } from 'react-router';
 import { getTheme } from '../../../lib/denim/lib';
 import { confirmAsync } from '../../../lib/denim/components/ConfirmDialog';
+import DetailsGrid from '../../../lib/typical-admin-fabric/lib/List';
+import { RowButtonConfig } from '../../../lib/typical-admin-fabric/lib/ListControls';
+import { DisplaySchema } from '../../../lib/typical-admin';
 import { GET_PROFILES, REMOVE_PROFILE, PROFILE_CHANGED, SoundDeviceProfile } from './queries';
 import { GET_ITEMS, CREATE_ITEM, REMOVE_ITEM, ITEM_CHANGED } from '../queries';
 import { ShakerRec, EFFECT_LABELS } from '../EffectRow';
@@ -14,8 +17,8 @@ import {
 // the default ReactiveAdmin list so a "Load" action (clone a saved
 // profile's ShakerChannel + MonocoqueSoundDevice rows into the live scope —
 // the inverse of index.tsx's SaveBar/cloneToProfile) can sit alongside the
-// usual Edit/Delete actions. Kept as a standalone hand-rolled table (not a
-// per-form) since this is plain tabular admin UI, not a data-entry form.
+// usual Edit/Delete actions. Rendered through the shared DetailsGrid, same
+// as every other admin list in the app, rather than a hand-rolled table.
 const ProfilesList: React.FC<{ dispatcher?: any; name?: any; schemaDefinition?: any }> = () => {
   const theme = getTheme();
   const navigate = useNavigate();
@@ -115,78 +118,37 @@ const ProfilesList: React.FC<{ dispatcher?: any; name?: any; schemaDefinition?: 
     await removeProfile({ variables: { id: profile.id } });
   };
 
-  const th: React.CSSProperties = {
-    textAlign: 'left', padding: '8px 12px', fontSize: '0.8em', fontWeight: 600,
-    background: theme.palette.neutralLight,
-    borderBottom: `2px solid ${theme.palette.neutralTertiaryAlt}`,
+  const schema: DisplaySchema<any> = {
+    name: { label: 'Name', options: { minWidth: 140, maxWidth: 220 } },
+    car: {
+      label: 'Car',
+      onRender: ({ values }) => <span style={{ opacity: values.car ? 1 : 0.35 }}>{values.car ?? '—'}</span>,
+    },
+    game: {
+      label: 'Game',
+      onRender: ({ values }) => <span style={{ opacity: values.game ? 1 : 0.35 }}>{values.game ?? '—'}</span>,
+    },
+    effects: {
+      label: 'Effects',
+      onRender: ({ values }) => <span style={{ fontSize: '0.8em', opacity: 0.7 }}>{effectsSummary[values.id]}</span>,
+    },
   };
-  const td: React.CSSProperties = {
-    padding: '8px 12px', fontSize: '0.875em',
-    borderBottom: `1px solid ${theme.palette.neutralLighter}`,
-    verticalAlign: 'middle',
-  };
-  const btnBase: React.CSSProperties = {
-    border: 'none', borderRadius: 4, cursor: 'pointer', padding: '4px 10px',
-    fontSize: '0.8em', marginRight: 6,
-  };
+
+  const rowButtons: RowButtonConfig[] = [
+    { key: 'edit', label: 'Edit', icon: 'Edit', onClick: (p) => navigate(`/shakers/profiles/${p.id}/edit`) },
+    { key: 'load', label: 'Load', icon: 'Download', onClick: handleLoad },
+    { key: 'delete', label: 'Delete', icon: 'Delete', danger: true, onClick: handleDelete },
+  ];
 
   return (
     <div style={{ padding: 16, color: theme.palette.neutralPrimary }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-        <h3 style={{ margin: 0 }}>Profiles</h3>
-        <button
-          style={{ ...btnBase, background: theme.palette.themePrimary, color: '#fff', padding: '6px 14px' }}
-          onClick={() => navigate(`${base}/new`)}
-        >
-          + New Profile
-        </button>
-      </div>
-
-      {profiles.length === 0 ? (
-        <div style={{ opacity: 0.5, padding: '12px 0' }}>No profiles yet.</div>
-      ) : (
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead>
-            <tr>
-              <th style={th}>Name</th>
-              <th style={th}>Car</th>
-              <th style={th}>Game</th>
-              <th style={th}>Effects</th>
-              <th style={th} />
-            </tr>
-          </thead>
-          <tbody>
-            {profiles.map(p => (
-              <tr key={p.id}>
-                <td style={{ ...td, fontWeight: 600 }}>{p.name}</td>
-                <td style={{ ...td, opacity: p.car ? 1 : 0.35 }}>{p.car ?? '—'}</td>
-                <td style={{ ...td, opacity: p.game ? 1 : 0.35 }}>{p.game ?? '—'}</td>
-                <td style={{ ...td, fontSize: '0.8em', opacity: 0.7 }}>{effectsSummary[p.id]}</td>
-                <td style={{ ...td, whiteSpace: 'nowrap' }}>
-                  <button
-                    style={{ ...btnBase, background: theme.palette.neutralLight, color: theme.palette.neutralPrimary }}
-                    onClick={() => navigate(`/shakers/profiles/${p.id}/edit`)}
-                  >
-                    Edit
-                  </button>
-                  <button
-                    style={{ ...btnBase, background: theme.palette.themeSecondary, color: '#fff' }}
-                    onClick={() => handleLoad(p)}
-                  >
-                    Load
-                  </button>
-                  <button
-                    style={{ ...btnBase, background: theme.palette.neutralLight, color: theme.palette.redDark }}
-                    onClick={() => handleDelete(p)}
-                  >
-                    Delete
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <h3 style={{ margin: '0 0 10px' }}>Profiles</h3>
+      {profiles.length === 0 && (
+        <div style={{ opacity: 0.5, padding: '0 0 8px' }}>
+          No profiles yet — click "Add" (top-right of the grid) to get started.
+        </div>
       )}
+      <DetailsGrid name="ShakerProfiles" items={profiles} schema={schema} onAdd={() => navigate(`${base}/new`)} rowButtons={rowButtons} />
     </div>
   );
 };

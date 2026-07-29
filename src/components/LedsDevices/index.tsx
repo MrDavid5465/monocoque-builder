@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { Routes, Route, useParams, useNavigate } from 'react-router-dom';
 import { PrimaryButton } from '@fluentui/react';
 import ReactiveAdmin from '../../lib/typical-admin-fabric';
@@ -13,8 +13,6 @@ import {
 import { GET_LEDS, CREATE_LEDS, REMOVE_LEDS, LEDS_CHANGED } from '../Shakers/LedsDevices/queries';
 import { LedsDeviceRec } from '../Shakers/LedsDevices/queries';
 
-const ENABLED_KEY = 'leds_enabled';
-
 function liveToInput(rec: LedsDeviceRec, profileId: string | null) {
   return { devpath: rec.devpath, baud: rec.baud, numLeds: rec.numLeds, startLed: rec.startLed, endLed: rec.endLed, config: rec.config, profileId };
 }
@@ -28,24 +26,19 @@ const profileSchema = {
 const dispatcher = { list: GET_PROFILES, show: GET_PROFILES, new: ADD_PROFILE, edit: ADD_PROFILE, delete: REMOVE_PROFILE, subscribe: PROFILE_CHANGED };
 const name = { singular: 'LedsDeviceProfile', plural: 'LedsDeviceProfiles' };
 
-const ProfilesList: React.FC<any> = (props) => {
-  const [enabled] = useState(() => localStorage.getItem(ENABLED_KEY) !== 'false');
-  return (
-    <DeviceProfilesList
-      {...props}
-      getProfilesQuery={GET_PROFILES} addProfileMutation={ADD_PROFILE}
-      removeProfileMutation={REMOVE_PROFILE} profileChangedSubscription={PROFILE_CHANGED}
-      profilesResultKey={profileResultKey} addProfileResultKey={addProfileResultKey}
-      getDevicesQuery={GET_LEDS} createDeviceMutation={CREATE_LEDS}
-      removeDeviceMutation={REMOVE_LEDS} deviceChangedSubscription={LEDS_CHANGED}
-      devicesResultKey="getMonocoqueLedsDevices"
-      liveToInput={liveToInput}
-      defaultDevice={(profileId: string) => ({ ...{ devpath: '/dev/simdev0', baud: 115200, numLeds: 6, startLed: 0, endLed: 5, config: '~/.config/monocoque/rpms_and_flags.lua' }, profileId })}
-      storageKey={STORAGE_KEY}
-      enabled={enabled}
-    />
-  );
-};
+const ProfilesList: React.FC<any> = (props) => (
+  <DeviceProfilesList
+    {...props}
+    getProfilesQuery={GET_PROFILES}
+    removeProfileMutation={REMOVE_PROFILE} profileChangedSubscription={PROFILE_CHANGED}
+    profilesResultKey={profileResultKey}
+    getDevicesQuery={GET_LEDS} createDeviceMutation={CREATE_LEDS}
+    removeDeviceMutation={REMOVE_LEDS} deviceChangedSubscription={LEDS_CHANGED}
+    devicesResultKey="getMonocoqueLedsDevices"
+    liveToInput={liveToInput}
+    storageKey={STORAGE_KEY}
+  />
+);
 
 const ProfileEdit: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -65,14 +58,6 @@ const ProfileEdit: React.FC = () => {
 };
 
 const LedsMain: React.FC = () => {
-  const [enabled, setEnabled] = useState(() => localStorage.getItem(ENABLED_KEY) !== 'false');
-  const toggle = () => {
-    const next = !enabled;
-    setEnabled(next);
-    localStorage.setItem(ENABLED_KEY, String(next));
-  };
-  const theme = getTheme();
-
   // Just a FormCard holding a Form + a Save button (see ShakerMatrix.tsx's
   // own profile-card doc comment) — the state/logic behind it is generic
   // across LedsDevices/ShiftLights/SimWindDevices, so it's a shared hook,
@@ -101,13 +86,7 @@ const LedsMain: React.FC = () => {
         />
         {profileCard.status && <div style={{ fontSize: '0.8em', opacity: 0.6, marginTop: 6 }}>{profileCard.status}</div>}
       </FormCard>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 16px', background: theme.palette.neutralLighterAlt, borderBottom: `1px solid ${theme.palette.neutralTertiaryAlt}` }}>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: '0.85em', color: theme.palette.neutralPrimary }}>
-          <input type="checkbox" checked={enabled} onChange={toggle} />
-          LED Controllers enabled
-        </label>
-      </div>
-      <LedsDeviceList enabled={enabled} />
+      <LedsDeviceList />
     </div>
   );
 };

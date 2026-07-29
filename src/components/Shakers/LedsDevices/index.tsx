@@ -1,14 +1,14 @@
-import React, { useEffect, useRef } from 'react';
+import React from 'react';
 import { useQuery, useMutation, useSubscription } from '@apollo/client/react';
-import { IconButton } from '@fluentui/react';
 import { getTheme, Form } from '../../../lib/denim/lib';
 import { confirmAsync } from '../../../lib/denim/components/ConfirmDialog';
 import DetailsGrid from '../../../lib/typical-admin-fabric/lib/List';
+import { RowButtonConfig } from '../../../lib/typical-admin-fabric/lib/ListControls';
 import { DisplaySchema } from '../../../lib/typical-admin';
 import { GET_LEDS, CREATE_LEDS, UPDATE_LEDS, REMOVE_LEDS, LEDS_CHANGED, LedsDeviceRec } from './queries';
 import { DEFAULT_LEDS_DEVICE } from '../../../mock/ledsDeviceMock';
 
-interface Props { profileId?: string | null; enabled?: boolean; }
+interface Props { profileId?: string | null; }
 
 // One tiny per-form Form per cell, committing immediately on change (diffed
 // directly against the row's own current value — no Save button needed, no
@@ -35,9 +35,9 @@ const FieldCell: React.FC<{
   />
 );
 
-const LedsDevices: React.FC<Props> = ({ profileId = null, enabled = true }) => {
+const LedsDevices: React.FC<Props> = ({ profileId = null }) => {
   const theme = getTheme();
-  const { data, loading } = useQuery(GET_LEDS);
+  const { data } = useQuery(GET_LEDS);
   useSubscription(LEDS_CHANGED);
   const [create] = useMutation(CREATE_LEDS, { refetchQueries: [{ query: GET_LEDS }] });
   const [update] = useMutation(UPDATE_LEDS, { refetchQueries: [{ query: GET_LEDS }] });
@@ -45,14 +45,6 @@ const LedsDevices: React.FC<Props> = ({ profileId = null, enabled = true }) => {
 
   const allRecords: LedsDeviceRec[] = (data as any)?.getMonocoqueLedsDevices ?? [];
   const records = allRecords.filter(r => (r.profileId ?? null) === profileId);
-
-  const seededRef = useRef(false);
-  useEffect(() => {
-    if (!enabled || profileId !== null || loading || seededRef.current) return;
-    if (allRecords.length > 0) { seededRef.current = true; return; }
-    seededRef.current = true;
-    create({ variables: { values: DEFAULT_LEDS_DEVICE } });
-  }, [enabled, profileId, loading, allRecords.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleAdd = () => create({ variables: { values: { ...DEFAULT_LEDS_DEVICE, profileId } } });
   const handleRemove = async (r: LedsDeviceRec) => {
@@ -76,14 +68,11 @@ const LedsDevices: React.FC<Props> = ({ profileId = null, enabled = true }) => {
     startLed: field('startLed', 'Start', true),
     endLed: field('endLed', 'End', true),
     config: { ...field('config', 'Config'), options: { minWidth: 220, maxWidth: 360 } },
-    actions: {
-      label: '',
-      options: { minWidth: 40, maxWidth: 48 },
-      onRender: ({ values }: { values: LedsDeviceRec }) => (
-        <IconButton iconProps={{ iconName: 'Delete' }} title="Remove" onClick={() => handleRemove(values)} />
-      ),
-    },
   };
+
+  const rowButtons: RowButtonConfig<LedsDeviceRec>[] = [
+    { key: 'remove', label: 'Remove', icon: 'Delete', danger: true, onClick: handleRemove },
+  ];
 
   return (
     <div style={{ padding: profileId ? 0 : 16, color: theme.palette.neutralPrimary }}>
@@ -93,7 +82,7 @@ const LedsDevices: React.FC<Props> = ({ profileId = null, enabled = true }) => {
           No LED controllers configured yet — click "Add" (top-right of the grid) to get started.
         </div>
       )}
-      <DetailsGrid name="LedsDevices" items={records} schema={schema} onAdd={handleAdd} />
+      <DetailsGrid name="LedsDevices" items={records} schema={schema} onAdd={handleAdd} rowButtons={rowButtons} />
     </div>
   );
 };

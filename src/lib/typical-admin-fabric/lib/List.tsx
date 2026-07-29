@@ -9,7 +9,7 @@ import {
   IconButton,
   Icon,
 } from '.';
-import ListControls, { ListButtonConfig } from './ListControls';
+import ListControls, { ListButtonConfig, RowButtonConfig } from './ListControls';
 import { ColumnVisibilityStore, localStorageColumnVisibilityStore } from './columnVisibilityStore';
 import { IColumn, CheckboxVisibility } from '@fluentui/react';
 import { matchSorter } from 'match-sorter';
@@ -45,6 +45,14 @@ interface Props {
   onAdd?: () => void;
   // Arbitrary grid-level actions beyond add/columns (see ListControls).
   customButtons?: ListButtonConfig[];
+  // Row action buttons (Edit/Load/Delete, etc.) — declarative replacement
+  // for callers hand-writing their own `actions` DisplayField with inline
+  // IconButton JSX. Rendered in the grid's own toolbar (alongside
+  // Add/Columns), enabled only once a row is selected via the grid's
+  // existing click-to-select mechanism (DetailsList's onActiveItemChanged,
+  // already wired below), and act on that selected row — not inline in
+  // each row.
+  rowButtons?: RowButtonConfig[];
 }
 
 const List: React.FC<Props> = ({
@@ -60,12 +68,14 @@ const List: React.FC<Props> = ({
   alwaysVisibleColumns,
   onAdd,
   customButtons,
+  rowButtons,
 }) => {
   const [filters, setFilters] = useState<IndexableObject>({});
   const [sort, setSort] = useState<IndexableObject>({});
   let filteredItems = items;
   const style = getStyle();
   const [page, setPage] = useState(0);
+  const [selectedItem, setSelectedItem] = useState<any>(null);
 
   const resolvedStorageKey = storageKey ?? name;
   const [hiddenColumns, setHiddenColumns] = useState<Set<string>>(
@@ -79,8 +89,24 @@ const List: React.FC<Props> = ({
     return acc;
   }, {} as Record<string, any>);
   function handleSelect(item?: any) {
+    if (rowButtons?.length) setSelectedItem(item ?? null);
     onSelect && onSelect(item);
   }
+  // Row buttons act on whichever row is currently selected — clearing the
+  // selection after acting avoids a stale reference to a since-mutated (or
+  // deleted) row still being the target of the next click.
+  const selectionButtons: ListButtonConfig[] = (rowButtons ?? []).map(btn => ({
+    key: btn.key,
+    label: btn.label,
+    icon: btn.icon,
+    danger: btn.danger,
+    disabled: !selectedItem || !!btn.disabled?.(selectedItem),
+    onClick: () => {
+      if (!selectedItem) return;
+      btn.onClick(selectedItem);
+      setSelectedItem(null);
+    },
+  }));
   function handleChange(name: string, value: any) {
     setPage(0);
     setFilters({ ...filters, [name]: value });
@@ -219,7 +245,7 @@ const List: React.FC<Props> = ({
           </Stack>
         )} */}
 
-        <div style={{ position: 'relative', paddingTop: (columnSelectable || onAdd || customButtons?.length) ? 36 : 0 }}>
+        <div style={{ position: 'relative', paddingTop: (columnSelectable || onAdd || customButtons?.length || rowButtons?.length) ? 36 : 0 }}>
           <ListControls
             columnSelectable={columnSelectable}
             visibleCount={visibleCount}
@@ -232,7 +258,7 @@ const List: React.FC<Props> = ({
               columnVisibilityStore.writeHidden(resolvedStorageKey, nextHidden);
             }}
             onAdd={onAdd}
-            customButtons={customButtons}
+            customButtons={[...(customButtons ?? []), ...selectionButtons]}
           />
           <DetailsList
             onActiveItemChanged={handleSelect}
