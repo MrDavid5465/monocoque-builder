@@ -54,6 +54,11 @@ interface Props {
   forceNightPreview?: boolean;
   skipTransition?: boolean;
   telemetryData?: Record<string, number>;
+  // True only while the kiosk boot-up sweep animation is actively running —
+  // used to hold nodes with `binding.startupSweep === false` at their rest
+  // value even though `telemetryData` may hold a swept value for their field
+  // (shared per field name, not per node — see canvasUtils.ts).
+  kioskSweepActive?: boolean;
   globalSteerMaxDeg?: number;
   panBgMode?: boolean;
   liveBackground?: React.ReactNode;
@@ -483,6 +488,7 @@ interface NodeRendererProps {
   spriteUrl: (file: string) => string;
   kioskMode: boolean;
   telemetryData: Record<string, number>;
+  kioskSweepActive: boolean;
   isNight: boolean;
   dayNight: boolean;
   skipTransition: boolean;
@@ -492,14 +498,15 @@ interface NodeRendererProps {
 }
 
 const NodeRenderer: React.FC<NodeRendererProps> = ({
-  node, absX, absY, selectedId, onSelect, startDrag, startGroupResize, spriteUrl, kioskMode, telemetryData, isNight, dayNight, skipTransition,
+  node, absX, absY, selectedId, onSelect, startDrag, startGroupResize, spriteUrl, kioskMode, telemetryData, kioskSweepActive, isNight, dayNight, skipTransition,
   registerCounterRotate, gamepadMappings, simStatus,
 }) => {
   const nodeAbsX = absX + node.x;
   const nodeAbsY = absY + node.y;
   const isSelected = node.id === selectedId;
+  const excludeFromSweep = kioskSweepActive && node.binding?.startupSweep === false;
 
-  const sharedChildProps = { selectedId, onSelect, startDrag, startGroupResize, spriteUrl, kioskMode, telemetryData, isNight, dayNight, skipTransition, registerCounterRotate, gamepadMappings, simStatus };
+  const sharedChildProps = { selectedId, onSelect, startDrag, startGroupResize, spriteUrl, kioskMode, telemetryData, kioskSweepActive, isNight, dayNight, skipTransition, registerCounterRotate, gamepadMappings, simStatus };
 
   // Groups wrap children in a positioned div so counter-rotation has a well-defined origin.
   if (node.type === 'group') {
@@ -580,7 +587,7 @@ const NodeRenderer: React.FC<NodeRendererProps> = ({
     node.type === 'sprite-bar-gauge' ||
     node.type === 'sprite-text-gauge'
   ) {
-    const deg = computeRotation(node, telemetryData);
+    const deg = computeRotation(node, telemetryData, excludeFromSweep);
     const pivX = node.rotationX ?? Math.round((node.width ?? 100) / 2);
     const pivY = node.rotationY ?? Math.round((node.height ?? 100) / 2);
     const imgLeft = node.type === 'needle-gauge' ? nodeAbsX - pivX : nodeAbsX;
@@ -591,7 +598,7 @@ const NodeRenderer: React.FC<NodeRendererProps> = ({
     // sprite-bar-gauge: clip the filled image based on fill fraction
     let clipPath: string | undefined;
     if (node.type === 'sprite-bar-gauge') {
-      const frac = fillFraction(node, telemetryData);
+      const frac = fillFraction(node, telemetryData, excludeFromSweep);
       const dir = node.fillDirection ?? 'ltr';
       if (dir === 'ltr') clipPath = `inset(0 ${Math.round((1 - frac) * 100)}% 0 0)`;
       else if (dir === 'rtl') clipPath = `inset(0 0 0 ${Math.round((1 - frac) * 100)}%)`;
@@ -601,7 +608,7 @@ const NodeRenderer: React.FC<NodeRendererProps> = ({
 
     // sprite-text-gauge: render individual character cells
     if (node.type === 'sprite-text-gauge' && node.charWidth && node.charHeight) {
-      const rawVal = applyBinding(node, telemetryData);
+      const rawVal = applyBinding(node, telemetryData, excludeFromSweep);
       const formatted = `${node.prefix ?? ''}${formatValue(rawVal, node.format)}${node.suffix ?? ''}`;
       const charMap = node.charMap ?? '0123456789. :-';
       const cw = node.charWidth;
@@ -736,7 +743,7 @@ const NodeRenderer: React.FC<NodeRendererProps> = ({
 
   // ── text-gauge ──
   if (node.type === 'text-gauge') {
-    const rawVal = applyBinding(node, telemetryData);
+    const rawVal = applyBinding(node, telemetryData, excludeFromSweep);
     const display = `${node.prefix ?? ''}${formatValue(rawVal, node.format)}${node.suffix ?? ''}`;
     return (
       <>
@@ -768,8 +775,8 @@ const NodeRenderer: React.FC<NodeRendererProps> = ({
 
   // ── graph-bar-gauge ──
   if (node.type === 'graph-bar-gauge') {
-    const frac = fillFraction(node, telemetryData);
-    const cfrac = colorFraction(node, telemetryData);
+    const frac = fillFraction(node, telemetryData, excludeFromSweep);
+    const cfrac = colorFraction(node, telemetryData, excludeFromSweep);
     const w = node.width ?? 200;
     const h = node.height ?? 24;
     const gt = node.graphType ?? 'h-bar';
@@ -788,7 +795,7 @@ const NodeRenderer: React.FC<NodeRendererProps> = ({
       ? (cfrac < 0.5 ? lerp(lo, mid, cfrac * 2) : lerp(mid, hi, (cfrac - 0.5) * 2))
       : lerp(lo, hi, cfrac);
 
-    const rawVal = applyBinding(node, telemetryData);
+    const rawVal = applyBinding(node, telemetryData, excludeFromSweep);
     const display = formatValue(rawVal, node.format ?? 'integer');
     const segs = node.segments ?? 12;
 
@@ -1074,7 +1081,7 @@ const NodeRenderer: React.FC<NodeRendererProps> = ({
       <GifGaugeNode
         node={node} nodeAbsX={nodeAbsX} nodeAbsY={nodeAbsY}
         isSelected={isSelected} onSelect={onSelect} startDrag={startDrag}
-        spriteUrl={spriteUrl} telemetryData={telemetryData} simStatus={simStatus}
+        spriteUrl={spriteUrl} telemetryData={telemetryData} excludeFromSweep={excludeFromSweep} simStatus={simStatus}
         kioskMode={kioskMode} registerCounterRotate={registerCounterRotate}
         childEls={childEls}
       />
@@ -1089,6 +1096,7 @@ const NodeRenderer: React.FC<NodeRendererProps> = ({
 // ---------------------------------------------------------------------------
 const Canvas = forwardRef<CanvasHandle, Props>(({
   dashboard, sprites, gamepadMappings = [], selectedId, onSelect, onUpdate, onUpdateDashboard, kioskMode, onKioskButton, isNight: isNightProp, onToggleNightMode, forceNightPreview, skipTransition, telemetryData,
+  kioskSweepActive = false,
   globalSteerMaxDeg, panBgMode, liveBackground, liveBackgroundInteractive, liveBackgroundIsNightPhoto, simStatus = '',
 }, ref) => {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -1262,6 +1270,7 @@ const Canvas = forwardRef<CanvasHandle, Props>(({
   const nodeProps = {
     selectedId, onSelect, startDrag, startGroupResize, spriteUrl, kioskMode,
     telemetryData: telemetryData ?? {},
+    kioskSweepActive,
     isNight, dayNight: dashboard.dayNight, skipTransition: skipTransition ?? false,
     registerCounterRotate,
     gamepadMappings,

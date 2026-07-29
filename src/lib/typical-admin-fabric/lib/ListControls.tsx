@@ -7,6 +7,23 @@ export interface ListButtonConfig {
   icon: string;
   onClick: () => void;
   disabled?: boolean;
+  // Tints the icon red — the established look for a destructive action.
+  danger?: boolean;
+}
+
+// Per-row equivalent of ListButtonConfig — same {key,label,icon} shape, but
+// onClick/disabled receive the row's own values, since a row action needs to
+// know which row it's acting on (there's no single "current" row the way a
+// grid-level toolbar button has nothing to be "current").
+export interface RowButtonConfig<T = any> {
+  key: string;
+  label: string;
+  icon: string;
+  onClick: (item: T) => void;
+  disabled?: (item: T) => boolean;
+  // Tints the icon red — the established look for a destructive action
+  // (see e.g. the old hand-rolled Delete buttons this replaces).
+  danger?: boolean;
 }
 
 interface Props {
@@ -50,7 +67,7 @@ const ListControls: React.FC<Props> = ({
       >
         {customButtons?.map(btn => (
           <IconButton key={btn.key} title={btn.label} disabled={btn.disabled} onClick={btn.onClick}>
-            <Icon iconName={btn.icon} />
+            <Icon iconName={btn.icon} style={btn.danger && !btn.disabled ? { color: theme.palette.redDark } : undefined} />
           </IconButton>
         ))}
         {onAdd && (

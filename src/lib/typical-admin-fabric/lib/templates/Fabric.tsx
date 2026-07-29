@@ -44,205 +44,6 @@ const Feedback = withConditionalRender(
   }
 );
 
-// Slider + number input pair, used standalone by the 'range'/'slider' case
-// (inline in Raw's switch, sharing Raw's own rawNum/numFocused state) and
-// repeated 4-5 times inside TelemetryBindingField below, where each row
-// needs its own independent debounce-while-focused buffer — can't reuse
-// Raw's single rawNum/numFocused since this renders multiple number inputs
-// at once.
-const BindingSliderRow = ({
-  label, value, min = -99999, max = 99999, step = 1, onChange, onActivate, onDeactivate,
-}: {
-  label: string;
-  value: number;
-  min?: number;
-  max?: number;
-  step?: number;
-  onChange: (v: number) => void;
-  onActivate?: () => void;
-  onDeactivate?: () => void;
-}) => {
-  const [raw, setRaw] = useState(String(value));
-  const focused = useRef(false);
-  useEffect(() => {
-    if (!focused.current) setRaw(String(value));
-  }, [value]);
-  const theme = getTheme();
-  return (
-    <Stack>
-      <label style={{ fontSize: '0.85em', marginBottom: 2 }}>{label}</label>
-      <Stack horizontal verticalAlign="center" tokens={{ childrenGap: 8 }}>
-        <input
-          type="range"
-          min={min} max={max} step={step}
-          value={value}
-          onChange={e => { const n = parseFloat(e.target.value); setRaw(String(n)); onChange(n); }}
-          onPointerDown={onActivate}
-          onPointerUp={onDeactivate}
-          style={{ flex: 1, accentColor: theme.palette.themePrimary, cursor: 'pointer', height: 20, margin: 0 }}
-        />
-        <input
-          type="number"
-          min={min} max={max} step={step}
-          value={raw}
-          onFocus={() => { focused.current = true; }}
-          onChange={e => setRaw(e.target.value)}
-          onBlur={e => {
-            focused.current = false;
-            const n = parseFloat(e.target.value);
-            if (!isNaN(n)) onChange(n);
-            else setRaw(String(value));
-          }}
-          onKeyDown={e => {
-            if (e.key === 'Enter') {
-              const n = parseFloat((e.target as HTMLInputElement).value);
-              if (!isNaN(n)) onChange(n);
-              else setRaw(String(value));
-            }
-          }}
-          style={{ width: 60, textAlign: 'right' }}
-        />
-      </Stack>
-    </Stack>
-  );
-};
-
-const TELEMETRY_BINDING_FIELDS = [
-  'rpm', 'speed', 'gear', 'throttle', 'brake', 'clutch', 'steering',
-  'gLat', 'gLon', 'gVert', 'fuel', 'turboBoost',
-  'tyreTempFl', 'tyreTempFr', 'tyreTempRl', 'tyreTempRr',
-  'tyreWearFl', 'tyreWearFr', 'tyreWearRl', 'tyreWearRr',
-];
-
-// Value shape: { field, inputMin, inputMax, outputMin, outputMax, influence?:
-// { field, weight }, advanced?: string } | undefined. `rest.onPreviewTelemetry
-// (data: Record<string,number> | null): void` is optional — while present,
-// dragging any of the input-range sliders live-previews that telemetry value
-// (outputMin/outputMax preview via the corresponding inputMin/inputMax,
-// showing what input would produce that output — an intentional asymmetry,
-// not a bug), releasing clears the preview.
-const TelemetryBindingField = ({
-  className, label, value: binding, onChange, onPreviewTelemetry,
-  errors = [], isValid = true, isDirty = false, isTouched = false,
-}: {
-  className?: string;
-  label?: string;
-  value?: any;
-  onChange: (v: any) => void;
-  onPreviewTelemetry?: (data: Record<string, number> | null) => void;
-  errors?: string[];
-  isValid?: boolean;
-  isDirty?: boolean;
-  isTouched?: boolean;
-}) => {
-  // Matches BindingEditor's original behavior exactly: always starts
-  // collapsed to simple mode, even if an advanced expression was previously
-  // saved — not something to "fix" as part of porting this field.
-  const [advanced, setAdvanced] = useState(false);
-  const style = getStyle();
-
-  const previewMin = () => binding && onPreviewTelemetry?.({ [binding.field]: binding.inputMin });
-  const previewMax = () => binding && onPreviewTelemetry?.({ [binding.field]: binding.inputMax });
-  const clearPreview = () => onPreviewTelemetry?.(null);
-
-  return (
-    <Stack className={className} tokens={{ childrenGap: 6 }}>
-      <Stack horizontal verticalAlign="center" horizontalAlign="space-between">
-        {label && <Label>{label}</Label>}
-        {binding && (
-          <button
-            onClick={() => onChange(undefined)}
-            style={{ fontSize: '0.75em', padding: '1px 8px', cursor: 'pointer' }}
-          >Remove</button>
-        )}
-      </Stack>
-
-      {!binding && (
-        <button
-          onClick={() => onChange({ field: 'rpm', inputMin: 0, inputMax: 8000, outputMin: 0, outputMax: 360 })}
-          style={{ padding: '3px 12px', cursor: 'pointer', alignSelf: 'flex-start' }}
-        >Add binding</button>
-      )}
-
-      {binding && (
-        <>
-          <Stack>
-            <label style={{ fontSize: '0.85em' }}>Field</label>
-            <select value={binding.field} onChange={e => onChange({ ...binding, field: e.target.value })}>
-              {TELEMETRY_BINDING_FIELDS.map(f => <option key={f} value={f}>{f}</option>)}
-            </select>
-          </Stack>
-
-          <BindingSliderRow
-            label="Input min" value={binding.inputMin} min={-99999} max={99999}
-            onChange={v => { onChange({ ...binding, inputMin: v }); onPreviewTelemetry?.({ [binding.field]: v }); }}
-            onActivate={previewMin} onDeactivate={clearPreview}
-          />
-          <BindingSliderRow
-            label="Input max" value={binding.inputMax} min={-99999} max={99999}
-            onChange={v => { onChange({ ...binding, inputMax: v }); onPreviewTelemetry?.({ [binding.field]: v }); }}
-            onActivate={previewMax} onDeactivate={clearPreview}
-          />
-          <BindingSliderRow
-            label="Output min" value={binding.outputMin} min={-720} max={720}
-            onChange={v => { onChange({ ...binding, outputMin: v }); onPreviewTelemetry?.({ [binding.field]: binding.inputMin }); }}
-            onActivate={previewMin} onDeactivate={clearPreview}
-          />
-          <BindingSliderRow
-            label="Output max" value={binding.outputMax} min={-720} max={720}
-            onChange={v => { onChange({ ...binding, outputMax: v }); onPreviewTelemetry?.({ [binding.field]: binding.inputMax }); }}
-            onActivate={previewMax} onDeactivate={clearPreview}
-          />
-
-          <Stack horizontal verticalAlign="center" tokens={{ childrenGap: 8 }}>
-            <input type="checkbox" checked={advanced} onChange={e => setAdvanced(e.target.checked)} />
-            <span style={{ fontSize: '0.85em' }}>Advanced expression</span>
-          </Stack>
-
-          {advanced && (
-            <textarea
-              rows={4}
-              value={binding.advanced ?? `(value - ${binding.inputMin}) / (${binding.inputMax} - ${binding.inputMin}) * (${binding.outputMax} - ${binding.outputMin}) + ${binding.outputMin}`}
-              onChange={e => onChange({ ...binding, advanced: e.target.value })}
-              style={{ fontFamily: 'monospace', fontSize: '0.8em', width: '100%', boxSizing: 'border-box' }}
-            />
-          )}
-
-          {!advanced && (
-            <Stack>
-              <label style={{ fontSize: '0.85em' }}>Influence from (optional)</label>
-              <select
-                value={binding.influence?.field ?? ''}
-                onChange={e => onChange({
-                  ...binding,
-                  influence: e.target.value
-                    ? { field: e.target.value, weight: binding.influence?.weight ?? 0.2 }
-                    : undefined,
-                })}
-              >
-                <option value="">None</option>
-                {TELEMETRY_BINDING_FIELDS.map(f => <option key={f} value={f}>{f}</option>)}
-              </select>
-              {binding.influence && (
-                <BindingSliderRow
-                  label="Influence weight"
-                  value={binding.influence.weight}
-                  min={-1} max={1} step={0.01}
-                  onChange={v => onChange({ ...binding, influence: { ...binding.influence, weight: v } })}
-                />
-              )}
-            </Stack>
-          )}
-        </>
-      )}
-
-      <Stack className={style.errors}>
-        <Feedback and={[!isValid, isTouched]} errors={errors} dirty={isDirty} />
-      </Stack>
-    </Stack>
-  );
-};
-
 export default function Raw(props: any): ReactElement {
   const {
     dirty,
@@ -547,20 +348,6 @@ export default function Raw(props: any): ReactElement {
           </Stack>
         );
       }
-      case 'telemetry-binding':
-        return (
-          <TelemetryBindingField
-            className={rest.className}
-            label={label}
-            value={value}
-            onChange={v => onChange(name, v)}
-            onPreviewTelemetry={rest.onPreviewTelemetry}
-            errors={errors}
-            isValid={isValid}
-            isDirty={isDirty}
-            isTouched={isTouched}
-          />
-        );
       // Value shape: { id, filename, url } | undefined. `rest.uploadFn(dataUrl,
       // filename): Promise<{id,filename,url}>` performs the actual network
       // upload and is required — the field itself has no opinion on where
@@ -947,7 +734,7 @@ export default function Raw(props: any): ReactElement {
                   margin: 0,
                 }}
               />
-              <input
+              <TextField
                 type="number"
                 min={rest.min ?? 0}
                 max={rest.max ?? 100}
@@ -955,21 +742,25 @@ export default function Raw(props: any): ReactElement {
                 value={rawNum}
                 disabled={rest.disabled}
                 onFocus={() => { numFocused.current = true; }}
-                onChange={e => setRawNum(e.target.value)}
-                onBlur={e => {
+                onChange={(_, newValue) => setRawNum(newValue ?? '')}
+                onBlur={() => {
                   numFocused.current = false;
-                  const n = parseFloat(e.target.value);
+                  const n = parseFloat(rawNum);
                   if (!isNaN(n)) onChange(name, n);
                   else setRawNum(String(value ?? ''));
                 }}
                 onKeyDown={e => {
                   if (e.key === 'Enter') {
-                    const n = parseFloat((e.target as HTMLInputElement).value);
+                    const n = parseFloat(rawNum);
                     if (!isNaN(n)) onChange(name, n);
                     else setRawNum(String(value ?? ''));
                   }
                 }}
-                style={{ width: 52, textAlign: 'right' }}
+                styles={{
+                  root: { width: 60 },
+                  fieldGroup: { height: 24 },
+                  field: { textAlign: 'right', padding: '0 6px', fontSize: '0.85em' },
+                }}
               />
             </Stack>
             <Stack className={style.errors}>

@@ -6,6 +6,7 @@ export const spriteArcGaugeFaceSchema: ComponentSchema = {
   label: 'Sprite Arc Gauge Face',
   icon: 'NumberField',
   allowChildren: true,
+  bindable: true,
   fields: {
     name:   { label: 'Name', type: 'text' },
     x:      { label: 'X', type: 'slider', min: -1000, max: 5000, section: 'Layout' },

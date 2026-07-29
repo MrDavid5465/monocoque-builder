@@ -6,6 +6,7 @@ export const barGaugeSchema: ComponentSchema = {
   label: 'Bar Gauge',
   icon: 'ProgressRingDots',
   allowChildren: true,
+  bindable: true,
   fields: {
     name:   { label: 'Name', type: 'text' },
     file:   { label: 'Image', type: 'select', fileSelect: true },
@@ -15,7 +16,6 @@ export const barGaugeSchema: ComponentSchema = {
     height: { label: 'Height', type: 'slider', min: 4, max: 5000, section: 'Layout' },
     nightFile: { label: 'Night version (optional)', type: 'select', fileSelect: true, section: 'Appearance' },
     backlit:   { label: 'Backlit (shines above night overlay)', type: 'checkbox', section: 'Appearance' },
-    binding: { label: 'Telemetry binding', type: 'telemetry-binding', section: 'Telemetry' },
     ...COUNTER_ROTATE_FIELDS,
   },
 };

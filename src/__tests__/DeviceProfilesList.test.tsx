@@ -35,20 +35,16 @@ const fakeDoc = {} as DocumentNode;
 
 const baseConfig: DeviceProfilesListConfig = {
   getProfilesQuery: fakeDoc,
-  addProfileMutation: fakeDoc,
   removeProfileMutation: fakeDoc,
   profileChangedSubscription: fakeDoc,
   profilesResultKey: 'getProfiles',
-  addProfileResultKey: 'addProfile',
   getDevicesQuery: fakeDoc,
   createDeviceMutation: fakeDoc,
   removeDeviceMutation: fakeDoc,
   deviceChangedSubscription: fakeDoc,
   devicesResultKey: 'getDevices',
   liveToInput: (rec: any, profileId: string | null) => ({ ...rec, profileId }),
-  defaultDevice: (profileId: string) => ({ profileId }),
   storageKey: 'test-profile',
-  enabled: true,
 };
 
 beforeEach(() => {
@@ -63,20 +59,20 @@ describe('DeviceProfilesList', () => {
     expect(screen.getByText('Profiles')).toBeTruthy();
   });
 
-  it('shows a "+ New Profile" button', () => {
+  it('shows an "Add" button', () => {
     render(<DeviceProfilesList {...baseConfig} />);
-    expect(screen.getByText('+ New Profile')).toBeTruthy();
+    expect(screen.getByTitle('Add')).toBeTruthy();
   });
 
-  it('navigates to /new when "+ New Profile" is clicked', () => {
+  it('navigates to /new when "Add" is clicked', () => {
     render(<DeviceProfilesList {...baseConfig} />);
-    fireEvent.click(screen.getByText('+ New Profile'));
+    fireEvent.click(screen.getByTitle('Add'));
     expect(navigateMock).toHaveBeenCalledWith('/shakers/profiles/new');
   });
 
-  it('shows "No profiles yet." when profiles data is empty', () => {
+  it('shows an empty-state message when profiles data is empty', () => {
     render(<DeviceProfilesList {...baseConfig} />);
-    expect(screen.getByText('No profiles yet.')).toBeTruthy();
+    expect(screen.getByText(/No profiles yet/)).toBeTruthy();
   });
 
   it('shows profile rows when profiles data is populated', () => {
@@ -92,34 +88,21 @@ describe('DeviceProfilesList', () => {
     expect(screen.getByText('iRacing')).toBeTruthy();
   });
 
-  it('shows Edit, Load and Delete buttons per profile', () => {
+  it('shows Edit, Load and Delete buttons, disabled until a row is selected', () => {
     useQueryMock.mockReturnValue({
       data: { getProfiles: [{ id: 'p1', name: 'My Profile', car: null, game: null }] },
       loading: false,
     });
     render(<DeviceProfilesList {...baseConfig} />);
-    expect(screen.getByText('Edit')).toBeTruthy();
-    expect(screen.getByText('Load')).toBeTruthy();
-    expect(screen.getByText('Delete')).toBeTruthy();
+    expect(screen.getByTitle('Edit')).toBeTruthy();
+    expect(screen.getByTitle('Load')).toBeTruthy();
+    expect(screen.getByTitle('Delete')).toBeTruthy();
+    expect(screen.getByTitle('Edit').closest('button')).toBeDisabled();
   });
 
-  it('navigates to profile edit route when Edit clicked', () => {
-    useQueryMock.mockReturnValue({
-      data: { getProfiles: [{ id: 'p1', name: 'My Profile', car: null, game: null }] },
-      loading: false,
-    });
-    render(<DeviceProfilesList {...baseConfig} />);
-    fireEvent.click(screen.getByText('Edit'));
-    expect(navigateMock).toHaveBeenCalledWith('/shakers/profiles/p1/edit');
-  });
-
-  it('shows the disabled notice when enabled=false', () => {
-    render(<DeviceProfilesList {...baseConfig} enabled={false} />);
-    expect(screen.getByText(/This device type is disabled/)).toBeTruthy();
-  });
-
-  it('does not show the disabled notice when enabled=true', () => {
-    render(<DeviceProfilesList {...baseConfig} enabled={true} />);
-    expect(screen.queryByText(/This device type is disabled/)).toBeNull();
-  });
+  // Selecting a row (Fluent DetailsList's own click-to-select/
+  // onActiveItemChanged mechanism) to enable + target these buttons is
+  // exercised via live Playwright verification rather than here — jsdom
+  // doesn't reproduce Fluent's FocusZone/selection pointer-event handling
+  // closely enough to drive it through simulated DOM events.
 });

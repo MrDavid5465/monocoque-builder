@@ -6,6 +6,7 @@ export const spriteBarGaugeSchema: ComponentSchema = {
   label: 'Sprite Bar Gauge',
   icon: 'ProgressRingDots',
   allowChildren: false,
+  bindable: true,
   fields: {
     name:           { label: 'Name', type: 'text' },
     file:           { label: 'Filled sprite', type: 'select', fileSelect: true },
@@ -24,7 +25,6 @@ export const spriteBarGaugeSchema: ComponentSchema = {
         { text: 'Top → Bottom', value: 'ttb' },
       ],
     },
-    binding: { label: 'Telemetry binding', type: 'telemetry-binding', section: 'Telemetry' },
     ...COUNTER_ROTATE_FIELDS,
   },
 };

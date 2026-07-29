@@ -5,6 +5,7 @@ export const flagDisplaySpriteSchema: ComponentSchema = {
   label: 'Flag Display (Sprite)',
   icon: 'Flag',
   allowChildren: false,
+  bindable: true,
   fields: {
     name:   { label: 'Name', type: 'text' },
     x:      { label: 'X', type: 'slider', min: -1000, max: 5000, section: 'Layout' },

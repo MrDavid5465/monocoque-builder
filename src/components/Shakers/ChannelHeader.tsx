@@ -1,5 +1,4 @@
 import React, { useRef } from 'react';
-import { IconButton } from '@fluentui/react';
 import { Form } from '../../lib/denim/lib';
 import { TYRE_SHORT } from './EffectRow';
 import { ShakerChannel } from './channelQueries';
@@ -12,7 +11,6 @@ interface Props {
   onDevidChange: (devid: string) => void;
   onPanChange: (pan: number) => void;
   onPositionChange: (position: string) => void;
-  onRemove: () => void;
 }
 
 // The per-channel "header" cell of the shaker matrix grid — device/pan/
@@ -21,7 +19,9 @@ interface Props {
 // remounts (picking up fresh initialValues) when the row identity changes,
 // same pattern as EffectRow/LfeRow. No drag-gating needed here (unlike
 // EffectRow's sliders) — every field here commits immediately on selection.
-const ChannelHeader: React.FC<Props> = ({ channel, audioSinks, onDevidChange, onPanChange, onPositionChange, onRemove }) => {
+// Removing a channel is a grid-level (toolbar) action now, not a per-row
+// button — see ShakerMatrix.tsx's `rowButtons` prop on its DetailsGrid.
+const ChannelHeader: React.FC<Props> = ({ channel, audioSinks, onDevidChange, onPanChange, onPositionChange }) => {
   const schema = {
     devid: {
       type: 'select',
@@ -54,7 +54,7 @@ const ChannelHeader: React.FC<Props> = ({ channel, audioSinks, onDevidChange, on
   const skipFirst = useRef(true);
 
   return (
-    <div style={{ position: 'relative' }}>
+    <div>
       <div style={{ fontWeight: 700, fontSize: '1.05em', marginBottom: 4 }}>
         {TYRE_SHORT[channel.position ?? ''] ?? `Ch${channel.pan}`}
       </div>
@@ -72,13 +72,6 @@ const ChannelHeader: React.FC<Props> = ({ channel, audioSinks, onDevidChange, on
           prevRef.current = clean;
         }}
       />
-      <div style={{ position: 'absolute', top: 0, right: 0 }}>
-        <IconButton
-          iconProps={{ iconName: 'Delete' }}
-          title="Remove Channel"
-          onClick={onRemove}
-        />
-      </div>
     </div>
   );
 };

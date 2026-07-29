@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useRef, useEffect } from 'react';
 import { Stack, IconButton, Icon, PrimaryButton, DefaultButton, getTheme, useQuery, Form } from '../../../lib/denim/lib';
 import { ComponentNode, DashboardConfig, ComponentType } from '../../../types/dashboard';
 import { SequenceConfig, DEFAULT_SWEEP_CONFIG, DEFAULT_SINE_CONFIG } from './useTelemetryPlayback';
@@ -10,6 +10,7 @@ import { Section } from '../../../lib/per-form';
 import { GamepadMapping } from '../../../lib/denim/lib/queries';
 import ComponentPicker, { PICKER_WIDTH } from './ComponentPicker';
 import { DashTemplate } from './useTemplates';
+import { DraggingBindingField, buildBindingFieldSchema, buildBindingInitialValues, reassembleBinding } from './components/telemetryBinding';
 
 type DropMode = 'before' | 'after' | 'inside';
 
@@ -48,6 +49,7 @@ interface Props {
   onDeleteSprite?: (spriteId: string) => Promise<void>;
   builtInSpriteFiles?: Set<string>;
   onCopyBuiltinSprite?: (filename: string) => Promise<void>;
+  onUploadSpriteData?: (filename: string, dataUrl: string) => Promise<void>;
   onReloadSprites?: () => void;
 }
 
@@ -61,7 +63,7 @@ const ObjectExplorer: React.FC<Props> = ({
   sequenceConfig, onSequenceConfigChange, playing, onTogglePlay, onPreviewTelemetry,
   onGenerateThumbnails, isTemplate, editing360, onChange360,
   templates, onAdd, onRemoveTemplate, onUpload, onDeleteSprite,
-  builtInSpriteFiles, onCopyBuiltinSprite, onReloadSprites,
+  builtInSpriteFiles, onCopyBuiltinSprite, onUploadSpriteData, onReloadSprites,
 }) => {
   const [pickerOpen, setPickerOpen] = React.useState(false);
   const [listExpanded, setListExpanded] = React.useState(true);
@@ -246,6 +248,7 @@ const ObjectExplorer: React.FC<Props> = ({
           onDeleteSprite={onDeleteSprite}
           builtInSpriteFiles={builtInSpriteFiles}
           onCopyBuiltinSprite={onCopyBuiltinSprite}
+          onUploadSpriteData={onUploadSpriteData}
           onReloadSprites={onReloadSprites}
           onClose={() => setPickerOpen(false)}
         />
@@ -480,10 +483,24 @@ const ComponentPropertiesPanel: React.FC<{
   const theme = getTheme();
   const schema = getSchema(node.type);
 
-  // Static schemas declare intent (`fileSelect: true`, `type: 'gamepad-select'`,
-  // `type: 'telemetry-binding'`) — this injects the runtime data those field
-  // types need (sprite options, the gamepad mapping list, the telemetry
-  // preview callback) that schema.ts files can't know about statically.
+  // Telemetry binding's "Advanced expression" always starts collapsed, even
+  // if an expression was previously saved (matches the field's original,
+  // documented behavior) — local UI state, not derived from node data, so it
+  // must be reset explicitly on node switch since this panel isn't remounted
+  // per node (only the Form below is, via its own key).
+  const [advancedEnabled, setAdvancedEnabled] = useState(false);
+  useEffect(() => setAdvancedEnabled(false), [node.id]);
+  const draggingBindingField = useRef<DraggingBindingField>(null);
+
+  const hasBinding = !!node.binding;
+  const hasInfluence = !!node.binding?.influence;
+
+  // Static schemas declare intent (`fileSelect: true`, `type: 'gamepad-select'`)
+  // — this injects the runtime data those field types need (sprite options,
+  // the gamepad mapping list) that schema.ts files can't know about
+  // statically. Bindable schemas (`schema.bindable`) get the telemetry
+  // binding sub-schema merged directly into this same fields object — same
+  // Form, same Section grouping, not a field type or a Form of its own.
   const perFormSchema = useMemo(() => {
     const out: Record<string, any> = {};
     for (const [key, field] of Object.entries(schema.fields)) {
@@ -495,14 +512,20 @@ const ComponentPropertiesPanel: React.FC<{
         };
       } else if (field.type === 'gamepad-select') {
         out[key] = { ...rest, gamepadMappings };
-      } else if (field.type === 'telemetry-binding') {
-        out[key] = { ...rest, onPreviewTelemetry };
       } else {
         out[key] = rest;
       }
     }
+    if (schema.bindable) {
+      Object.assign(out, buildBindingFieldSchema(
+        node.binding, advancedEnabled,
+        f => { draggingBindingField.current = f; },
+        () => { draggingBindingField.current = null; onPreviewTelemetry?.(null); },
+        schema.bindingHint,
+      ));
+    }
     return out;
-  }, [schema, sprites, gamepadMappings, onPreviewTelemetry]);
+  }, [schema, sprites, gamepadMappings, node.binding, advancedEnabled, onPreviewTelemetry]);
 
   // per-form's onChange fires with the whole current form state on every
   // change, always passing the form's own name (not the changed field) as
@@ -524,12 +547,37 @@ const ComponentPropertiesPanel: React.FC<{
         changed = true;
       }
     }
+
+    if (schema.bindable) {
+      if (raw.advancedEnabled !== advancedEnabled) setAdvancedEnabled(!!raw.advancedEnabled);
+      const nextBinding = reassembleBinding(raw, advancedEnabled);
+      if (JSON.stringify(nextBinding ?? null) !== JSON.stringify(node.binding ?? null)) {
+        patch.binding = nextBinding;
+        changed = true;
+      }
+      const dragging = draggingBindingField.current;
+      if (dragging) {
+        if (dragging === 'inputMin' || dragging === 'inputMax') {
+          onPreviewTelemetry?.({ [raw.field]: raw[dragging] });
+        } else {
+          // Output sliders preview using the input side's configured range,
+          // not the output value itself — showing what raw input produces
+          // that output. Intentional asymmetry, matches the field's
+          // original design.
+          onPreviewTelemetry?.({ [raw.field]: dragging === 'outputMin' ? raw.inputMin : raw.inputMax });
+        }
+      }
+    }
+
     if (changed) onUpdate(patch);
   };
 
   const initialValues = Object.fromEntries(
     Object.keys(schema.fields).map(key => [key, (node as any)[key]])
   );
+  if (schema.bindable) {
+    Object.assign(initialValues, buildBindingInitialValues(node.binding, advancedEnabled));
+  }
 
   const handleTypeChange = (newType: ComponentType) => {
     if (newType === node.type) return;
@@ -583,7 +631,7 @@ const ComponentPropertiesPanel: React.FC<{
       <div style={{ borderTop: `1px solid ${theme.palette.neutralLight}` }} />
 
       <Form
-        key={node.id}
+        key={`${node.id}-${hasBinding ? 'b' : 'nb'}-${advancedEnabled ? 'a' : 's'}-${hasInfluence ? 'i' : 'ni'}`}
         form={perFormSchema}
         name={`component-${node.id}`}
         initialValues={initialValues}

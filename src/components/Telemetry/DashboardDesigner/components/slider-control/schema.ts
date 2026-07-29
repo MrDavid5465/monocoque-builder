@@ -5,6 +5,7 @@ export const sliderControlSchema: ComponentSchema = {
   label: 'Slider Control',
   icon: 'Slider',
   allowChildren: false,
+  bindable: true,
   fields: {
     name:   { label: 'Name', type: 'text' },
     x:      { label: 'X', type: 'slider', min: -1000, max: 5000, section: 'Layout' },

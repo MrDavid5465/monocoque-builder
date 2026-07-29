@@ -6,6 +6,8 @@ export const gifGaugeSchema: ComponentSchema = {
   label: 'GIF Gauge',
   icon: 'GIF',
   allowChildren: true,
+  bindable: true,
+  bindingHint: 'Only used in value-driven mode.',
   fields: {
     name:   { label: 'Name', type: 'text' },
     file:   { label: 'Spritesheet', type: 'select', fileSelect: true },
@@ -23,7 +25,6 @@ export const gifGaugeSchema: ComponentSchema = {
       ],
     },
     gifFps:  { label: 'FPS (startup mode)', type: 'slider', min: 1, max: 120, section: 'Animation' },
-    binding: { label: 'Telemetry binding (value mode)', type: 'telemetry-binding', section: 'Telemetry' },
     ...COUNTER_ROTATE_FIELDS,
   },
 };

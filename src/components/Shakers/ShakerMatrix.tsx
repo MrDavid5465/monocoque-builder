@@ -498,7 +498,6 @@ const ShakerMatrix: React.FC<{ profileId?: string | null }> = ({ profileId = nul
             onDevidChange={devid => handleChannelDevidChange(ch, devid)}
             onPanChange={pan => handleChannelPanChange(ch, pan)}
             onPositionChange={pos => handleChannelPositionChange(ch, pos)}
-            onRemove={() => handleRemoveChannel(ch)}
           />
         );
       },
@@ -825,6 +824,9 @@ const ShakerMatrix: React.FC<{ profileId?: string | null }> = ({ profileId = nul
         customButtons={[
           { key: 'export', label: 'Export to Config', icon: 'CloudDownload', onClick: handleExport },
           { key: 'restart', label: 'Restart Monocoque', icon: 'Refresh', onClick: handleRestart },
+        ]}
+        rowButtons={[
+          { key: 'remove', label: 'Remove Channel', icon: 'Delete', danger: true, onClick: handleRemoveChannel },
         ]}
       />
     </div>

@@ -1,14 +1,14 @@
-import React, { useEffect, useRef } from 'react';
+import React from 'react';
 import { useQuery, useMutation, useSubscription } from '@apollo/client/react';
-import { IconButton } from '@fluentui/react';
 import { getTheme, Form } from '../../../lib/denim/lib';
 import { confirmAsync } from '../../../lib/denim/components/ConfirmDialog';
 import DetailsGrid from '../../../lib/typical-admin-fabric/lib/List';
+import { RowButtonConfig } from '../../../lib/typical-admin-fabric/lib/ListControls';
 import { DisplaySchema } from '../../../lib/typical-admin';
 import { GET_SHIFT_LIGHTS, CREATE_SHIFT_LIGHT, UPDATE_SHIFT_LIGHT, REMOVE_SHIFT_LIGHT, SHIFT_LIGHT_CHANGED, ShiftLightRec } from './queries';
 import { DEFAULT_SHIFT_LIGHT } from '../../../mock/shiftLightMock';
 
-interface Props { profileId?: string | null; enabled?: boolean; }
+interface Props { profileId?: string | null; }
 
 // One tiny per-form Form per cell, committing immediately on change (diffed
 // directly against the row's own current value — no Save button needed, no
@@ -35,9 +35,9 @@ const FieldCell: React.FC<{
   />
 );
 
-const ShiftLights: React.FC<Props> = ({ profileId = null, enabled = true }) => {
+const ShiftLights: React.FC<Props> = ({ profileId = null }) => {
   const theme = getTheme();
-  const { data, loading } = useQuery(GET_SHIFT_LIGHTS);
+  const { data } = useQuery(GET_SHIFT_LIGHTS);
   useSubscription(SHIFT_LIGHT_CHANGED);
   const [create] = useMutation(CREATE_SHIFT_LIGHT, { refetchQueries: [{ query: GET_SHIFT_LIGHTS }] });
   const [update] = useMutation(UPDATE_SHIFT_LIGHT, { refetchQueries: [{ query: GET_SHIFT_LIGHTS }] });
@@ -45,14 +45,6 @@ const ShiftLights: React.FC<Props> = ({ profileId = null, enabled = true }) => {
 
   const allRecords: ShiftLightRec[] = (data as any)?.getMonocoqueShiftLights ?? [];
   const records = allRecords.filter(r => (r.profileId ?? null) === profileId);
-
-  const seededRef = useRef(false);
-  useEffect(() => {
-    if (!enabled || profileId !== null || loading || seededRef.current) return;
-    if (allRecords.length > 0) { seededRef.current = true; return; }
-    seededRef.current = true;
-    create({ variables: { values: DEFAULT_SHIFT_LIGHT } });
-  }, [enabled, profileId, loading, allRecords.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleAdd = () => create({ variables: { values: { ...DEFAULT_SHIFT_LIGHT, profileId } } });
   const handleRemove = async (r: ShiftLightRec) => {
@@ -74,14 +66,11 @@ const ShiftLights: React.FC<Props> = ({ profileId = null, enabled = true }) => {
     subtype: field('subtype', 'Subtype'),
     granularity: field('granularity', 'Granularity', true),
     config: { ...field('config', 'Config'), options: { minWidth: 220, maxWidth: 360 } },
-    actions: {
-      label: '',
-      options: { minWidth: 40, maxWidth: 48 },
-      onRender: ({ values }: { values: ShiftLightRec }) => (
-        <IconButton iconProps={{ iconName: 'Delete' }} title="Remove" onClick={() => handleRemove(values)} />
-      ),
-    },
   };
+
+  const rowButtons: RowButtonConfig<ShiftLightRec>[] = [
+    { key: 'remove', label: 'Remove', icon: 'Delete', danger: true, onClick: handleRemove },
+  ];
 
   return (
     <div style={{ padding: profileId ? 0 : 16, color: theme.palette.neutralPrimary }}>
@@ -91,7 +80,7 @@ const ShiftLights: React.FC<Props> = ({ profileId = null, enabled = true }) => {
           No shift lights configured yet — click "Add" (top-right of the grid) to get started.
         </div>
       )}
-      <DetailsGrid name="ShiftLights" items={records} schema={schema} onAdd={handleAdd} />
+      <DetailsGrid name="ShiftLights" items={records} schema={schema} onAdd={handleAdd} rowButtons={rowButtons} />
     </div>
   );
 };
