@@ -11,6 +11,7 @@ interface GifGaugeNodeProps {
   startDrag: (e: React.PointerEvent, id: string, origX: number, origY: number) => void;
   spriteUrl: (file: string) => string;
   telemetryData: Record<string, number>;
+  excludeFromSweep?: boolean;
   simStatus: string;
   kioskMode: boolean;
   registerCounterRotate: (id: string, el: HTMLDivElement | null, steerMaxDeg: number | undefined) => void;
@@ -19,7 +20,7 @@ interface GifGaugeNodeProps {
 
 const GifGaugeNode: React.FC<GifGaugeNodeProps> = ({
   node, nodeAbsX, nodeAbsY, isSelected, onSelect, startDrag,
-  spriteUrl, telemetryData, simStatus, kioskMode, registerCounterRotate, childEls,
+  spriteUrl, telemetryData, excludeFromSweep = false, simStatus, kioskMode, registerCounterRotate, childEls,
 }) => {
   const frameCount = node.gifFrameCount ?? 1;
   const cols = node.gifCols ?? frameCount;
@@ -56,7 +57,7 @@ const GifGaugeNode: React.FC<GifGaugeNodeProps> = ({
 
   const frame = node.gifMode === 'startup'
     ? startupFrame
-    : Math.min(Math.floor(fillFraction(node, telemetryData) * frameCount), frameCount - 1);
+    : Math.min(Math.floor(fillFraction(node, telemetryData, excludeFromSweep) * frameCount), frameCount - 1);
 
   const col = frame % cols;
   const row = Math.floor(frame / cols);

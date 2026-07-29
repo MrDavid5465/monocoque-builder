@@ -4,7 +4,7 @@ import { Stack, IconButton, Icon, PrimaryButton, DefaultButton, getTheme } from 
 import { DashboardConfig, ComponentNode, ComponentType } from '../../../types/dashboard';
 import { ALL_SCHEMAS, SPRITE_TYPES, FREEFORM_TYPES } from './components/registry';
 import { findNodeById } from './components/utils';
-import { DashTemplate } from './useTemplates';
+import { DashTemplate, TemplateSprite } from './useTemplates';
 import { deepCopyNode, collectFileRefs } from './components/utils';
 import { GET_BUILTIN_TEMPLATES } from './queries';
 import { confirmAsync } from '../../../lib/denim/components/ConfirmDialog';
@@ -29,6 +29,7 @@ interface Props {
   onClose: () => void;
   builtInSpriteFiles?: Set<string>;
   onCopyBuiltinSprite?: (filename: string) => Promise<void>;
+  onUploadSpriteData?: (filename: string, dataUrl: string) => Promise<void>;
   onReloadSprites?: () => void;
 }
 
@@ -48,7 +49,7 @@ const TEMPLATE_TYPE_META: Record<string, { label: string; icon: string }> = {
 const ComponentPicker: React.FC<Props> = ({
   sprites, dashboard, selectedId, templates, onAdd, onRemoveTemplate,
   onUpload, onDeleteSprite, onClose,
-  builtInSpriteFiles, onCopyBuiltinSprite, onReloadSprites,
+  builtInSpriteFiles, onCopyBuiltinSprite, onUploadSpriteData, onReloadSprites,
 }) => {
   const [uploading, setUploading] = useState(false);
   const [activeType, setActiveType] = useState<ComponentType>('static-sprite');
@@ -69,14 +70,17 @@ const ComponentPicker: React.FC<Props> = ({
   };
 
   // Templates (saved or built-in) reference sprite filenames that may not
-  // exist in this dashboard's own folder yet. Best-effort copy anything
-  // missing from the global /dash-sprites/ store so the drop renders
-  // immediately instead of showing broken images.
-  const copyMissingSprites = (node: ComponentNode) => {
-    if (!onCopyBuiltinSprite) return;
+  // exist in this dashboard's own folder yet. Prefer bytes bundled with the
+  // template itself (see useTemplates.ts's saveTemplate); fall back to a
+  // best-effort copy from the global /dash-sprites/ store so the drop still
+  // renders for templates saved before bundling existed.
+  const copyMissingSprites = (node: ComponentNode, templateSprites?: TemplateSprite[]) => {
     const existing = new Set(sprites.map(s => s.file));
     for (const file of collectFileRefs(node)) {
-      if (!existing.has(file)) onCopyBuiltinSprite(file);
+      if (existing.has(file)) continue;
+      const bundled = templateSprites?.find(s => s.filename === file);
+      if (bundled && onUploadSpriteData) onUploadSpriteData(file, bundled.data);
+      else if (onCopyBuiltinSprite) onCopyBuiltinSprite(file);
     }
   };
 
@@ -220,7 +224,12 @@ const ComponentPicker: React.FC<Props> = ({
                 </Stack>
                 <DefaultButton
                   styles={{ root: { fontSize: '0.75em', height: 24, minWidth: 0, flexShrink: 0 } }}
-                  onClick={() => { copyMissingSprites(tmpl.component); onAdd(deepCopyNode(tmpl.component), parentId()); }}
+                  onClick={() => {
+                    let templateSprites: TemplateSprite[] | undefined;
+                    try { templateSprites = tmpl.sprites ? JSON.parse(tmpl.sprites) : undefined; } catch { /* malformed sprites */ }
+                    copyMissingSprites(tmpl.component, templateSprites);
+                    onAdd(deepCopyNode(tmpl.component), parentId());
+                  }}
                   title={`Add copy of ${tmpl.name}`}
                 >
                   Use

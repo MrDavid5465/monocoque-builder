@@ -286,6 +286,13 @@ pub struct DashTemplate {
     /// thumbnails. Not a live-rendered preview — storing that per template
     /// card was explicitly rejected as non-performant.
     pub thumbnail: Option<String>,
+    /// JSON-serialized array of `{filename, data}` (data = base64 data URL),
+    /// captured from the source dashboard's own sprite files at save time so
+    /// the template renders correctly when applied to a dashboard that doesn't
+    /// already have those files. `None` for templates saved before this field
+    /// existed or with no sprite refs — applying them falls back to the
+    /// global /dash-sprites/ store, same as before.
+    pub sprites: Option<String>,
 }
 
 /// Tracks connected app instances for per-device dashboard configuration.

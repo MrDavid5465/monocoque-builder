@@ -1,9 +1,15 @@
 import { ComponentNode } from '../../../types/dashboard';
 
-export function applyBinding(node: ComponentNode, data: Record<string, number>): number {
+// `excludeFromSweep` forces the rest value (inputMin) even though `data`
+// holds a live/swept number for this field — needed because the kiosk boot
+// sweep computes one shared value per telemetry FIELD NAME (e.g. "speed"),
+// not per node, so a node that opted out via `binding.startupSweep: false`
+// would otherwise still visually animate whenever any other node sharing
+// its field (e.g. a needle also bound to "speed") legitimately sweeps.
+export function applyBinding(node: ComponentNode, data: Record<string, number>, excludeFromSweep = false): number {
   if (!node.binding) return 0;
   const { field, inputMin, inputMax, outputMin, outputMax } = node.binding;
-  const raw = data[field] ?? inputMin;
+  const raw = excludeFromSweep ? inputMin : (data[field] ?? inputMin);
   const t = Math.max(0, Math.min(1, (raw - inputMin) / (inputMax - inputMin)));
   return outputMin + t * (outputMax - outputMin);
 }
@@ -25,10 +31,10 @@ export function formatValue(value: number, fmt: ComponentNode['format']): string
   }
 }
 
-export function fillFraction(node: ComponentNode, data: Record<string, number>): number {
+export function fillFraction(node: ComponentNode, data: Record<string, number>, excludeFromSweep = false): number {
   if (!node.binding) return 0;
   const { field, inputMin, inputMax } = node.binding;
-  const raw = data[field] ?? inputMin;
+  const raw = excludeFromSweep ? inputMin : (data[field] ?? inputMin);
   return Math.max(0, Math.min(1, (raw - inputMin) / (inputMax - inputMin)));
 }
 
@@ -36,18 +42,18 @@ export function fillFraction(node: ComponentNode, data: Record<string, number>):
 // (fill level) when colorField is set — e.g. a tire widget where fill level
 // tracks wear but colour tracks temperature. Falls back to fillFraction when
 // colorField is absent, preserving existing single-binding gauges.
-export function colorFraction(node: ComponentNode, data: Record<string, number>): number {
-  if (!node.colorField) return fillFraction(node, data);
+export function colorFraction(node: ComponentNode, data: Record<string, number>, excludeFromSweep = false): number {
+  if (!node.colorField) return fillFraction(node, data, excludeFromSweep);
   const inputMin = node.colorInputMin ?? 0;
   const inputMax = node.colorInputMax ?? 100;
-  const raw = data[node.colorField] ?? inputMin;
+  const raw = excludeFromSweep ? inputMin : (data[node.colorField] ?? inputMin);
   return Math.max(0, Math.min(1, (raw - inputMin) / (inputMax - inputMin)));
 }
 
-export function computeRotation(node: ComponentNode, data: Record<string, number>): number | undefined {
+export function computeRotation(node: ComponentNode, data: Record<string, number>, excludeFromSweep = false): number | undefined {
   if (node.type !== 'needle-gauge' || !node.binding) return undefined;
   const { field, inputMin, inputMax, outputMin, outputMax } = node.binding;
-  const raw = data[field] ?? inputMin;
+  const raw = excludeFromSweep ? inputMin : (data[field] ?? inputMin);
   const t = Math.max(0, Math.min(1, (raw - inputMin) / (inputMax - inputMin)));
   return outputMin + t * (outputMax - outputMin);
 }

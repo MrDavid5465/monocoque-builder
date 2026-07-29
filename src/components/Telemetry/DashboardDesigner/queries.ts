@@ -138,6 +138,7 @@ const TEMPLATE_FIELDS = `
   gaugeType
   component
   thumbnail
+  sprites
 `;
 
 export const GET_TEMPLATES = gql`

@@ -6,11 +6,11 @@ export const textGaugeSchema: ComponentSchema = {
   label: 'Text Gauge',
   icon: 'Font',
   allowChildren: false,
+  bindable: true,
   fields: {
     name: { label: 'Name', type: 'text' },
     x:    { label: 'X', type: 'slider', min: -1000, max: 5000, section: 'Layout' },
     y:    { label: 'Y', type: 'slider', min: -1000, max: 5000, section: 'Layout' },
-    binding: { label: 'Telemetry binding', type: 'telemetry-binding', section: 'Telemetry' },
     format: {
       label: 'Format', type: 'select', section: 'Format',
       options: [

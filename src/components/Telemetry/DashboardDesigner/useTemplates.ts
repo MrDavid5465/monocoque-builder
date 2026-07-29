@@ -1,7 +1,7 @@
 import { useCallback } from 'react';
 import { useQuery, useMutation } from '@apollo/client/react';
 import { ComponentNode } from '../../../types/dashboard';
-import { detectTemplateType, TemplateGaugeType, deepCopyNode } from './components/utils';
+import { detectTemplateType, TemplateGaugeType, deepCopyNode, collectFileRefs } from './components/utils';
 import { GET_TEMPLATES, ADD_TEMPLATE, UPDATE_TEMPLATE, REMOVE_TEMPLATE, UPLOAD_TEMPLATE_THUMBNAIL } from './queries';
 
 export interface DashTemplate {
@@ -10,6 +10,14 @@ export interface DashTemplate {
   gaugeType: TemplateGaugeType;
   component: ComponentNode;
   thumbnail?: string | null;
+  sprites?: string | null;
+}
+
+// Bundled into a saved template's `sprites` field so it renders correctly when
+// applied to a dashboard that doesn't already have these files of its own.
+export interface TemplateSprite {
+  filename: string;
+  data: string;
 }
 
 function parseTemplate(raw: any): DashTemplate | null {
@@ -20,10 +28,23 @@ function parseTemplate(raw: any): DashTemplate | null {
       gaugeType: raw.gaugeType as TemplateGaugeType,
       component: JSON.parse(raw.component) as ComponentNode,
       thumbnail: raw.thumbnail ?? null,
+      sprites:   raw.sprites ?? null,
     };
   } catch {
     return null;
   }
+}
+
+async function urlToDataUrl(url: string): Promise<string | null> {
+  const response = await fetch(url);
+  if (!response.ok) return null;
+  const blob = await response.blob();
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
 }
 
 export function useTemplates() {
@@ -46,14 +67,26 @@ export function useTemplates() {
     await updateTemplateMutation({ variables: { id, update: values } });
   }, [updateTemplateMutation]);
 
-  const saveTemplate = useCallback(async (node: ComponentNode): Promise<string> => {
+  const saveTemplate = useCallback(async (
+    node: ComponentNode,
+    sourceSprites: { file: string; thumbnail: string }[] = [],
+  ): Promise<string> => {
     const gaugeType = detectTemplateType(node);
+    const spriteMap = new Map(sourceSprites.map(s => [s.file, s.thumbnail]));
+    const bundled: TemplateSprite[] = [];
+    for (const filename of collectFileRefs(node)) {
+      const thumbnail = spriteMap.get(filename);
+      if (!thumbnail) continue;
+      const data = await urlToDataUrl(thumbnail);
+      if (data) bundled.push({ filename, data });
+    }
     const result = await addTemplateMutation({
       variables: {
         values: {
           name:      node.name || 'Unnamed template',
           gaugeType,
           component: JSON.stringify(node),
+          sprites:   bundled.length ? JSON.stringify(bundled) : undefined,
         },
       },
     });

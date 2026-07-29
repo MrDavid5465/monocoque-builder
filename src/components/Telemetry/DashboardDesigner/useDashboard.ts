@@ -38,6 +38,7 @@ interface UseDashboardResult {
   deleteSprite: (spriteId: string) => Promise<void>;
   refetchSprites: () => void;
   copyBuiltinSprite: (filename: string) => Promise<void>;
+  uploadSpriteData: (filename: string, dataUrl: string) => Promise<void>;
   uploadBackground: (dataUrl: string) => Promise<void>;
   loading: boolean;
   saving: boolean;
@@ -53,6 +54,18 @@ function apiBase() {
 
 function fileProxyUrl(absolutePath: string) {
   return `${apiBase()}/file-proxy?path=${encodeURIComponent(absolutePath)}`;
+}
+
+async function urlToDataUrl(url: string): Promise<string | null> {
+  const response = await fetch(url);
+  if (!response.ok) return null;
+  const blob = await response.blob();
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
 }
 
 // Migrate v1 flat SpriteElement[] to v2 ComponentNode[].
@@ -394,23 +407,20 @@ export function useDashboard(dashboardName: string): UseDashboardResult {
     refetchFiles();
   }, [uploadFileMutation, updateDashboardMutation, setDashboard, refetchFiles]);
 
-  const copyBuiltinSprite = useCallback(async (filename: string) => {
+  const uploadSpriteData = useCallback(async (filename: string, dataUrl: string) => {
     const raw = rawDashboardRef.current;
     if (!raw?.id) return;
-    const response = await fetch(`${apiBase()}/dash-sprites/${encodeURIComponent(filename)}`);
-    if (!response.ok) return;
-    const blob = await response.blob();
-    const dataUrl = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
     await uploadFileMutation({
       variables: { dashboardId: raw.id, name: filename, data: dataUrl },
     });
     refetchFiles();
   }, [uploadFileMutation, refetchFiles]);
+
+  const copyBuiltinSprite = useCallback(async (filename: string) => {
+    const dataUrl = await urlToDataUrl(`${apiBase()}/dash-sprites/${encodeURIComponent(filename)}`);
+    if (!dataUrl) return;
+    await uploadSpriteData(filename, dataUrl);
+  }, [uploadSpriteData]);
 
   // Keep ref in sync so savePanCoordinates can read the current state without
   // adding localDashboard to its useCallback deps (which would recreate it on every render).
@@ -463,6 +473,7 @@ export function useDashboard(dashboardName: string): UseDashboardResult {
     deleteSprite,
     refetchSprites: refetchFiles,
     copyBuiltinSprite,
+    uploadSpriteData,
     uploadBackground,
     loading: listLoading && !localDashboard,
     saving,

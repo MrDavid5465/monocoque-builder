@@ -6,6 +6,7 @@ export const spriteTextGaugeSchema: ComponentSchema = {
   label: 'Sprite Text Gauge',
   icon: 'NumberSymbol',
   allowChildren: false,
+  bindable: true,
   fields: {
     name: { label: 'Name', type: 'text' },
     file: { label: 'Sprite sheet', type: 'select', fileSelect: true },
@@ -16,7 +17,6 @@ export const spriteTextGaugeSchema: ComponentSchema = {
     charMap:     { label: 'Char map', type: 'text', section: 'Character Grid' },
     charSpacing: { label: 'Char spacing (px)', type: 'slider', min: -50, max: 100, section: 'Character Grid' },
     numDigits:   { label: 'Display digits', type: 'slider', min: 1, max: 20, section: 'Character Grid' },
-    binding: { label: 'Telemetry binding', type: 'telemetry-binding', section: 'Telemetry' },
     format: {
       label: 'Format', type: 'select', section: 'Format',
       options: [

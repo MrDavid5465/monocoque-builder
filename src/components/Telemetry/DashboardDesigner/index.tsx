@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
-import { Stack, IconButton, PrimaryButton, DefaultButton, getTheme, useQuery } from '../../../lib/denim/lib';
+import { Stack, IconButton, getTheme, useQuery } from '../../../lib/denim/lib';
 import { useSubscription } from '@apollo/client/react';
 import dispatcher from '../../../lib/denim/lib/queries';
 import { useNavigate } from 'react-router';
@@ -35,6 +35,36 @@ interface Props {
   kioskMode: boolean;
 }
 
+// Floating-toolbar action: icon button with its label to the right, both
+// tinted the same color so an "active" state (e.g. Night is on) reads at a
+// glance without a filled button background.
+const ToolbarIconButton: React.FC<{
+  icon: string;
+  label: string;
+  onClick: () => void;
+  title?: string;
+  active?: boolean;
+}> = ({ icon, label, onClick, title, active }) => {
+  const theme = getTheme();
+  const color = active ? theme.palette.themePrimary : theme.palette.neutralPrimary;
+  return (
+    <Stack horizontal verticalAlign="center" tokens={{ childrenGap: 2 }}>
+      <IconButton
+        iconProps={{ iconName: icon }}
+        onClick={onClick}
+        title={title}
+        styles={{ root: { height: 28, width: 28 }, icon: { color, fontSize: 16 } }}
+      />
+      <span
+        onClick={onClick}
+        style={{ color, fontSize: '0.82em', cursor: 'pointer', userSelect: 'none' }}
+      >
+        {label}
+      </span>
+    </Stack>
+  );
+};
+
 const MOBILE_BREAKPOINT = 768;
 const MIN_EXPLORER_HEIGHT = 120;
 const MAX_EXPLORER_HEIGHT = 600;
@@ -50,7 +80,7 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
     else navigate(`/telemetryadmin/dashboards/${encodeURIComponent(dashboardName)}/show`);
   };
 
-  const { dashboard, setDashboard, saveDashboard, deleteDashboard, savePanCoordinates, savePhotoEditing, uploadSprite, deleteSprite, refetchSprites, copyBuiltinSprite, uploadBackground, isDirty, sprites, loading, canvasRef, forceNightPreview, handleDashboardUpdate } = useDashboard(dashboardName);
+  const { dashboard, setDashboard, saveDashboard, deleteDashboard, savePanCoordinates, savePhotoEditing, uploadSprite, deleteSprite, refetchSprites, copyBuiltinSprite, uploadSpriteData, uploadBackground, isDirty, sprites, loading, canvasRef, forceNightPreview, handleDashboardUpdate } = useDashboard(dashboardName);
   const { isNight, toggleNightMode } = useGlobalNightMode();
   const { previewCarId } = useGlobalPreviewCar();
   const builtInSpriteFileSet = useMemo(() => new Set(builtInSprites.map(s => s.file)), []);
@@ -169,17 +199,23 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
   const [kioskSweepDone, setKioskSweepDone] = useState(false);
   const [previewTelemetry, setPreviewTelemetry] = useState<Record<string, number> | null>(null);
 
-  const startupSweep = useMemo<SequenceConfig>(() => DEFAULT_SWEEP_CONFIG, []);
-
   const activeSequence = useMemo<SequenceConfig | null>(() => {
-    if (kioskMode) return kioskSweepDone ? null : startupSweep;
+    if (kioskMode) return kioskSweepDone ? null : sequenceConfig;
     return playing ? sequenceConfig : null;
-  }, [kioskMode, kioskSweepDone, startupSweep, playing, sequenceConfig]);
+  }, [kioskMode, kioskSweepDone, playing, sequenceConfig]);
 
   const flatNodes = useMemo(() => dashboard ? flattenNodes(dashboard.components) : [], [dashboard]);
+  // The manual edit-mode test sweep always sweeps every bound field — that's
+  // its job. The kiosk boot sweep is a cosmetic startup animation and
+  // respects each binding's opt-out (binding.startupSweep === false).
+  const startupSweepNodes = useMemo(
+    () => flatNodes.filter(n => n.binding?.startupSweep !== false),
+    [flatNodes],
+  );
+  const sweepNodes = kioskMode ? startupSweepNodes : flatNodes;
   const playbackData = useTelemetryPlayback(
     activeSequence,
-    flatNodes,
+    sweepNodes,
     () => { if (kioskMode) setKioskSweepDone(true); else setPlaying(false); },
   );
   const baseTelemetry = kioskMode && kioskSweepDone ? liveValues : playbackData;
@@ -195,12 +231,12 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
   }, [getCanvasEl, dashboard]);
 
   const handleSaveTemplate = useCallback(async (node: ComponentNode) => {
-    const id = await saveTemplate(node);
+    const id = await saveTemplate(node, sprites);
     if (!id) return;
     if (!dashboard) return;
     const thumb = await captureNodeThumbnail(getCanvasEl, node, dashboard.canvasWidth, dashboard.canvasHeight);
     if (thumb) await uploadThumbnail(id, thumb);
-  }, [saveTemplate, uploadThumbnail, getCanvasEl, dashboard]);
+  }, [saveTemplate, sprites, uploadThumbnail, getCanvasEl, dashboard]);
 
   const updateNode = useCallback((id: string, patch: Partial<ComponentNode>) => {
     setDashboard(prev => {
@@ -327,6 +363,7 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
     onDeleteSprite: deleteSprite,
     builtInSpriteFiles: builtInSpriteFileSet,
     onCopyBuiltinSprite: copyBuiltinSprite,
+    onUploadSpriteData: uploadSpriteData,
     onReloadSprites: refetchSprites,
   };
 
@@ -428,6 +465,7 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
       kioskMode={kioskMode}
       onKioskButton={handleKioskButton}
       telemetryData={telemetryData}
+      kioskSweepActive={kioskMode && !kioskSweepDone}
       ref={canvasRef}
       forceNightPreview={forceNightPreview}
       skipTransition={forceNightPreview !== undefined}
@@ -446,57 +484,48 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
       {/* Floating toolbar */}
       <div style={{ position: 'absolute', top: 8, right: 8, zIndex: 10, display: 'flex', gap: 4 }}>
         {dashboard.baseDashType === '360' && !viewing360 && (
-          <DefaultButton
+          <ToolbarIconButton
+            icon="EditPhoto"
+            label="Edit 360°"
             onClick={enter360Edit}
             title="Open live 360° photo viewer to adjust pan/zoom"
-            styles={{ root: { height: 28, fontSize: '0.82em' } }}
-          >
-            Edit 360°
-          </DefaultButton>
+          />
         )}
         {viewing360 && (
           <>
-            <PrimaryButton
+            <ToolbarIconButton
+              icon="Save"
+              label="Save"
               onClick={save360}
               title="Capture current view as background image and exit"
-              styles={{ root: { height: 28, fontSize: '0.82em' } }}
-            >
-              Save
-            </PrimaryButton>
-            <DefaultButton
+              active
+            />
+            <ToolbarIconButton
+              icon="ChromeClose"
+              label="Cancel"
               onClick={cancel360}
               title="Exit 360° editing without saving"
-              styles={{ root: { height: 28, fontSize: '0.82em' } }}
-            >
-              Cancel
-            </DefaultButton>
+            />
           </>
         )}
-        {!show360 && dashboard.background && (() => {
-          const PanBgButton = panBgMode ? PrimaryButton : DefaultButton;
-          return (
-            <PanBgButton
-              onClick={() => setPanBgMode(m => !m)}
-              title={panBgMode ? 'Stop panning background' : 'Drag to pan background image'}
-              styles={{ root: { height: 28, fontSize: '0.82em' } }}
-            >
-              Pan BG
-            </PanBgButton>
-          );
-        })()}
-        {dashboard.dayNight && !kioskMode && (() => {
-          const NightButton = isNight ? PrimaryButton : DefaultButton;
-          return (
-            <NightButton
-              onClick={toggleNightMode}
-              title={isNight ? 'Switch to day mode (all screens)' : 'Switch to night mode (all screens)'}
-              iconProps={{ iconName: isNight ? 'ClearNight' : 'Sunny' }}
-              styles={{ root: { height: 28, fontSize: '0.82em' } }}
-            >
-              {isNight ? 'Day' : 'Night'}
-            </NightButton>
-          );
-        })()}
+        {!show360 && dashboard.background && (
+          <ToolbarIconButton
+            icon="Move"
+            label="Pan BG"
+            onClick={() => setPanBgMode(m => !m)}
+            title={panBgMode ? 'Stop panning background' : 'Drag to pan background image'}
+            active={panBgMode}
+          />
+        )}
+        {dashboard.dayNight && !kioskMode && (
+          <ToolbarIconButton
+            icon={isNight ? 'ClearNight' : 'Sunny'}
+            label={isNight ? 'Day' : 'Night'}
+            onClick={toggleNightMode}
+            title={isNight ? 'Switch to day mode (all screens)' : 'Switch to night mode (all screens)'}
+            active={isNight}
+          />
+        )}
       </div>
       {show360 && !photoUrl ? (
         <div style={{

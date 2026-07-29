@@ -6,6 +6,7 @@ export const staticSpriteSchema: ComponentSchema = {
   label: 'Static Sprite',
   icon: 'Picture',
   allowChildren: true,
+  bindable: true,
   fields: {
     name:   { label: 'Name', type: 'text' },
     file:   { label: 'Image', type: 'select', fileSelect: true },

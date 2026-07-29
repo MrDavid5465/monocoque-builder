@@ -46,6 +46,12 @@ export interface TelemetryBinding {
   outputMax: number;
   influence?: { field: string; weight: number };
   advanced?: string;
+  // Whether this binding is swept during the kiosk boot-up sweep animation.
+  // Undefined/true participates (the historical default, so existing
+  // dashboards keep sweeping everything on boot); false opts out. Does NOT
+  // affect the manual edit-mode test sweep, which always sweeps every bound
+  // field regardless of this flag.
+  startupSweep?: boolean;
 }
 
 export interface ComponentNode {
