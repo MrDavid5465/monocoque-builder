@@ -13,7 +13,7 @@ const FIELD_OPTIONS = TELEMETRY_BINDING_FIELDS.map(f => ({ text: f, value: f }))
 // Seeds a binding's other fields the moment "Field" is switched away from
 // "— none —" for the first time (they aren't part of `raw` yet, since
 // they're only rendered once a binding exists).
-const NEW_BINDING_DEFAULTS = { inputMin: 0, inputMax: 8000, outputMin: 0, outputMax: 360, startupSweep: true };
+const NEW_BINDING_DEFAULTS = { inputMin: 0, inputMax: 8000, outputMin: 0, outputMax: 360, startupSweep: true, limitBehavior: 'stop' as const };
 
 export type DraggingBindingField = 'inputMin' | 'inputMax' | 'outputMin' | 'outputMax' | null;
 
@@ -53,6 +53,10 @@ export function buildBindingFieldSchema(
   fields.outputMin = slider('outputMin', { label: 'Output min', min: -720, max: 720 });
   fields.outputMax = slider('outputMax', { label: 'Output max', min: -720, max: 720 });
   fields.startupSweep = { label: 'Include in startup sweep', type: 'checkbox', section: 'Telemetry' };
+  fields.limitBehavior = {
+    label: 'When out of range', type: 'select', section: 'Telemetry',
+    options: [{ text: 'Stop (clamp)', value: 'stop' }, { text: 'Hide', value: 'hide' }],
+  };
   fields.advancedEnabled = { label: 'Advanced expression', type: 'checkbox', section: 'Telemetry' };
   if (advancedEnabled) {
     fields.advanced = {
@@ -79,6 +83,7 @@ export function buildBindingInitialValues(binding: TelemetryBinding | undefined,
     outputMin: binding?.outputMin ?? NEW_BINDING_DEFAULTS.outputMin,
     outputMax: binding?.outputMax ?? NEW_BINDING_DEFAULTS.outputMax,
     startupSweep: binding?.startupSweep ?? NEW_BINDING_DEFAULTS.startupSweep,
+    limitBehavior: binding?.limitBehavior ?? NEW_BINDING_DEFAULTS.limitBehavior,
     advancedEnabled,
     advanced: binding?.advanced ?? '',
     influenceField: binding?.influence?.field ?? '',
@@ -98,6 +103,7 @@ export function reassembleBinding(raw: any, advancedEnabled: boolean): Telemetry
     outputMin: raw.outputMin ?? NEW_BINDING_DEFAULTS.outputMin,
     outputMax: raw.outputMax ?? NEW_BINDING_DEFAULTS.outputMax,
     startupSweep: raw.startupSweep ?? NEW_BINDING_DEFAULTS.startupSweep,
+    limitBehavior: raw.limitBehavior === 'hide' ? 'hide' : undefined,
     advanced: advancedEnabled ? raw.advanced : undefined,
     influence: raw.influenceField ? { field: raw.influenceField, weight: raw.influenceWeight ?? 0.2 } : undefined,
   };

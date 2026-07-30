@@ -2,7 +2,7 @@ import React, { useRef, useState, useEffect, useCallback, forwardRef, useImperat
 import { DashboardConfig, ComponentNode } from '../../../types/dashboard';
 import { GamepadMapping } from '../../../lib/denim/lib/queries';
 import { findNodeById } from './components/utils';
-import { applyBinding, formatValue, fillFraction, colorFraction, computeRotation, scaleNode } from './canvasUtils';
+import { applyBinding, formatValue, fillFraction, colorFraction, computeRotation, computeTranslate, isHiddenByLimit, scaleNode } from './canvasUtils';
 import GifGaugeNode from './GifGaugeNode';
 import ArcGaugeFaceNode from './ArcGaugeFaceNode';
 import { useGamepadIO, useHeldGamepadButton } from './useGamepadIO';
@@ -506,6 +506,8 @@ const NodeRenderer: React.FC<NodeRendererProps> = ({
   const isSelected = node.id === selectedId;
   const excludeFromSweep = kioskSweepActive && node.binding?.startupSweep === false;
 
+  if (isHiddenByLimit(node, telemetryData, excludeFromSweep)) return null;
+
   const sharedChildProps = { selectedId, onSelect, startDrag, startGroupResize, spriteUrl, kioskMode, telemetryData, kioskSweepActive, isNight, dayNight, skipTransition, registerCounterRotate, gamepadMappings, simStatus };
 
   // Groups wrap children in a positioned div so counter-rotation has a well-defined origin.
@@ -585,9 +587,16 @@ const NodeRenderer: React.FC<NodeRendererProps> = ({
     node.type === 'needle-gauge' ||
     node.type === 'bar-gauge' ||
     node.type === 'sprite-bar-gauge' ||
-    node.type === 'sprite-text-gauge'
+    node.type === 'sprite-text-gauge' ||
+    node.type === 'transform-sprite'
   ) {
     const deg = computeRotation(node, telemetryData, excludeFromSweep);
+    const move = computeTranslate(node, telemetryData, excludeFromSweep);
+    const transformParts = [
+      deg != null ? `rotate(${deg}deg)` : null,
+      move ? `translate(${move.x}px, ${move.y}px)` : null,
+    ].filter(Boolean);
+    const transform = transformParts.length ? transformParts.join(' ') : undefined;
     const pivX = node.rotationX ?? Math.round((node.width ?? 100) / 2);
     const pivY = node.rotationY ?? Math.round((node.height ?? 100) / 2);
     const imgLeft = node.type === 'needle-gauge' ? nodeAbsX - pivX : nodeAbsX;
@@ -688,7 +697,7 @@ const NodeRenderer: React.FC<NodeRendererProps> = ({
                 position: 'absolute', inset: 0, width: w, height: h,
                 opacity: isNight ? 0 : 1,
                 transition: skipTransition ? undefined : 'opacity 2s ease',
-                transform: deg != null ? `rotate(${deg}deg)` : undefined,
+                transform,
                 transformOrigin: deg != null ? `${pivX}px ${pivY}px` : undefined,
                 clipPath,
               }}
@@ -701,7 +710,7 @@ const NodeRenderer: React.FC<NodeRendererProps> = ({
                 position: 'absolute', inset: 0, width: w, height: h,
                 opacity: isNight ? 1 : 0,
                 transition: skipTransition ? undefined : 'opacity 2s ease',
-                transform: deg != null ? `rotate(${deg}deg)` : undefined,
+                transform,
                 transformOrigin: deg != null ? `${pivX}px ${pivY}px` : undefined,
                 clipPath,
               }}
@@ -722,7 +731,7 @@ const NodeRenderer: React.FC<NodeRendererProps> = ({
               userSelect: 'none',
               zIndex: backlitNight ? NIGHT_OVERLAY_Z + 5 : undefined,
               filter: backlitNight ? glowFilter : undefined,
-              transform: deg != null ? `rotate(${deg}deg)` : undefined,
+              transform,
               transformOrigin: deg != null ? `${pivX}px ${pivY}px` : undefined,
               clipPath,
             }}

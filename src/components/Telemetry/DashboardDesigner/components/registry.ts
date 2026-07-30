@@ -16,6 +16,7 @@ import { encoderControlSchema } from './encoder-control/schema';
 import { gifGaugeSchema } from './gif-gauge/schema';
 import { arcGaugeFaceSchema } from './arc-gauge-face/schema';
 import { spriteArcGaugeFaceSchema } from './sprite-arc-gauge-face/schema';
+import { transformSpriteSchema } from './transform-sprite/schema';
 
 const REGISTRY: Record<ComponentType, ComponentSchema> = {
   'static-sprite':       staticSpriteSchema,
@@ -34,6 +35,7 @@ const REGISTRY: Record<ComponentType, ComponentSchema> = {
   'gif-gauge':             gifGaugeSchema,
   'arc-gauge-face':        arcGaugeFaceSchema,
   'sprite-arc-gauge-face': spriteArcGaugeFaceSchema,
+  'transform-sprite':      transformSpriteSchema,
 };
 
 export function getSchema(type: ComponentType): ComponentSchema {
@@ -43,7 +45,7 @@ export function getSchema(type: ComponentType): ComponentSchema {
 export const ALL_SCHEMAS: ComponentSchema[] = Object.values(REGISTRY);
 
 export const SPRITE_TYPES = new Set<ComponentType>([
-  'static-sprite', 'needle-gauge', 'bar-gauge', 'sprite-bar-gauge', 'sprite-text-gauge', 'gif-gauge',
+  'static-sprite', 'needle-gauge', 'bar-gauge', 'sprite-bar-gauge', 'sprite-text-gauge', 'gif-gauge', 'transform-sprite',
 ]);
 
 export const FREEFORM_TYPES = new Set<ComponentType>([

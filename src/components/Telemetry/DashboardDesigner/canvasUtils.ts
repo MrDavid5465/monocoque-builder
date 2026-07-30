@@ -58,6 +58,28 @@ export function computeRotation(node: ComponentNode, data: Record<string, number
   return outputMin + t * (outputMax - outputMin);
 }
 
+export function computeTranslate(node: ComponentNode, data: Record<string, number>, excludeFromSweep = false): { x: number; y: number } | undefined {
+  if (node.type !== 'transform-sprite' || !node.binding) return undefined;
+  const { field, inputMin, inputMax } = node.binding;
+  const raw = excludeFromSweep ? inputMin : (data[field] ?? inputMin);
+  const t = Math.max(0, Math.min(1, (raw - inputMin) / (inputMax - inputMin)));
+  const offset = (node.moveMin ?? 0) + t * ((node.moveMax ?? 0) - (node.moveMin ?? 0));
+  return node.moveAxis === 'y' ? { x: 0, y: offset } : { x: offset, y: 0 };
+}
+
+// Whether a bound node should render nothing because its telemetry value has gone
+// outside [inputMin, inputMax] and its binding opted into 'hide' (vs. the default
+// 'stop', which clamps to the boundary and keeps rendering). Deliberately uses the
+// *unclamped* fraction (unlike fillFraction/computeRotation) so both directions —
+// below inputMin and above inputMax — trigger hiding.
+export function isHiddenByLimit(node: ComponentNode, data: Record<string, number>, excludeFromSweep = false): boolean {
+  if (node.binding?.limitBehavior !== 'hide') return false;
+  const { field, inputMin, inputMax } = node.binding;
+  const raw = excludeFromSweep ? inputMin : (data[field] ?? inputMin);
+  const t = (raw - inputMin) / (inputMax - inputMin);
+  return t < 0 || t > 1;
+}
+
 export function scaleNode(node: ComponentNode, factor: number): Partial<ComponentNode> {
   const w = node.width ?? 100;
   const h = node.height ?? 100;

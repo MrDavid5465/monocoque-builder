@@ -16,7 +16,8 @@ export type ComponentType =
   | 'encoder-control'
   | 'gif-gauge'
   | 'arc-gauge-face'
-  | 'sprite-arc-gauge-face';
+  | 'sprite-arc-gauge-face'
+  | 'transform-sprite';
 export type BaseDashType = 'sprite' | '360';
 
 export interface BaseDashTypeInfo {
@@ -52,6 +53,12 @@ export interface TelemetryBinding {
   // affect the manual edit-mode test sweep, which always sweeps every bound
   // field regardless of this flag.
   startupSweep?: boolean;
+  // What happens once the bound telemetry value falls outside [inputMin, inputMax].
+  // Undefined/'stop' clamps to the boundary and keeps rendering (today's historical
+  // behaviour). 'hide' renders nothing instead — used to hand off between staged
+  // gauge elements (e.g. a needle-gauge that hides once fully swept so a
+  // transform-sprite can take over the rest of the range).
+  limitBehavior?: 'stop' | 'hide';
 }
 
 export interface ComponentNode {
@@ -72,6 +79,12 @@ export interface ComponentNode {
   // needle-gauge: pixel offset of the pivot WITHIN the image
   rotationX?: number;
   rotationY?: number;
+  // transform-sprite: translates the sprite along one axis between moveMin/moveMax
+  // (pixels) as the binding fraction goes 0→1 — the translate analogue of
+  // rotationX/rotationY for a needle-gauge.
+  moveAxis?: 'x' | 'y';
+  moveMin?: number;
+  moveMax?: number;
   binding?: TelemetryBinding;
   // any type can nest children
   children?: ComponentNode[];

@@ -7,11 +7,13 @@ const ALL_TYPES: ComponentType[] = [
   'text-gauge', 'sprite-text-gauge', 'graph-bar-gauge', 'group',
   'flag-display', 'flag-display-sprite',
   'button-control', 'slider-control', 'encoder-control',
+  'transform-sprite',
 ];
 
 const GAUGE_TYPES: ComponentType[] = [
   'static-sprite', 'needle-gauge', 'bar-gauge', 'sprite-bar-gauge',
   'text-gauge', 'sprite-text-gauge', 'graph-bar-gauge', 'group',
+  'transform-sprite',
 ];
 
 // ─── getSchema ────────────────────────────────────────────────────────────────
@@ -33,8 +35,8 @@ describe('getSchema', () => {
 // ─── ALL_SCHEMAS ──────────────────────────────────────────────────────────────
 
 describe('ALL_SCHEMAS', () => {
-  it('contains exactly 16 schemas', () => {
-    expect(ALL_SCHEMAS).toHaveLength(16);
+  it('contains exactly 17 schemas', () => {
+    expect(ALL_SCHEMAS).toHaveLength(17);
   });
 
   it('every schema has required shape', () => {
@@ -116,11 +118,19 @@ describe('ALL_SCHEMAS', () => {
     expect(getSchema('group').allowChildren).toBe(true);
   });
 
-  it('types that allow children are group, static-sprite, needle-gauge, bar-gauge, gif-gauge, arc-gauge-face, and sprite-arc-gauge-face', () => {
+  it('types that allow children are group, static-sprite, needle-gauge, bar-gauge, gif-gauge, arc-gauge-face, sprite-arc-gauge-face, and transform-sprite', () => {
     const allowingChildren = ALL_SCHEMAS.filter(s => s.allowChildren).map(s => s.type).sort();
     expect(allowingChildren).toEqual(
-      ['arc-gauge-face', 'bar-gauge', 'gif-gauge', 'group', 'needle-gauge', 'sprite-arc-gauge-face', 'static-sprite'].sort()
+      ['arc-gauge-face', 'bar-gauge', 'gif-gauge', 'group', 'needle-gauge', 'sprite-arc-gauge-face', 'static-sprite', 'transform-sprite'].sort()
     );
+  });
+
+  it('transform-sprite has move fields and is bindable', () => {
+    const schema = getSchema('transform-sprite');
+    expect(schema.bindable).toBe(true);
+    expect(schema.fields.moveAxis).toBeDefined();
+    expect(schema.fields.moveMin).toBeDefined();
+    expect(schema.fields.moveMax).toBeDefined();
   });
 
   it('freeform leaf types do not allow children', () => {
@@ -135,7 +145,7 @@ describe('ALL_SCHEMAS', () => {
 
 describe('SPRITE_TYPES', () => {
   it('contains sprite-based types', () => {
-    const expected: ComponentType[] = ['static-sprite', 'needle-gauge', 'bar-gauge', 'sprite-bar-gauge', 'sprite-text-gauge'];
+    const expected: ComponentType[] = ['static-sprite', 'needle-gauge', 'bar-gauge', 'sprite-bar-gauge', 'sprite-text-gauge', 'transform-sprite'];
     for (const t of expected) expect(SPRITE_TYPES.has(t), `expected ${t} in SPRITE_TYPES`).toBe(true);
   });
 

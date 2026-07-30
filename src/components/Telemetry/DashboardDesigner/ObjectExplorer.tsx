@@ -137,6 +137,7 @@ const ObjectExplorer: React.FC<Props> = ({
     'gif-gauge':             'GIF',
     'arc-gauge-face':        'CircleRing',
     'sprite-arc-gauge-face': 'NumberField',
+    'transform-sprite':      'ArrowTallUpRight',
   };
 
   const calcDropMode = (e: React.DragEvent<HTMLElement>, targetNode: ComponentNode): DropMode => {
