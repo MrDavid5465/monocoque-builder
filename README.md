@@ -27,7 +27,7 @@ form system on the frontend.
 ## Screenshots
 
 <p align="center">
-  <img src="presentation-screenshots/dashboard-live.png" width="820" alt="A live sim-racing dashboard rendering a gauge cluster"><br>
+  <img src="presentation-screenshots/dashboard-live-mk7-tuned.png" width="820" alt="A live sim-racing dashboard rendering a gauge cluster"><br>
   <sub>A dashboard rendered live against sim telemetry</sub>
 </p>
 
