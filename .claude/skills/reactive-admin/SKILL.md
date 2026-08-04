@@ -24,7 +24,11 @@ elsewhere under the alias `ReactiveAdmin`) is the routing core: a nested
 
 `typical-admin-fabric/index.tsx`'s `Index` is what every real screen in this
 app actually imports (`import ReactiveAdmin from '.../typical-admin-fabric'`).
-It wraps the core, supplying this app's real (Fluent-styled) defaults:
+It wraps the core, supplying this app's real (Fluent-styled) defaults. **This
+construction happens once, inside the library — an app screen never writes
+it.** A screen's own `components` prop only needs to name the slots it's
+actually overriding; anything it omits falls through this same spread to
+the Fluent default:
 
 ```tsx
 <ReactiveAdmin  {/* = typical-admin's core Index */}
@@ -61,6 +65,27 @@ Each slot's presence gates real behavior, not just which mutation fires:
 | `new` | `/new` | only if **both** `dispatcher.new` and `schemaDefinition.new` are set |
 | `edit` | `/:id/edit` | only if **both** `dispatcher.edit` and `schemaDefinition.edit` are set |
 | — | (no route) | `delete` isn't a route — it's a button+confirm rendered inside `Show`, shown only when `dispatcher.delete` is set |
+
+**Real example of omitting a slot entirely**: `RecordingsAdmin.tsx`'s
+`dispatcher` has no `edit` key, its `schemaDefinition` has no `edit` key
+(not even a placeholder `edit: {}`, unlike every other admin screen), and
+its `components` has no `edit` key either — because nothing on a Recording
+is user-editable after creation, so there's deliberately no `/:id/edit`
+route at all, per the gate above. This is the real proof that a screen only
+declares what it actually has, not a template every screen fills in.
+
+**One honest caveat**: that same gate means the reverse case — omitting a
+slot from `components` while its route *does* exist, so the plain generated
+Fluent default actually renders — is real and mechanically works (verified
+directly in `typical-admin-fabric/index.tsx`'s spread), but no screen in
+this app currently does it. All five real admin screens
+(`Cars`/`Dashboards`/`Templates`/`Groups`/`Recordings`) override every
+active slot — `list` for thumbnails, `show`/`edit`/`new` for custom
+behavior. Don't take that as evidence the fallback doesn't work; take it as
+this app not having needed a plain generic show/edit/new page yet. A new
+screen that's genuinely fine with the generated default for one slot should
+just... not mention that slot in `components`, the same way `RecordingsAdmin`
+doesn't mention `edit`.
 
 These routes are relative to wherever `<ReactiveAdmin>` itself is mounted in
 the app's own route tree — it's a self-contained nested router, not
