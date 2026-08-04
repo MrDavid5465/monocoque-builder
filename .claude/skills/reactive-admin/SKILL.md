@@ -87,6 +87,14 @@ screen that's genuinely fine with the generated default for one slot should
 just... not mention that slot in `components`, the same way `RecordingsAdmin`
 doesn't mention `edit`.
 
+The sibling `davidallanscott.ca` repo (this app's `denim`/`typical-admin-fabric`
+scaffolding was ported from it — see `hand-rolled-components`) reportedly
+*does* rely on the plain generated defaults in some of its own screens. Not
+verifiable from this remote session (its path is local to the real dev
+machine, not this container) — worth checking there first for a concrete
+"un-overridden slot" example next time this comes up at the real dev env,
+rather than this app's admin screens, which don't have one.
+
 These routes are relative to wherever `<ReactiveAdmin>` itself is mounted in
 the app's own route tree — it's a self-contained nested router, not
 something that needs its own top-level route wiring beyond one mount point.
