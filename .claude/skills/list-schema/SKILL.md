@@ -102,6 +102,32 @@ in use:
 `DetailsList` grid does, so a schema written for one renders correctly
 through either.
 
+## Run the validator before calling a list schema done
+
+```bash
+node .claude/skills/list-schema/scripts/validate-list-schema.cjs path/to/file.ts
+# or, with no args, scans all of src/:
+node .claude/skills/list-schema/scripts/validate-list-schema.cjs
+```
+
+Real TypeScript compiler API, not regex — same approach as `form-schema`'s
+validator. It anchors on two patterns (both real, both found in this app):
+a variable explicitly typed `DisplaySchema<...>`, and any `columns:` property
+(resolving a same-file identifier reference like `columns: carSchema` back
+to its declaration). For each `DisplayField` entry found this way it checks:
+missing `label` (skipped when the entry contains a spread — e.g.
+`{ ...field('devpath', 'Device Path'), options: {...} }` in
+`SimWindDevices/index.tsx` — since a spread might supply it and that can't
+be resolved statically), unrecognized top-level keys (`DisplayField` has no
+index signature, so a typo like `labl` won't always be caught through an
+untyped intermediate const the way `tsc` would catch it on a fresh literal),
+and unrecognized/dead `options.*` sub-keys (flags `filterable`/`filterType`/
+nested `options` as "implemented, zero real usages" rather than silently
+accepting them as if they were as reliable as `minWidth`/`maxWidth`).
+Entries built entirely through opaque helper calls (e.g. `field('baud', 'Baud', true)`
+with no object literal in sight) are skipped, not guessed at. Exits non-zero
+only on real errors.
+
 ## Where this is headed: the `list` field
 
 `DisplayField` (`{ label, onRender?, options? }`) and per-form's `Field`
