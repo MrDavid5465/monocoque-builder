@@ -59,7 +59,7 @@ when in doubt, check what Fluent component the type wraps (see Fabric.tsx).
 | `custom` | `onRender({value,onChange,name}) => ReactElement` | escape hatch, bypasses everything else |
 | *(unmatched string)* | — | plain `TextField`. `type` itself is never forwarded as a prop (Fabric.tsx destructures it out before `...rest` on **every** case) — `type: 'password'` does **not** get you a masked input, it silently renders as an ordinary `TextField`. `text`/`number`/`email`/`password`/`tel`/`url`/`textarea`/`search` are common intentional uses of this fallback. |
 
-### Deferred `options`: the `fileSelect` sentinel
+### Deferred `options`: the `fileSelect` sentinel (current code — planned for removal)
 
 `select`/`multi-select`/`radio`/`picker`/`combobox` normally need a static
 `options` array in the schema itself — but when the option list can't be
@@ -72,13 +72,29 @@ not a real per-form/Fabric.tsx key — it gets stripped before the field ever
 reaches per-form. See `button-control/schema.ts` and `slider-control/schema.ts`
 for the two real examples.
 
+**This is slated for removal**, not just documentation of a stable pattern —
+see `.claude/plans/schema-dispatcher-functions.md` for the full plan (not
+yet implemented, deferred to the real dev env). Short version: schema
+exports that need runtime data become factory functions
+(`(props) => SchemaDefinition<T>`) instead of plain objects; the caller
+resolves the data it already has and calls the function, and a `fileSelect`
+field just becomes an ordinary `type: 'select'` with `options: props.spriteOptions`.
+No sentinel, no special-casing by field shape in `ObjectExplorer.tsx`. Until
+that plan lands, the table above still describes the real, current behavior
+— don't remove `fileSelect` from a schema on the strength of this note alone.
+
 ### `gamepad-select` is slated for replacement
 
 It works (via the same runtime-injection pattern as `fileSelect`, see
 `ObjectExplorer.tsx`), but it's too narrow — a **generalized `list` field**
-is planned to replace it. Don't build new features on `gamepad-select` or
-invest in improving its validation further; a `list-schema` skill covering
-the replacement is coming next.
+is planned to replace it: a repeating-rows field type that mounts a full
+nested per-row `useForm` (confirmed: real per-row dirty/touched/validation
+state, not flat updates), with add/remove-row UI built into the field
+itself (confirmed: not left to the schema author). Unlike `fileSelect`,
+this is **not part of** the schema-dispatcher-functions plan above — it's
+its own, not-yet-designed piece of work. Don't build new features on
+`gamepad-select` or invest in improving its validation further; a
+`list-schema` skill covering the replacement is coming next.
 
 ## Run the validator before calling a schema done
 
