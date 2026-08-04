@@ -2,6 +2,7 @@
 name: typiql-api
 description: Rules for adding or changing any backend data type in this app (src-tauri/src/typiql_types.rs, graphql/*.rs) — when to use typiql's own CRUD/relation codegen vs. a hand-written resolver, and how to use relations instead of manual multi-query joins.
 license: MIT
+user-invocable: false
 ---
 
 # Building on typiql (this app's backend data layer)

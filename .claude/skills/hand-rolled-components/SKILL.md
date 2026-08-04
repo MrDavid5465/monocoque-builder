@@ -2,6 +2,7 @@
 name: hand-rolled-components
 description: How to build a new one-off visual component in this app's frontend (a "card", panel, or similar shell with no existing Fabric.tsx field type or Fluent component) — build it from basic Fluent primitives and theme.palette/theme.semanticColors, check for prior art first, and put genuinely reusable atoms in typical-admin-fabric/lib/templates. Use this before hand-rolling any new component with inline styles.
 license: MIT
+user-invocable: false
 ---
 
 # Hand-rolling a component in this app
