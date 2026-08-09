@@ -24,6 +24,28 @@ form system on the frontend.
 - **Telemetry admin** — car/photo management, dashboard groups, device
   routing, and template libraries, all backed by the same typiql schema.
 
+## Screenshots
+
+<p align="center">
+  <img src="presentation-screenshots/dashboard-live-mk7-tuned.png" width="820" alt="A live sim-racing dashboard rendering a gauge cluster"><br>
+  <sub>A dashboard rendered live against sim telemetry</sub>
+</p>
+
+<p align="center">
+  <img src="presentation-screenshots/designer-canvas-new.png" width="820" alt="The Dashboard Designer editing a gauge cluster"><br>
+  <sub>Dashboard Designer — dragging and configuring gauges on the canvas</sub>
+</p>
+
+<p align="center">
+  <img src="presentation-screenshots/shakers-matrix.png" width="480" alt="The shaker rig channel/effect matrix"><br>
+  <sub>Shaker rig control — per-channel device, pan, and effect fader matrix</sub>
+</p>
+
+<p align="center">
+  <img src="presentation-screenshots/recording-chart.png" width="820" alt="A recorded telemetry session plotted on a chart"><br>
+  <sub>Recordings — replaying a captured telemetry session</sub>
+</p>
+
 ## Stack
 
 - Frontend: React, TypeScript, Vite, Apollo Client, Fluent UI, per-form.

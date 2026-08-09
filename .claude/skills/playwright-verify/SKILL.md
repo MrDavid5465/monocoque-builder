@@ -24,13 +24,18 @@ anything else if in doubt.
 
 1. `npm run tauri dev` (full app + Rust backend on port 9000 + Vite on port
    1420) or at minimum `npm run dev` (Vite only, port 1420) must already be
-   running. Check with:
+   running. If you're not sure, just try `live-check.cjs` — it does its own
+   reachability check against the same URL and fails fast with a clear
+   message if the dev server isn't up, instead of a 30s Playwright timeout.
+   If it isn't running yet, start `npm run tauri dev` in the background
+   (`run_in_background`), then run:
    ```bash
-   curl -s -o /dev/null -w '%{http_code}\n' http://localhost:1420/
+   .claude/skills/playwright-verify/scripts/wait-for-dev-server.sh
    ```
-   If it's not a `200`, start `npm run tauri dev` in the background first
-   (`run_in_background`) and wait for `Starting API on http://0.0.0.0:9000`
-   in its log before proceeding.
+   instead of re-reading the background task's log yourself to spot
+   `Starting API on http://0.0.0.0:9000` — it polls `http://localhost:1420/`
+   and returns as soon as it's actually ready (60s timeout, override with a
+   second arg).
 2. Run everything from inside the `typiql/` project directory (where
    `package.json` and `node_modules` live) — Node's `require()` resolution
    needs a `node_modules` in an ancestor directory of the script. Scripts
