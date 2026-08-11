@@ -26,6 +26,7 @@ const baseProps = {
   onSelect: vi.fn(),
   onUpdate: vi.fn(),
   kioskMode: false,
+  activeTool: 'transform' as const,
 };
 
 function node(overrides: Partial<ComponentNode>): ComponentNode {

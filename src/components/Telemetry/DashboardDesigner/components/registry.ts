@@ -1,5 +1,5 @@
 import { ComponentType } from '../../../../types/dashboard';
-import { ComponentSchema } from './types';
+import { ComponentSchema, ComponentSchemaSource, SchemaProps } from './types';
 import { staticSpriteSchema } from './static-sprite/schema';
 import { needleGaugeSchema } from './needle-gauge/schema';
 import { barGaugeSchema } from './bar-gauge/schema';
@@ -16,8 +16,10 @@ import { encoderControlSchema } from './encoder-control/schema';
 import { gifGaugeSchema } from './gif-gauge/schema';
 import { arcGaugeFaceSchema } from './arc-gauge-face/schema';
 import { spriteArcGaugeFaceSchema } from './sprite-arc-gauge-face/schema';
+import { transformSpriteSchema } from './transform-sprite/schema';
+import { spriteArcFillSchema } from './sprite-arc-fill/schema';
 
-const REGISTRY: Record<ComponentType, ComponentSchema> = {
+const REGISTRY: Record<ComponentType, ComponentSchemaSource> = {
   'static-sprite':       staticSpriteSchema,
   'needle-gauge':        needleGaugeSchema,
   'bar-gauge':           barGaugeSchema,
@@ -34,16 +36,31 @@ const REGISTRY: Record<ComponentType, ComponentSchema> = {
   'gif-gauge':             gifGaugeSchema,
   'arc-gauge-face':        arcGaugeFaceSchema,
   'sprite-arc-gauge-face': spriteArcGaugeFaceSchema,
+  'transform-sprite':      transformSpriteSchema,
+  'sprite-arc-fill':       spriteArcFillSchema,
 };
 
-export function getSchema(type: ComponentType): ComponentSchema {
-  return REGISTRY[type];
+// Metadata-only callers (ALL_SCHEMAS below, and anything just checking
+// .type/.allowChildren/etc.) don't need real field `options` — this default
+// lets them omit `props` instead of every call site supplying an empty list.
+// Callers that actually render the form (ObjectExplorer.tsx) always pass the
+// real spriteOptions explicitly.
+const EMPTY_SCHEMA_PROPS: SchemaProps = { spriteOptions: [] };
+
+// Normalizes both REGISTRY shapes (plain schema vs. factory function needing
+// runtime data — see ComponentSchemaSource) for callers, so nothing outside
+// this file needs to know which one a given component type uses.
+export function getSchema(type: ComponentType, props: SchemaProps = EMPTY_SCHEMA_PROPS): ComponentSchema {
+  const source = REGISTRY[type];
+  return typeof source === 'function' ? source(props) : source;
 }
 
-export const ALL_SCHEMAS: ComponentSchema[] = Object.values(REGISTRY);
+export const ALL_SCHEMAS: ComponentSchema[] = Object.values(REGISTRY).map(
+  source => typeof source === 'function' ? source(EMPTY_SCHEMA_PROPS) : source,
+);
 
 export const SPRITE_TYPES = new Set<ComponentType>([
-  'static-sprite', 'needle-gauge', 'bar-gauge', 'sprite-bar-gauge', 'sprite-text-gauge', 'gif-gauge',
+  'static-sprite', 'needle-gauge', 'bar-gauge', 'sprite-bar-gauge', 'sprite-text-gauge', 'gif-gauge', 'transform-sprite', 'sprite-arc-fill',
 ]);
 
 export const FREEFORM_TYPES = new Set<ComponentType>([

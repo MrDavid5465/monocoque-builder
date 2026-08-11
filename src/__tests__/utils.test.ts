@@ -180,6 +180,25 @@ describe('moveNode', () => {
     expect(result.map(n => n.id)).toEqual(['group1']);
     expect(result[0].children!.map(n => n.id)).toEqual(['child', 'a']);
   });
+
+  it('resets x/y to 0 when a node moves into a different parent', () => {
+    const tree = [
+      { ...node('a'), x: 100, y: 200 },
+      node('group1', 'group', [node('child')]),
+    ];
+    const result = moveNode(tree, 'a', 'group1', 'inside');
+    const moved = result[0].children!.find(n => n.id === 'a')!;
+    expect(moved.x).toBe(0);
+    expect(moved.y).toBe(0);
+  });
+
+  it('does not reset x/y when reordering within the same parent', () => {
+    const tree = [{ ...node('a'), x: 100, y: 200 }, node('b'), node('c')];
+    const result = moveNode(tree, 'c', 'a', 'before');
+    const moved = result.find(n => n.id === 'a')!;
+    expect(moved.x).toBe(100);
+    expect(moved.y).toBe(200);
+  });
 });
 
 // ─── isDescendantOf ───────────────────────────────────────────────────────────

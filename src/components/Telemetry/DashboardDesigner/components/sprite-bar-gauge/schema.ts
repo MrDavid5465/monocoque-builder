@@ -1,7 +1,7 @@
-import { ComponentSchema } from '../types';
-import { COUNTER_ROTATE_FIELDS } from '../shared';
+import { ComponentSchema, SchemaProps } from '../types';
+import { COUNTER_ROTATE_FIELDS, CROP_FIELDS } from '../shared';
 
-export const spriteBarGaugeSchema: ComponentSchema = {
+export const spriteBarGaugeSchema = (props: SchemaProps): ComponentSchema => ({
   type: 'sprite-bar-gauge',
   label: 'Sprite Bar Gauge',
   icon: 'ProgressRingDots',
@@ -9,8 +9,8 @@ export const spriteBarGaugeSchema: ComponentSchema = {
   bindable: true,
   fields: {
     name:           { label: 'Name', type: 'text' },
-    file:           { label: 'Filled sprite', type: 'select', fileSelect: true },
-    backgroundFile: { label: 'Empty sprite (opt)', type: 'select', fileSelect: true },
+    file:           { label: 'Filled sprite', type: 'select', options: props.spriteOptions },
+    backgroundFile: { label: 'Empty sprite (opt)', type: 'select', options: props.spriteOptions },
     x:      { label: 'X', type: 'slider', min: -1000, max: 5000, section: 'Layout' },
     y:      { label: 'Y', type: 'slider', min: -1000, max: 5000, section: 'Layout' },
     width:  { label: 'Width', type: 'slider', min: 4, max: 5000, section: 'Layout' },
@@ -26,5 +26,6 @@ export const spriteBarGaugeSchema: ComponentSchema = {
       ],
     },
     ...COUNTER_ROTATE_FIELDS,
+    ...CROP_FIELDS,
   },
-};
+});

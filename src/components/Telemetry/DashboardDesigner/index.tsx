@@ -3,7 +3,7 @@ import { Stack, IconButton, getTheme, useQuery } from '../../../lib/denim/lib';
 import { useSubscription } from '@apollo/client/react';
 import dispatcher from '../../../lib/denim/lib/queries';
 import { useNavigate } from 'react-router';
-import Canvas from './Canvas';
+import Canvas, { CanvasTool } from './Canvas';
 import ObjectExplorer from './ObjectExplorer';
 import { DASHBOARD_UPDATES_SUB } from './queries';
 import { Photo360Handle } from './components/Photo360Viewer';
@@ -11,7 +11,7 @@ import Photo360CrossfadeViewer from './components/Photo360CrossfadeViewer';
 import { useDashboard } from './useDashboard';
 import { useTemplates } from './useTemplates';
 import { builtInSprites } from '../../../mock/dashboardMock';
-import { useTelemetryPlayback, SequenceConfig, DEFAULT_SWEEP_CONFIG } from './useTelemetryPlayback';
+import { useTelemetryPlayback, computeStaticFrame, SequenceConfig, DEFAULT_SWEEP_CONFIG } from './useTelemetryPlayback';
 import { computeTelemetryValues } from '../useLiveTelemetry';
 import { useMappingWatcher } from '../useMappingWatcher';
 import { useGlobalNightMode } from '../useGlobalNightMode';
@@ -44,20 +44,22 @@ const ToolbarIconButton: React.FC<{
   onClick: () => void;
   title?: string;
   active?: boolean;
-}> = ({ icon, label, onClick, title, active }) => {
+  disabled?: boolean;
+}> = ({ icon, label, onClick, title, active, disabled }) => {
   const theme = getTheme();
-  const color = active ? theme.palette.themePrimary : theme.palette.neutralPrimary;
+  const color = disabled ? theme.palette.neutralTertiaryAlt : active ? theme.palette.themePrimary : theme.palette.neutralPrimary;
   return (
     <Stack horizontal verticalAlign="center" tokens={{ childrenGap: 2 }}>
       <IconButton
         iconProps={{ iconName: icon }}
         onClick={onClick}
         title={title}
+        disabled={disabled}
         styles={{ root: { height: 28, width: 28 }, icon: { color, fontSize: 16 } }}
       />
       <span
-        onClick={onClick}
-        style={{ color, fontSize: '0.82em', cursor: 'pointer', userSelect: 'none' }}
+        onClick={disabled ? undefined : onClick}
+        style={{ color, fontSize: '0.82em', cursor: disabled ? 'default' : 'pointer', userSelect: 'none' }}
       >
         {label}
       </span>
@@ -81,6 +83,101 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
   };
 
   const { dashboard, setDashboard, saveDashboard, deleteDashboard, savePanCoordinates, savePhotoEditing, uploadSprite, deleteSprite, refetchSprites, copyBuiltinSprite, uploadSpriteData, uploadBackground, isDirty, sprites, loading, canvasRef, forceNightPreview, handleDashboardUpdate } = useDashboard(dashboardName);
+
+  // Undo/redo — every edit funnels through trackedSetDashboard below (see the
+  // 6 call sites that use it in place of the raw setDashboard). Rapid-fire
+  // changes from the same gesture (dragging a slider, dragging a transform
+  // handle, panning a 360 view) are coalesced into a single undo step by only
+  // pushing a new snapshot when more than UNDO_COALESCE_MS has passed since
+  // the last change — otherwise every pointermove during a drag would become
+  // its own undo step. undo()/redo() themselves call the RAW setDashboard,
+  // never trackedSetDashboard, since restoring a snapshot isn't itself a new
+  // edit to record.
+  const UNDO_COALESCE_MS = 400;
+  const MAX_HISTORY = 100;
+  const undoStackRef = useRef<DashboardConfig[]>([]);
+  const redoStackRef = useRef<DashboardConfig[]>([]);
+  const lastChangeAtRef = useRef(0);
+  // The value itself is never read — its only job is forcing a re-render
+  // when the (ref-based, so otherwise invisible to React) undo/redo stacks
+  // change, so canUndo/canRedo below reflect the current stack state.
+  const [, setHistoryTick] = useState(0);
+  // Bumped whenever a canvas move/resize drag ends, OR an undo/redo fires, so
+  // the properties panel's uncontrolled Form (which snapshots values once at
+  // mount) re-syncs to the node's live x/y/width/height instead of showing
+  // stale values from before the drag/undo/redo.
+  const [formRevision, setFormRevision] = useState(0);
+  const handleDragCommit = useCallback(() => setFormRevision(r => r + 1), []);
+
+  useEffect(() => {
+    undoStackRef.current = [];
+    redoStackRef.current = [];
+    setHistoryTick(t => t + 1);
+  }, [dashboardName]);
+
+  const trackedSetDashboard = useCallback((updater: React.SetStateAction<DashboardConfig | null>) => {
+    setDashboard(prev => {
+      const next = typeof updater === 'function'
+        ? (updater as (p: DashboardConfig | null) => DashboardConfig | null)(prev)
+        : updater;
+      if (prev && next && next !== prev) {
+        const now = Date.now();
+        if (now - lastChangeAtRef.current > UNDO_COALESCE_MS) {
+          undoStackRef.current.push(prev);
+          if (undoStackRef.current.length > MAX_HISTORY) undoStackRef.current.shift();
+          redoStackRef.current = [];
+          setHistoryTick(t => t + 1);
+        }
+        lastChangeAtRef.current = now;
+      }
+      return next;
+    });
+  }, [setDashboard]);
+
+  const undo = useCallback(() => {
+    if (undoStackRef.current.length === 0) return;
+    const snapshot = undoStackRef.current.pop()!;
+    setDashboard(current => {
+      if (current) redoStackRef.current.push(current);
+      return snapshot;
+    });
+    lastChangeAtRef.current = 0;
+    setHistoryTick(t => t + 1);
+    // The properties panel's Form is uncontrolled (snapshots values once at
+    // mount) — without this it would keep showing pre-undo values even
+    // though the underlying node data reverted correctly.
+    setFormRevision(r => r + 1);
+  }, [setDashboard]);
+
+  const redo = useCallback(() => {
+    if (redoStackRef.current.length === 0) return;
+    const snapshot = redoStackRef.current.pop()!;
+    setDashboard(current => {
+      if (current) undoStackRef.current.push(current);
+      return snapshot;
+    });
+    lastChangeAtRef.current = 0;
+    setHistoryTick(t => t + 1);
+    setFormRevision(r => r + 1);
+  }, [setDashboard]);
+
+  const canUndo = undoStackRef.current.length > 0;
+  const canRedo = redoStackRef.current.length > 0;
+
+  // Ctrl+Z / Ctrl+Y — skipped while typing in a text field, or in kiosk mode.
+  useEffect(() => {
+    if (kioskMode) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const el = document.activeElement as HTMLElement | null;
+      const typing = !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
+      if (typing) return;
+      if (e.key === 'z' || e.key === 'Z') { e.preventDefault(); undo(); }
+      else if (e.key === 'y' || e.key === 'Y') { e.preventDefault(); redo(); }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [undo, redo, kioskMode]);
   const { isNight, toggleNightMode } = useGlobalNightMode();
   const { previewCarId } = useGlobalPreviewCar();
   const builtInSpriteFileSet = useMemo(() => new Set(builtInSprites.map(s => s.file)), []);
@@ -92,6 +189,7 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
   const [viewing360, setViewing360] = useState(false);
   const viewer360Ref = useRef<Photo360Handle>(null);
   const [panBgMode, setPanBgMode] = useState(false);
+  const [activeTool, setActiveTool] = useState<CanvasTool>('transform');
   const [panelSide, setPanelSide] = useState<'left' | 'right'>('left');
   const [explorerHeight, setExplorerHeight] = useState(DEFAULT_EXPLORER_HEIGHT);
   const [windowWidth, setWindowWidth] = useState(window.innerWidth);
@@ -198,6 +296,19 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
   const [playing, setPlaying] = useState(false);
   const [kioskSweepDone, setKioskSweepDone] = useState(false);
   const [previewTelemetry, setPreviewTelemetry] = useState<Record<string, number> | null>(null);
+  // Editor-only manual "preview position" (0–1) — holds every bound field at
+  // a fixed fraction so elements that are otherwise invisible at rest (e.g. a
+  // sprite-arc-fill or a hidden-below-inputMin needle) can be seen and placed
+  // without running a sweep. Persists across edits; automatically suppressed
+  // while a sweep/sine test is actually playing (see telemetryData below) and
+  // reasserts itself once the test stops.
+  const [manualPreviewFraction, setManualPreviewFraction] = useState<number | null>(null);
+  // Editor-only test-sequence override: the manual edit-mode Play sweep
+  // normally already ignores each binding's startupSweep opt-out (that's
+  // the kiosk boot sweep's job, not this one) — unchecking this lets you
+  // preview the real kiosk boot sweep's opt-out behaviour instead, without
+  // needing to launch kiosk mode. Ephemeral (not persisted with the dashboard).
+  const [forceAllParticipate, setForceAllParticipate] = useState(true);
 
   const activeSequence = useMemo<SequenceConfig | null>(() => {
     if (kioskMode) return kioskSweepDone ? null : sequenceConfig;
@@ -212,14 +323,25 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
     () => flatNodes.filter(n => n.binding?.startupSweep !== false),
     [flatNodes],
   );
-  const sweepNodes = kioskMode ? startupSweepNodes : flatNodes;
+  const sweepNodes = kioskMode ? startupSweepNodes : (forceAllParticipate ? flatNodes : startupSweepNodes);
   const playbackData = useTelemetryPlayback(
     activeSequence,
     sweepNodes,
     () => { if (kioskMode) setKioskSweepDone(true); else setPlaying(false); },
   );
   const baseTelemetry = kioskMode && kioskSweepDone ? liveValues : playbackData;
-  const telemetryData = previewTelemetry ? { ...baseTelemetry, ...previewTelemetry } : baseTelemetry;
+  const manualFrame = useMemo(
+    () => (!kioskMode && !playing && manualPreviewFraction !== null)
+      ? computeStaticFrame(manualPreviewFraction, flatNodes)
+      : null,
+    [kioskMode, playing, manualPreviewFraction, flatNodes],
+  );
+  // previewTelemetry (binding min/max drag preview) now stays pinned after
+  // release instead of clearing — see ObjectExplorer's ComponentPropertiesPanel
+  // — so it must defer to an actual test playing, same as manualFrame above,
+  // or Play would never be able to override a still-pinned preview value.
+  const previewOverride = !playing ? previewTelemetry : null;
+  const telemetryData = { ...baseTelemetry, ...(manualFrame ?? {}), ...(previewOverride ?? {}) };
   const getCanvasEl = useCallback(
     () => canvasRef.current?.getCanvasEl() ?? null,
     [canvasRef],
@@ -239,7 +361,7 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
   }, [saveTemplate, sprites, uploadThumbnail, getCanvasEl, dashboard]);
 
   const updateNode = useCallback((id: string, patch: Partial<ComponentNode>) => {
-    setDashboard(prev => {
+    trackedSetDashboard(prev => {
       if (!prev) return prev;
       const node = findNodeById(prev.components, id);
       if (!node) return prev;
@@ -257,11 +379,11 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
 
       return { ...prev, components: updateNodeById(prev.components, id, finalPatch) };
     });
-  }, [setDashboard]);
+  }, [trackedSetDashboard]);
 
   const updateDashboard = useCallback((patch: Partial<DashboardConfig>) => {
-    setDashboard(prev => prev ? { ...prev, ...patch } : prev);
-  }, [setDashboard]);
+    trackedSetDashboard(prev => prev ? { ...prev, ...patch } : prev);
+  }, [trackedSetDashboard]);
 
   const onSequenceConfigChange = useCallback((c: SequenceConfig) => {
     updateDashboard({ sequenceConfig: c });
@@ -291,33 +413,33 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
   }, [savePhotoEditing]);
 
   const addNode = useCallback((node: ComponentNode, parentId: string | null) => {
-    setDashboard(prev => prev ? {
+    trackedSetDashboard(prev => prev ? {
       ...prev,
       components: addChildToNode(prev.components, parentId, node),
     } : prev);
     setSelectedId(node.id);
-  }, [setDashboard]);
+  }, [trackedSetDashboard]);
 
   const deleteNode = useCallback((id: string) => {
-    setDashboard(prev => prev ? {
+    trackedSetDashboard(prev => prev ? {
       ...prev,
       components: deleteNodeById(prev.components, id),
     } : prev);
     setSelectedId(prev => prev === id ? null : prev);
-  }, [setDashboard]);
+  }, [trackedSetDashboard]);
 
   const handleMoveNode = useCallback((nodeId: string, targetId: string, mode: 'before' | 'after' | 'inside') => {
-    setDashboard(prev => {
+    trackedSetDashboard(prev => {
       if (!prev || nodeId === targetId) return prev;
       if (isDescendantOf(prev.components, nodeId, targetId)) return prev;
       return { ...prev, components: moveNode(prev.components, nodeId, targetId, mode) };
     });
-  }, [setDashboard]);
+  }, [trackedSetDashboard]);
 
   const handle360Change = useCallback((y: number, p: number, f: number, r: number) => {
-    setDashboard(prev => prev ? { ...prev, photo360Yaw: y, photo360Pitch: p, photo360Fov: f, photo360Roll: r } : prev);
+    trackedSetDashboard(prev => prev ? { ...prev, photo360Yaw: y, photo360Pitch: p, photo360Fov: f, photo360Roll: r } : prev);
     savePanCoordinates(y, p, f, r);
-  }, [setDashboard, savePanCoordinates]);
+  }, [trackedSetDashboard, savePanCoordinates]);
 
   const handleFlip = useCallback(() => setPanelSide(s => s === 'left' ? 'right' : 'left'), []);
   const handleTogglePlay = useCallback(() => setPlaying(p => !p), []);
@@ -346,6 +468,11 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
     onSave: handleOnSave,
     onDeleteDashboard: handleDeleteDashboard,
     onMoveNode: handleMoveNode,
+    formRevision,
+    manualPreviewFraction,
+    onManualPreviewFractionChange: setManualPreviewFraction,
+    forceAllParticipate,
+    onForceAllParticipateChange: setForceAllParticipate,
     onSaveTemplate: handleSaveTemplate,
     onGenerateThumbnails: generateThumbnails,
     sequenceConfig,
@@ -476,6 +603,9 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
       liveBackgroundInteractive={viewing360 && !kioskMode}
       gamepadMappings={gamepadMappings}
       simStatus={simStatus}
+      onDragCommit={handleDragCommit}
+      activeTool={activeTool}
+      key={dashboardName}
     />
   );
 
@@ -483,6 +613,56 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
       {/* Floating toolbar */}
       <div style={{ position: 'absolute', top: 8, right: 8, zIndex: 10, display: 'flex', gap: 4 }}>
+        {!kioskMode && (
+          <>
+            <ToolbarIconButton
+              icon="Undo"
+              label="Undo"
+              onClick={undo}
+              title="Undo (Ctrl+Z)"
+              disabled={!canUndo}
+            />
+            <ToolbarIconButton
+              icon="Redo"
+              label="Redo"
+              onClick={redo}
+              title="Redo (Ctrl+Y)"
+              disabled={!canRedo}
+            />
+            <ToolbarIconButton
+              icon="ZoomOut"
+              label=""
+              onClick={() => canvasRef.current?.zoomBy(1 / 1.25)}
+              title="Zoom out"
+            />
+            <ToolbarIconButton
+              icon="ZoomIn"
+              label=""
+              onClick={() => canvasRef.current?.zoomBy(1.25)}
+              title="Zoom in"
+            />
+            <ToolbarIconButton
+              icon="FullScreen"
+              label=""
+              onClick={() => canvasRef.current?.zoomReset()}
+              title="Reset zoom (100%, centered)"
+            />
+          </>
+        )}
+        <ToolbarIconButton
+          icon="TransitionEffect"
+          label="Transform"
+          onClick={() => setActiveTool('transform')}
+          title="Transform tool — select an element in the tree, then drag its box handles to move/scale/rotate"
+          active={activeTool === 'transform'}
+        />
+        <ToolbarIconButton
+          icon="Crop"
+          label="Crop"
+          onClick={() => setActiveTool('crop')}
+          title="Crop tool — select a sprite element, then drag its edges inward to trim it (telemetry-driven fill/rotation acts on what's left)"
+          active={activeTool === 'crop'}
+        />
         {dashboard.baseDashType === '360' && !viewing360 && (
           <ToolbarIconButton
             icon="EditPhoto"

@@ -1,6 +1,6 @@
-import { ComponentSchema } from '../types';
+import { ComponentSchema, SchemaProps } from '../types';
 
-export const sliderControlSchema: ComponentSchema = {
+export const sliderControlSchema = (props: SchemaProps): ComponentSchema => ({
   type: 'slider-control',
   label: 'Slider Control',
   icon: 'Slider',
@@ -21,7 +21,7 @@ export const sliderControlSchema: ComponentSchema = {
     },
     sliderTrackColor:        { label: 'Track color', type: 'text', section: 'Track' },
     sliderTrackBorderRadius: { label: 'Track border radius', type: 'slider', min: 0, max: 100, section: 'Track' },
-    sliderThumbFile:  { label: 'Thumb sprite', type: 'select', fileSelect: true, section: 'Thumb' },
+    sliderThumbFile:  { label: 'Thumb sprite', type: 'select', options: props.spriteOptions, section: 'Thumb' },
     sliderThumbColor: { label: 'Thumb color', type: 'text', section: 'Thumb' },
     sliderThumbW:     { label: 'Thumb width', type: 'slider', min: 4, max: 200, section: 'Thumb' },
     sliderThumbH:     { label: 'Thumb height', type: 'slider', min: 4, max: 200, section: 'Thumb' },
@@ -30,4 +30,4 @@ export const sliderControlSchema: ComponentSchema = {
     sliderDefault: { label: 'Default value', type: 'slider', min: -1, max: 1, step: 0.1, section: 'Range' },
     gamepadMappingId: { label: 'Gamepad axis', type: 'gamepad-select', gamepadFilter: 'axis', section: 'Gamepad' },
   },
-};
+});

@@ -1,43 +1,28 @@
 import React, { useRef, useState, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react';
 import { DashboardConfig, ComponentNode } from '../../../types/dashboard';
 import { GamepadMapping } from '../../../lib/denim/lib/queries';
-import { findNodeById } from './components/utils';
-import { applyBinding, formatValue, fillFraction, colorFraction, computeRotation, scaleNode } from './canvasUtils';
+import { applyBinding, formatValue, fillFraction, colorFraction, computeRotation, computeTranslate, isHiddenByLimit, cropInsetPx, maxInsetPx, insetToClipPath, EdgeInset } from './canvasUtils';
 import GifGaugeNode from './GifGaugeNode';
 import ArcGaugeFaceNode from './ArcGaugeFaceNode';
+import TransformOverlay from './TransformOverlay';
+import CropOverlay from './CropOverlay';
 import { useGamepadIO, useHeldGamepadButton } from './useGamepadIO';
 
 interface SpriteFile { file: string; thumbnail: string; }
 
+export type CanvasTool = 'transform' | 'crop';
+
+// Node types that render a single primary sprite image and so support the
+// Crop tool — see cropInsetPx/CropOverlay. sprite-text-gauge (per-character
+// cells) and the drawn/SVG types are excluded on purpose.
+const CROPPABLE_TYPES = new Set<ComponentNode['type']>([
+  'static-sprite', 'needle-gauge', 'bar-gauge', 'sprite-bar-gauge', 'transform-sprite', 'sprite-arc-fill',
+]);
+
 type CanvasDragState =
   | { kind: 'move'; id: string; startX: number; startY: number; origX: number; origY: number }
-  | { kind: 'resize-group'; id: string; startX: number; startY: number; origW: number; origH: number; origChildren: ComponentNode[] }
-  | { kind: 'pan-bg'; startX: number; startY: number; origOffsetX: number; origOffsetY: number };
-
-function groupContentBounds(node: ComponentNode): { w: number; h: number } {
-  if (!node.children?.length) return { w: 0, h: 0 };
-  let maxX = 0, maxY = 0;
-  for (const child of node.children) {
-    const cw = child.type === 'group' ? groupContentBounds(child).w : (child.width ?? 100);
-    const ch = child.type === 'group' ? groupContentBounds(child).h : (child.height ?? 100);
-    maxX = Math.max(maxX, (child.x ?? 0) + cw);
-    maxY = Math.max(maxY, (child.y ?? 0) + ch);
-  }
-  return { w: maxX, h: maxY };
-}
-
-function scaleGroupChildren(children: ComponentNode[], sx: number, sy: number): ComponentNode[] {
-  return children.map(child => ({
-    ...child,
-    x: Math.round((child.x ?? 0) * sx),
-    y: Math.round((child.y ?? 0) * sy),
-    ...(child.width  !== undefined ? { width:  Math.max(1, Math.round(child.width  * sx)) } : {}),
-    ...(child.height !== undefined ? { height: Math.max(1, Math.round(child.height * sy)) } : {}),
-    ...(child.rotationX !== undefined ? { rotationX: Math.round(child.rotationX * sx) } : {}),
-    ...(child.rotationY !== undefined ? { rotationY: Math.round(child.rotationY * sy) } : {}),
-    ...(child.children ? { children: scaleGroupChildren(child.children, sx, sy) } : {}),
-  }));
-}
+  | { kind: 'pan-bg'; startX: number; startY: number; origOffsetX: number; origOffsetY: number }
+  | { kind: 'pan-view'; startX: number; startY: number; origOffsetX: number; origOffsetY: number };
 
 interface Props {
   dashboard: DashboardConfig;
@@ -70,10 +55,17 @@ interface Props {
   // already-correct night photo.
   liveBackgroundIsNightPhoto?: boolean;
   simStatus?: string;
+  // Fired once when a canvas-driven move or resize drag ends (pointer up), so
+  // the properties panel — which shows a snapshot taken at mount/selection
+  // time, not live-bound to the node — knows to refresh its displayed values.
+  onDragCommit?: (id: string) => void;
+  activeTool: CanvasTool;
 }
 
 export interface CanvasHandle {
   getCanvasEl: () => HTMLDivElement | null;
+  zoomBy: (factor: number) => void;
+  zoomReset: () => void;
 }
 
 
@@ -87,8 +79,6 @@ interface ControlSubProps {
   nodeAbsX: number;
   nodeAbsY: number;
   isSelected: boolean;
-  onSelect: (id: string | null) => void;
-  startDrag: (e: React.PointerEvent, id: string, origX: number, origY: number) => void;
   spriteUrl: (f: string) => string;
   kioskMode: boolean;
   childEls: React.ReactNode;
@@ -121,7 +111,7 @@ function resolveEncoderButtonIndex(node: ComponentNode, pos: number, mappings: G
 }
 
 const ButtonControlNode: React.FC<ControlSubProps> = ({
-  node, nodeAbsX, nodeAbsY, isSelected, onSelect, startDrag, spriteUrl, kioskMode, childEls, gamepadMappings,
+  node, nodeAbsX, nodeAbsY, isSelected, spriteUrl, kioskMode, childEls, gamepadMappings,
 }) => {
   const [ctrlState, setCtrlState] = React.useState<'off' | 'on' | 'pressed'>('off');
   const { sendButton } = useGamepadIO();
@@ -148,7 +138,7 @@ const ButtonControlNode: React.FC<ControlSubProps> = ({
   const r = node.ctrlBorderRadius ?? 6;
 
   const handlePointerDown = (e: React.PointerEvent) => {
-    if (!kioskMode) { startDrag(e, node.id, node.x, node.y); return; }
+    if (!kioskMode) return;
     e.stopPropagation();
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     if (node.buttonMode !== 'toggle') {
@@ -216,7 +206,6 @@ const ButtonControlNode: React.FC<ControlSubProps> = ({
           onPointerUp={handlePointerUp}
           onPointerLeave={handlePointerLeave}
           onPointerCancel={handlePointerCancel}
-          onClick={e => { e.stopPropagation(); if (!kioskMode) onSelect(node.id); }}
           style={{
             position: 'absolute', left: nodeAbsX, top: nodeAbsY,
             width: w, height: h, borderRadius: r, overflow: 'hidden',
@@ -250,7 +239,6 @@ const ButtonControlNode: React.FC<ControlSubProps> = ({
         onPointerUp={handlePointerUp}
         onPointerLeave={handlePointerLeave}
         onPointerCancel={handlePointerCancel}
-        onClick={e => { e.stopPropagation(); if (!kioskMode) onSelect(node.id); }}
         style={{
           position: 'absolute', left: nodeAbsX, top: nodeAbsY,
           width: w, height: h, borderRadius: r, overflow: 'hidden',
@@ -278,7 +266,7 @@ const ButtonControlNode: React.FC<ControlSubProps> = ({
 // SliderControlNode — linear axis slider
 // ---------------------------------------------------------------------------
 const SliderControlNode: React.FC<ControlSubProps> = ({
-  node, nodeAbsX, nodeAbsY, isSelected, onSelect, startDrag, spriteUrl, kioskMode, childEls, gamepadMappings,
+  node, nodeAbsX, nodeAbsY, isSelected, spriteUrl, kioskMode, childEls, gamepadMappings,
 }) => {
   const [value, setValue] = React.useState(() => node.sliderDefault ?? 0);
   const dragRef = React.useRef<{ trackRect: DOMRect } | null>(null);
@@ -309,7 +297,7 @@ const SliderControlNode: React.FC<ControlSubProps> = ({
   };
 
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!kioskMode) { startDrag(e, node.id, node.x, node.y); return; }
+    if (!kioskMode) return;
     e.stopPropagation();
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     const rect = e.currentTarget.getBoundingClientRect();
@@ -335,7 +323,6 @@ const SliderControlNode: React.FC<ControlSubProps> = ({
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
-        onClick={e => { e.stopPropagation(); if (!kioskMode) onSelect(node.id); }}
         style={{
           position: 'absolute', left: nodeAbsX, top: nodeAbsY,
           width: w, height: h, borderRadius: trackR, background: trackColor,
@@ -370,7 +357,7 @@ const SliderControlNode: React.FC<ControlSubProps> = ({
 // EncoderControlNode — rotary encoder with arc-arranged position buttons
 // ---------------------------------------------------------------------------
 const EncoderControlNode: React.FC<ControlSubProps> = ({
-  node, nodeAbsX, nodeAbsY, isSelected, onSelect, startDrag, spriteUrl, kioskMode, childEls, gamepadMappings,
+  node, nodeAbsX, nodeAbsY, isSelected, spriteUrl, kioskMode, childEls, gamepadMappings,
 }) => {
   const [activePos, setActivePos] = React.useState(() => node.encoderDefault ?? 0);
   const { sendButton } = useGamepadIO();
@@ -441,13 +428,12 @@ const EncoderControlNode: React.FC<ControlSubProps> = ({
   return (
     <>
       <div
-        onPointerDown={e => { if (!kioskMode) { startDrag(e, node.id, node.x, node.y); } else { e.stopPropagation(); } }}
-        onClick={e => { e.stopPropagation(); if (!kioskMode) onSelect(node.id); }}
+        onPointerDown={e => { if (kioskMode) e.stopPropagation(); }}
         style={{
           position: 'absolute', left: nodeAbsX, top: nodeAbsY,
           width: w, height: h,
           outline: isSelected ? '2px solid #4af' : 'none',
-          cursor: kioskMode ? 'default' : 'move',
+          cursor: kioskMode ? 'default' : 'default',
           userSelect: 'none',
         }}
       >
@@ -484,7 +470,12 @@ interface NodeRendererProps {
   selectedId: string | null;
   onSelect: (id: string | null) => void;
   startDrag: (e: React.PointerEvent, id: string, origX: number, origY: number) => void;
-  startGroupResize: (e: React.PointerEvent, node: ComponentNode, origW: number, origH: number) => void;
+  onUpdate: (id: string, patch: Partial<ComponentNode>) => void;
+  onDragCommit?: (id: string) => void;
+  activeTool: CanvasTool;
+  viewRef: React.RefObject<{ scale: number; offsetX: number; offsetY: number }>;
+  containerRef: React.RefObject<HTMLDivElement>;
+  overlayActiveRef: React.MutableRefObject<boolean>;
   spriteUrl: (file: string) => string;
   kioskMode: boolean;
   telemetryData: Record<string, number>;
@@ -492,13 +483,13 @@ interface NodeRendererProps {
   isNight: boolean;
   dayNight: boolean;
   skipTransition: boolean;
-  registerCounterRotate: (id: string, el: HTMLDivElement | null, steerMaxDeg: number | undefined) => void;
+  registerCounterRotate: (id: string, el: HTMLDivElement | null, steerMaxDeg: number | undefined, rotationDeg: number | undefined) => void;
   gamepadMappings: GamepadMapping[];
   simStatus: string;
 }
 
 const NodeRenderer: React.FC<NodeRendererProps> = ({
-  node, absX, absY, selectedId, onSelect, startDrag, startGroupResize, spriteUrl, kioskMode, telemetryData, kioskSweepActive, isNight, dayNight, skipTransition,
+  node, absX, absY, selectedId, onSelect, startDrag, onUpdate, onDragCommit, activeTool, viewRef, containerRef, overlayActiveRef, spriteUrl, kioskMode, telemetryData, kioskSweepActive, isNight, dayNight, skipTransition,
   registerCounterRotate, gamepadMappings, simStatus,
 }) => {
   const nodeAbsX = absX + node.x;
@@ -506,7 +497,28 @@ const NodeRenderer: React.FC<NodeRendererProps> = ({
   const isSelected = node.id === selectedId;
   const excludeFromSweep = kioskSweepActive && node.binding?.startupSweep === false;
 
-  const sharedChildProps = { selectedId, onSelect, startDrag, startGroupResize, spriteUrl, kioskMode, telemetryData, kioskSweepActive, isNight, dayNight, skipTransition, registerCounterRotate, gamepadMappings, simStatus };
+  if (isHiddenByLimit(node, telemetryData, excludeFromSweep)) return null;
+
+  const sharedChildProps = { selectedId, onSelect, startDrag, onUpdate, onDragCommit, activeTool, viewRef, containerRef, overlayActiveRef, spriteUrl, kioskMode, telemetryData, kioskSweepActive, isNight, dayNight, skipTransition, registerCounterRotate, gamepadMappings, simStatus };
+
+  const overlay = (!isSelected || kioskMode) ? null
+    : activeTool === 'transform'
+    ? <TransformOverlay
+        node={node} absX={absX} absY={absY}
+        // A group's own overlay renders INSIDE the group's already-positioned
+        // wrapper div (see below) — it must draw relative to the group's own
+        // position, not its parent's, or node.x/y get double-counted.
+        renderOffsetX={node.type === 'group' ? nodeAbsX : undefined}
+        renderOffsetY={node.type === 'group' ? nodeAbsY : undefined}
+        onUpdate={onUpdate} onDragCommit={onDragCommit} viewRef={viewRef} containerRef={containerRef} overlayActiveRef={overlayActiveRef}
+        telemetryData={telemetryData} excludeFromSweep={excludeFromSweep}
+      />
+    : (activeTool === 'crop' && CROPPABLE_TYPES.has(node.type))
+    ? <CropOverlay
+        node={node} absX={absX} absY={absY}
+        onUpdate={onUpdate} onDragCommit={onDragCommit} viewRef={viewRef} overlayActiveRef={overlayActiveRef}
+      />
+    : null;
 
   // Groups wrap children in a positioned div so counter-rotation has a well-defined origin.
   if (node.type === 'group') {
@@ -519,57 +531,19 @@ const NodeRenderer: React.FC<NodeRendererProps> = ({
       position: 'absolute',
       left: nodeAbsX,
       top: nodeAbsY,
-      // transform-origin 0 0 so counter-rotation pivots around the group's canvas position
+      // transform-origin 0 0 so counter-rotation (and manual rotation) pivots
+      // around the group's own canvas position, not its content's bounding box.
       transformOrigin: '0 0',
+      transform: node.counterRotate ? undefined : (node.rotation ? `rotate(${node.rotation}deg)` : undefined),
     };
-
-    const bounds = isSelected && !kioskMode ? groupContentBounds(node) : { w: 0, h: 0 };
 
     return (
       <div
-        ref={node.counterRotate ? (el => registerCounterRotate(node.id, el, node.steerMaxDeg)) : undefined}
+        ref={node.counterRotate ? (el => registerCounterRotate(node.id, el, node.steerMaxDeg, node.rotation)) : undefined}
         style={groupStyle}
       >
-        {/* Drag handle: only visible when selected in edit mode */}
-        {isSelected && !kioskMode && (
-          <div
-            onPointerDown={e => { e.stopPropagation(); startDrag(e, node.id, node.x, node.y); }}
-            onClick={e => { e.stopPropagation(); onSelect(node.id); }}
-            style={{
-              position: 'absolute',
-              left: -7, top: -7,
-              width: 14, height: 14,
-              background: '#4af',
-              border: '1px solid #4af',
-              borderRadius: 2,
-              cursor: 'move',
-              zIndex: 50,
-              boxSizing: 'border-box',
-            }}
-            title={`Group: ${node.name}`}
-          />
-        )}
-        {/* SE resize handle — scales all children proportionally */}
-        {isSelected && !kioskMode && bounds.w > 0 && bounds.h > 0 && (
-          <div
-            onPointerDown={e => { e.stopPropagation(); startGroupResize(e, node, bounds.w, bounds.h); }}
-            onClick={e => e.stopPropagation()}
-            style={{
-              position: 'absolute',
-              left: bounds.w - 5,
-              top: bounds.h - 5,
-              width: 10, height: 10,
-              background: '#fa0',
-              border: '2px solid #4af',
-              borderRadius: 2,
-              cursor: 'se-resize',
-              zIndex: 51,
-              boxSizing: 'border-box',
-            }}
-            title="Resize group (scales children)"
-          />
-        )}
         {childEls}
+        {overlay}
       </div>
     );
   }
@@ -585,9 +559,18 @@ const NodeRenderer: React.FC<NodeRendererProps> = ({
     node.type === 'needle-gauge' ||
     node.type === 'bar-gauge' ||
     node.type === 'sprite-bar-gauge' ||
-    node.type === 'sprite-text-gauge'
+    node.type === 'sprite-text-gauge' ||
+    node.type === 'transform-sprite'
   ) {
-    const deg = computeRotation(node, telemetryData, excludeFromSweep);
+    const bindingDeg = computeRotation(node, telemetryData, excludeFromSweep);
+    const deg = node.type === 'needle-gauge' ? (node.rotation ?? 0) + (bindingDeg ?? 0) : node.rotation;
+    const move = computeTranslate(node, telemetryData, excludeFromSweep);
+    const transformParts = [
+      deg != null ? `rotate(${deg}deg)` : null,
+      move ? `translate(${move.x}px, ${move.y}px)` : null,
+    ].filter(Boolean);
+    const transform = transformParts.length ? transformParts.join(' ') : undefined;
+    const transformOrigin = node.type === 'needle-gauge' ? undefined : '50% 50%'; // needle's is set from pivX/pivY below
     const pivX = node.rotationX ?? Math.round((node.width ?? 100) / 2);
     const pivY = node.rotationY ?? Math.round((node.height ?? 100) / 2);
     const imgLeft = node.type === 'needle-gauge' ? nodeAbsX - pivX : nodeAbsX;
@@ -595,16 +578,19 @@ const NodeRenderer: React.FC<NodeRendererProps> = ({
     const w = node.width ?? 100;
     const h = node.height ?? 100;
 
-    // sprite-bar-gauge: clip the filled image based on fill fraction
-    let clipPath: string | undefined;
+    // sprite-bar-gauge: clip the filled image based on fill fraction, combined
+    // (per-side max) with any fixed Crop-tool inset so a crop always wins over
+    // whatever the fill would otherwise reveal.
+    let fillInset: EdgeInset = { top: 0, right: 0, bottom: 0, left: 0 };
     if (node.type === 'sprite-bar-gauge') {
       const frac = fillFraction(node, telemetryData, excludeFromSweep);
       const dir = node.fillDirection ?? 'ltr';
-      if (dir === 'ltr') clipPath = `inset(0 ${Math.round((1 - frac) * 100)}% 0 0)`;
-      else if (dir === 'rtl') clipPath = `inset(0 0 0 ${Math.round((1 - frac) * 100)}%)`;
-      else if (dir === 'btt') clipPath = `inset(${Math.round((1 - frac) * 100)}% 0 0 0)`;
-      else clipPath = `inset(0 0 ${Math.round((1 - frac) * 100)}% 0)`;
+      if (dir === 'ltr') fillInset = { ...fillInset, right: Math.round((1 - frac) * w) };
+      else if (dir === 'rtl') fillInset = { ...fillInset, left: Math.round((1 - frac) * w) };
+      else if (dir === 'btt') fillInset = { ...fillInset, top: Math.round((1 - frac) * h) };
+      else fillInset = { ...fillInset, bottom: Math.round((1 - frac) * h) };
     }
+    const clipPath = insetToClipPath(maxInsetPx(fillInset, cropInsetPx(node)));
 
     // sprite-text-gauge: render individual character cells
     if (node.type === 'sprite-text-gauge' && node.charWidth && node.charHeight) {
@@ -616,38 +602,50 @@ const NodeRenderer: React.FC<NodeRendererProps> = ({
       const spacing = node.charSpacing ?? 0;
       const numDigits = node.numDigits ?? formatted.length;
       const padded = formatted.padStart(numDigits, ' ').slice(-numDigits);
+      const gridCols = node.charGridCols && node.charGridCols > 0 ? node.charGridCols : charMap.length;
+      const gridRows = Math.ceil(charMap.length / gridCols);
+      const firstSignificant = node.hideLeadingZeros ? padded.search(/\S/) : -1;
+      const visiblePadded = firstSignificant > 0 ? padded.slice(firstSignificant) : padded;
+      const visibleCount = visiblePadded.length;
+      const contentW = visibleCount * cw + spacing * Math.max(0, visibleCount - 1);
+      const contentH = ch;
+      const anchorX = node.textAlign === 'center' ? contentW / 2 : node.textAlign === 'right' ? contentW : 0;
+      const anchorY = node.verticalAlign === 'middle' ? contentH / 2 : node.verticalAlign === 'bottom' ? contentH : 0;
 
       return (
         <>
           <div
-            ref={node.counterRotate ? (el => registerCounterRotate(node.id, el, node.steerMaxDeg)) : undefined}
-            onPointerDown={e => { if (kioskMode) return; startDrag(e, node.id, node.x, node.y); }}
-            onClick={e => { e.stopPropagation(); onSelect(node.id); }}
+            ref={node.counterRotate ? (el => registerCounterRotate(node.id, el, node.steerMaxDeg, node.rotation)) : undefined}
             style={{
-              position: 'absolute', left: nodeAbsX, top: nodeAbsY,
+              position: 'absolute', left: nodeAbsX - anchorX, top: nodeAbsY - anchorY,
               display: 'flex', flexDirection: 'row',
               outline: isSelected ? '2px solid #4af' : 'none',
-              cursor: kioskMode ? 'default' : 'move',
               userSelect: 'none',
+              transform: node.counterRotate ? undefined : (node.rotation ? `rotate(${node.rotation}deg)` : undefined),
               transformOrigin: '50% 50%',
             }}
           >
-            {Array.from(padded).map((ch_char, i) => {
+            {Array.from(visiblePadded).map((ch_char, i) => {
+              const cellMarginRight = i < visibleCount - 1 ? spacing : 0;
               const charIdx = charMap.indexOf(ch_char);
-              const offsetX = charIdx >= 0 ? -(charIdx * cw) : 0;
+              const col = charIdx >= 0 ? charIdx % gridCols : 0;
+              const row = charIdx >= 0 ? Math.floor(charIdx / gridCols) : 0;
+              const offsetX = charIdx >= 0 ? -(col * cw) : 0;
+              const offsetY = charIdx >= 0 ? -(row * ch) : 0;
               return (
-                <div key={i} style={{ width: cw, height: ch, overflow: 'hidden', flexShrink: 0, marginRight: spacing }}>
+                <div key={i} style={{ width: cw, height: ch, overflow: 'hidden', flexShrink: 0, marginRight: cellMarginRight }}>
                   <img
                     src={spriteUrl(node.file ?? '')}
                     alt=""
                     draggable={false}
-                    style={{ position: 'relative', left: offsetX, width: 'auto', height: ch }}
+                    style={{ position: 'relative', left: offsetX, top: offsetY, width: 'auto', height: ch * gridRows }}
                   />
                 </div>
               );
             })}
           </div>
           {childEls}
+          {overlay}
         </>
       );
     }
@@ -663,19 +661,15 @@ const NodeRenderer: React.FC<NodeRendererProps> = ({
             src={spriteUrl(node.backgroundFile)}
             alt=""
             draggable={false}
-            style={{ position: 'absolute', left: imgLeft, top: imgTop, width: w, height: h, pointerEvents: 'none' }}
+            style={{ position: 'absolute', left: imgLeft, top: imgTop, width: w, height: h, pointerEvents: 'none', clipPath: insetToClipPath(cropInsetPx(node)) }}
           />
         )}
         {node.nightFile ? (
           /* Day/night crossfade: stack two images at the same position */
           <div
-            onPointerDown={e => { if (kioskMode) return; startDrag(e, node.id, node.x, node.y); }}
-            onClick={e => { e.stopPropagation(); onSelect(node.id); }}
             style={{
               position: 'absolute', left: imgLeft, top: imgTop, width: w, height: h,
               outline: isSelected ? '2px solid #4af' : 'none',
-              cursor: kioskMode ? 'default' : 'move',
-              userSelect: 'none',
               zIndex: backlitNight ? NIGHT_OVERLAY_Z + 5 : undefined,
               filter: backlitNight ? glowFilter : undefined,
             }}
@@ -688,8 +682,8 @@ const NodeRenderer: React.FC<NodeRendererProps> = ({
                 position: 'absolute', inset: 0, width: w, height: h,
                 opacity: isNight ? 0 : 1,
                 transition: skipTransition ? undefined : 'opacity 2s ease',
-                transform: deg != null ? `rotate(${deg}deg)` : undefined,
-                transformOrigin: deg != null ? `${pivX}px ${pivY}px` : undefined,
+                transform,
+                transformOrigin: node.type === 'needle-gauge' ? `${pivX}px ${pivY}px` : transformOrigin,
                 clipPath,
               }}
             />
@@ -701,8 +695,8 @@ const NodeRenderer: React.FC<NodeRendererProps> = ({
                 position: 'absolute', inset: 0, width: w, height: h,
                 opacity: isNight ? 1 : 0,
                 transition: skipTransition ? undefined : 'opacity 2s ease',
-                transform: deg != null ? `rotate(${deg}deg)` : undefined,
-                transformOrigin: deg != null ? `${pivX}px ${pivY}px` : undefined,
+                transform,
+                transformOrigin: node.type === 'needle-gauge' ? `${pivX}px ${pivY}px` : transformOrigin,
                 clipPath,
               }}
             />
@@ -711,32 +705,65 @@ const NodeRenderer: React.FC<NodeRendererProps> = ({
           <img
             src={spriteUrl(node.file ?? '')}
             alt={node.name}
-            onPointerDown={e => { if (kioskMode) return; startDrag(e, node.id, node.x, node.y); }}
-            onClick={e => { e.stopPropagation(); onSelect(node.id); }}
             style={{
               position: 'absolute',
               left: imgLeft, top: imgTop,
               width: w, height: h,
               outline: isSelected ? '2px solid #4af' : 'none',
-              cursor: kioskMode ? 'default' : 'move',
               userSelect: 'none',
               zIndex: backlitNight ? NIGHT_OVERLAY_Z + 5 : undefined,
               filter: backlitNight ? glowFilter : undefined,
-              transform: deg != null ? `rotate(${deg}deg)` : undefined,
-              transformOrigin: deg != null ? `${pivX}px ${pivY}px` : undefined,
+              transform,
+              transformOrigin: node.type === 'needle-gauge' ? `${pivX}px ${pivY}px` : transformOrigin,
               clipPath,
             }}
             draggable={false}
           />
         )}
-        {isSelected && node.type === 'needle-gauge' && (
-          <svg style={{ position: 'absolute', left: nodeAbsX - 14, top: nodeAbsY - 14, width: 28, height: 28, pointerEvents: 'none', overflow: 'visible' }}>
-            <circle cx={14} cy={14} r={8} fill="none" stroke="#0cf" strokeWidth={1.5} />
-            <line x1={14} y1={0} x2={14} y2={28} stroke="#0cf" strokeWidth={1} />
-            <line x1={0} y1={14} x2={28} y2={14} stroke="#0cf" strokeWidth={1} />
-          </svg>
-        )}
         {childEls}
+        {overlay}
+      </>
+    );
+  }
+
+  // ── sprite-arc-fill ── angular reveal of a raster arc image via a conic-gradient mask,
+  // the arc analogue of sprite-bar-gauge's linear clip-path fill. Not folded into the shared
+  // sprite block above since that block already juggles rotation + linear clip-path.
+  if (node.type === 'sprite-arc-fill') {
+    const frac = fillFraction(node, telemetryData, excludeFromSweep);
+    const w = node.width ?? 100;
+    const h = node.height ?? 100;
+    const cx = node.arcCenterX ?? Math.round(w / 2);
+    const cy = node.arcCenterY ?? Math.round(h / 2);
+    const start = node.arcStartAngle ?? 0;
+    const sweep = node.arcSweepAngle ?? 360;
+    const revealDeg = sweep * frac;
+    const mask = `conic-gradient(from ${start}deg at ${cx}px ${cy}px, black 0deg ${revealDeg}deg, transparent ${revealDeg}deg 360deg)`;
+    const backlitNight = node.backlit && dayNight && isNight;
+    const glowFilter = 'drop-shadow(0 0 6px rgba(255, 210, 80, 0.85))';
+    return (
+      <>
+        <img
+          src={spriteUrl(node.file ?? '')}
+          alt={node.name}
+          style={{
+            position: 'absolute',
+            left: nodeAbsX, top: nodeAbsY,
+            width: w, height: h,
+            outline: isSelected ? '2px solid #4af' : 'none',
+            userSelect: 'none',
+            zIndex: backlitNight ? NIGHT_OVERLAY_Z + 5 : undefined,
+            filter: backlitNight ? glowFilter : undefined,
+            maskImage: mask,
+            WebkitMaskImage: mask,
+            clipPath: insetToClipPath(cropInsetPx(node)),
+            transform: node.rotation ? `rotate(${node.rotation}deg)` : undefined,
+            transformOrigin: '50% 50%',
+          }}
+          draggable={false}
+        />
+        {childEls}
+        {overlay}
       </>
     );
   }
@@ -748,9 +775,7 @@ const NodeRenderer: React.FC<NodeRendererProps> = ({
     return (
       <>
         <div
-          ref={node.counterRotate ? (el => registerCounterRotate(node.id, el, node.steerMaxDeg)) : undefined}
-          onPointerDown={e => { if (kioskMode) return; startDrag(e, node.id, node.x, node.y); }}
-          onClick={e => { e.stopPropagation(); onSelect(node.id); }}
+          ref={node.counterRotate ? (el => registerCounterRotate(node.id, el, node.steerMaxDeg, node.rotation)) : undefined}
           style={{
             position: 'absolute', left: nodeAbsX, top: nodeAbsY,
             fontFamily: node.fontFamily ?? 'Arial, sans-serif',
@@ -759,16 +784,17 @@ const NodeRenderer: React.FC<NodeRendererProps> = ({
             color: node.color ?? '#ffffff',
             textAlign: node.textAlign ?? 'left',
             outline: isSelected ? '2px solid #4af' : 'none',
-            cursor: kioskMode ? 'default' : 'move',
             userSelect: 'none',
             whiteSpace: 'nowrap',
             lineHeight: 1,
+            transform: node.counterRotate ? undefined : (node.rotation ? `rotate(${node.rotation}deg)` : undefined),
             transformOrigin: '50% 50%',
           }}
         >
           {display}
         </div>
         {childEls}
+        {overlay}
       </>
     );
   }
@@ -852,20 +878,19 @@ const NodeRenderer: React.FC<NodeRendererProps> = ({
     return (
       <>
         <div
-          ref={node.counterRotate ? (el => registerCounterRotate(node.id, el, node.steerMaxDeg)) : undefined}
-          onPointerDown={e => { if (kioskMode) return; startDrag(e, node.id, node.x, node.y); }}
-          onClick={e => { e.stopPropagation(); onSelect(node.id); }}
+          ref={node.counterRotate ? (el => registerCounterRotate(node.id, el, node.steerMaxDeg, node.rotation)) : undefined}
           style={{
             position: 'absolute', left: nodeAbsX, top: nodeAbsY,
             outline: isSelected ? '2px solid #4af' : 'none',
-            cursor: kioskMode ? 'default' : 'move',
             userSelect: 'none',
+            transform: node.counterRotate ? undefined : (node.rotation ? `rotate(${node.rotation}deg)` : undefined),
             transformOrigin: '50% 50%',
           }}
         >
           {innerEl}
         </div>
         {childEls}
+        {overlay}
       </>
     );
   }
@@ -932,8 +957,6 @@ const NodeRenderer: React.FC<NodeRendererProps> = ({
     return (
       <>
         <div
-          onPointerDown={e => { if (kioskMode) return; startDrag(e, node.id, node.x, node.y); }}
-          onClick={e => { e.stopPropagation(); onSelect(node.id); }}
           style={{
             position: 'absolute', left: nodeAbsX, top: nodeAbsY,
             width: w, height: h,
@@ -942,8 +965,9 @@ const NodeRenderer: React.FC<NodeRendererProps> = ({
             gridTemplateRows: `repeat(${rows}, 1fr)`,
             gap,
             outline: isSelected ? '2px solid #4af' : 'none',
-            cursor: kioskMode ? 'default' : 'move',
             userSelect: 'none',
+            transform: node.rotation ? `rotate(${node.rotation}deg)` : undefined,
+            transformOrigin: '50% 50%',
           }}
         >
           {cellEls}
@@ -961,6 +985,7 @@ const NodeRenderer: React.FC<NodeRendererProps> = ({
           )}
         </div>
         {childEls}
+        {overlay}
       </>
     );
   }
@@ -991,14 +1016,13 @@ const NodeRenderer: React.FC<NodeRendererProps> = ({
     return (
       <>
         <div
-          onPointerDown={e => { if (kioskMode) return; startDrag(e, node.id, node.x, node.y); }}
-          onClick={e => { e.stopPropagation(); onSelect(node.id); }}
           style={{
             position: 'absolute', left: nodeAbsX, top: nodeAbsY,
             width: w, height: h,
             outline: isSelected ? '2px solid #4af' : 'none',
-            cursor: kioskMode ? 'default' : 'move',
             userSelect: 'none',
+            transform: node.rotation ? `rotate(${node.rotation}deg)` : undefined,
+            transformOrigin: '50% 50%',
           }}
         >
           {displayFile
@@ -1020,6 +1044,7 @@ const NodeRenderer: React.FC<NodeRendererProps> = ({
           )}
         </div>
         {childEls}
+        {overlay}
       </>
     );
   }
@@ -1027,68 +1052,80 @@ const NodeRenderer: React.FC<NodeRendererProps> = ({
   // ── button-control ──
   if (node.type === 'button-control') {
     return (
-      <ButtonControlNode
-        node={node} nodeAbsX={nodeAbsX} nodeAbsY={nodeAbsY}
-        isSelected={isSelected} onSelect={onSelect} startDrag={startDrag}
-        spriteUrl={spriteUrl} kioskMode={kioskMode} childEls={childEls}
-        gamepadMappings={gamepadMappings}
-      />
+      <>
+        <ButtonControlNode
+          node={node} nodeAbsX={nodeAbsX} nodeAbsY={nodeAbsY}
+          isSelected={isSelected} spriteUrl={spriteUrl} kioskMode={kioskMode} childEls={childEls}
+          gamepadMappings={gamepadMappings}
+        />
+        {overlay}
+      </>
     );
   }
 
   // ── slider-control ──
   if (node.type === 'slider-control') {
     return (
-      <SliderControlNode
-        node={node} nodeAbsX={nodeAbsX} nodeAbsY={nodeAbsY}
-        isSelected={isSelected} onSelect={onSelect} startDrag={startDrag}
-        spriteUrl={spriteUrl} kioskMode={kioskMode} childEls={childEls}
-        gamepadMappings={gamepadMappings}
-      />
+      <>
+        <SliderControlNode
+          node={node} nodeAbsX={nodeAbsX} nodeAbsY={nodeAbsY}
+          isSelected={isSelected} spriteUrl={spriteUrl} kioskMode={kioskMode} childEls={childEls}
+          gamepadMappings={gamepadMappings}
+        />
+        {overlay}
+      </>
     );
   }
 
   // ── encoder-control ──
   if (node.type === 'encoder-control') {
     return (
-      <EncoderControlNode
-        node={node} nodeAbsX={nodeAbsX} nodeAbsY={nodeAbsY}
-        isSelected={isSelected} onSelect={onSelect} startDrag={startDrag}
-        spriteUrl={spriteUrl} kioskMode={kioskMode} childEls={childEls}
-        gamepadMappings={gamepadMappings}
-      />
+      <>
+        <EncoderControlNode
+          node={node} nodeAbsX={nodeAbsX} nodeAbsY={nodeAbsY}
+          isSelected={isSelected} spriteUrl={spriteUrl} kioskMode={kioskMode} childEls={childEls}
+          gamepadMappings={gamepadMappings}
+        />
+        {overlay}
+      </>
     );
   }
 
   // ── arc-gauge-face / sprite-arc-gauge-face ──
   if (node.type === 'arc-gauge-face' || node.type === 'sprite-arc-gauge-face') {
     return (
-      <ArcGaugeFaceNode
-        node={node} nodeAbsX={nodeAbsX} nodeAbsY={nodeAbsY}
-        isSelected={isSelected} onSelect={onSelect} startDrag={startDrag}
-        telemetryData={telemetryData} kioskMode={kioskMode}
-        registerCounterRotate={registerCounterRotate} childEls={childEls}
-        spriteUrl={spriteUrl}
-        isNight={isNight} dayNight={dayNight}
-        nightOverlayZ={NIGHT_OVERLAY_Z}
-      />
+      <>
+        <ArcGaugeFaceNode
+          node={node} nodeAbsX={nodeAbsX} nodeAbsY={nodeAbsY}
+          isSelected={isSelected}
+          telemetryData={telemetryData} kioskMode={kioskMode}
+          registerCounterRotate={registerCounterRotate} childEls={childEls}
+          spriteUrl={spriteUrl}
+          isNight={isNight} dayNight={dayNight}
+          nightOverlayZ={NIGHT_OVERLAY_Z}
+        />
+        {overlay}
+      </>
     );
   }
 
   // ── gif-gauge ──
   if (node.type === 'gif-gauge') {
     return (
-      <GifGaugeNode
-        node={node} nodeAbsX={nodeAbsX} nodeAbsY={nodeAbsY}
-        isSelected={isSelected} onSelect={onSelect} startDrag={startDrag}
-        spriteUrl={spriteUrl} telemetryData={telemetryData} excludeFromSweep={excludeFromSweep} simStatus={simStatus}
-        kioskMode={kioskMode} registerCounterRotate={registerCounterRotate}
-        childEls={childEls}
-      />
+      <>
+        <GifGaugeNode
+          node={node} nodeAbsX={nodeAbsX} nodeAbsY={nodeAbsY}
+          isSelected={isSelected}
+          spriteUrl={spriteUrl} telemetryData={telemetryData} excludeFromSweep={excludeFromSweep} simStatus={simStatus}
+          kioskMode={kioskMode} registerCounterRotate={registerCounterRotate}
+          childEls={childEls}
+        />
+        {overlay}
+      </>
     );
   }
 
-  return <>{childEls}</>;
+  return <>{childEls}{overlay}</>;
 };
 
 // ---------------------------------------------------------------------------
@@ -1098,17 +1135,14 @@ const Canvas = forwardRef<CanvasHandle, Props>(({
   dashboard, sprites, gamepadMappings = [], selectedId, onSelect, onUpdate, onUpdateDashboard, kioskMode, onKioskButton, isNight: isNightProp, onToggleNightMode, forceNightPreview, skipTransition, telemetryData,
   kioskSweepActive = false,
   globalSteerMaxDeg, panBgMode, liveBackground, liveBackgroundInteractive, liveBackgroundIsNightPhoto, simStatus = '',
+  onDragCommit, activeTool,
 }, ref) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const innerRef     = useRef<HTMLDivElement>(null);
   const [view, setView] = useState({ scale: 1, offsetX: 0, offsetY: 0 });
+  const viewRef = useRef(view);
+  viewRef.current = view;
 
-  const selectedIdRef   = useRef(selectedId);
-  selectedIdRef.current = selectedId;
-  const componentsRef   = useRef(dashboard.components);
-  componentsRef.current = dashboard.components;
-  const onUpdateRef     = useRef(onUpdate);
-  onUpdateRef.current   = onUpdate;
   const telemetryDataRef = useRef<Record<string, number>>({});
   telemetryDataRef.current = telemetryData ?? {};
   const neckFxRef = useRef(dashboard.neckFx);
@@ -1127,21 +1161,56 @@ const Canvas = forwardRef<CanvasHandle, Props>(({
   neckFxDisableXRef.current = dashboard.neckFxDisableX ?? false;
   neckFxDisableYRef.current = dashboard.neckFxDisableY ?? false;
 
-  const counterRotateRefsRef = useRef<Map<string, { el: HTMLDivElement; steerMaxDeg: number | undefined }>>(new Map());
+  const counterRotateRefsRef = useRef<Map<string, { el: HTMLDivElement; steerMaxDeg: number | undefined; rotationDeg: number | undefined }>>(new Map());
   const globalSteerMaxDegRef = useRef<number>(globalSteerMaxDeg ?? 200);
   globalSteerMaxDegRef.current = globalSteerMaxDeg ?? 200;
 
-  const registerCounterRotate = useCallback((id: string, el: HTMLDivElement | null, steerMaxDeg: number | undefined) => {
-    if (el) counterRotateRefsRef.current.set(id, { el, steerMaxDeg });
+  const registerCounterRotate = useCallback((id: string, el: HTMLDivElement | null, steerMaxDeg: number | undefined, rotationDeg: number | undefined) => {
+    if (el) counterRotateRefsRef.current.set(id, { el, steerMaxDeg, rotationDeg });
     else    counterRotateRefsRef.current.delete(id);
   }, []);
 
   const dragState = useRef<CanvasDragState | null>(null);
   const scaleRef  = useRef(view.scale);
   scaleRef.current = view.scale;
+  // Set by TransformOverlay while a move/scale/rotate touch is in progress on
+  // a handle. Pinch-zoom below must not also activate from an incidental
+  // second touch (e.g. a palm/thumb brushing the screen while a finger is
+  // precisely gripping a small handle) — without this, the pinch handler's
+  // continuous view.scale/offset writes would corrupt the overlay's own
+  // screen→canvas math mid-gesture, producing runaway/exploding resize.
+  const overlayActiveRef = useRef(false);
+
+  // Button-driven zoom (toolbar zoom in/out/reset) — anchored at the
+  // container's own center rather than a cursor position, since there's no
+  // pointer coordinate behind a button click. Same clamp as wheel/pinch zoom.
+  const zoomBy = useCallback((factor: number) => {
+    const el = containerRef.current;
+    if (!el) return;
+    setView(v => {
+      const newScale = Math.max(0.1, Math.min(8, v.scale * factor));
+      const { clientWidth, clientHeight } = el;
+      const cx = clientWidth / 2, cy = clientHeight / 2;
+      const canvasX = (cx - v.offsetX) / v.scale, canvasY = (cy - v.offsetY) / v.scale;
+      return { scale: newScale, offsetX: Math.round(cx - canvasX * newScale), offsetY: Math.round(cy - canvasY * newScale) };
+    });
+  }, []);
+
+  const zoomReset = useCallback(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const { clientWidth, clientHeight } = el;
+    setView({
+      scale: 1,
+      offsetX: Math.round((clientWidth - dashboard.canvasWidth) / 2),
+      offsetY: Math.round((clientHeight - dashboard.canvasHeight) / 2),
+    });
+  }, [dashboard.canvasWidth, dashboard.canvasHeight]);
 
   useImperativeHandle(ref, () => ({
     getCanvasEl: () => innerRef.current,
+    zoomBy,
+    zoomReset,
   }));
 
   // NeckFX sway loop
@@ -1167,9 +1236,9 @@ const Canvas = forwardRef<CanvasHandle, Props>(({
       }
       const steer = data['steering'] ?? 0;
       const globalMaxDeg = globalSteerMaxDegRef.current;
-      for (const { el, steerMaxDeg } of counterRotateRefsRef.current.values()) {
+      for (const { el, steerMaxDeg, rotationDeg } of counterRotateRefsRef.current.values()) {
         const maxDeg = steerMaxDeg ?? globalMaxDeg;
-        el.style.transform = `rotate(${-(steer * maxDeg / 2).toFixed(2)}deg)`;
+        el.style.transform = `rotate(${((rotationDeg ?? 0) - steer * maxDeg / 2).toFixed(2)}deg)`;
       }
       rafId = requestAnimationFrame(tick);
     };
@@ -1177,40 +1246,133 @@ const Canvas = forwardRef<CanvasHandle, Props>(({
     return () => cancelAnimationFrame(rafId);
   }, []);
 
-  // Fit-to-container
+  // Centered-at-scale-1 default view — no auto-fit. Runs once per mount (this
+  // component remounts via `key={dashboardName}` when the edited dashboard
+  // changes, so the view always resets rather than persisting/restoring).
+  // Edit mode only — kiosk mode uses the fit-to-container effect below.
   useEffect(() => {
+    if (kioskMode || !containerRef.current) return;
+    const { clientWidth, clientHeight } = containerRef.current;
+    setView({
+      scale: 1,
+      offsetX: Math.round((clientWidth - dashboard.canvasWidth) / 2),
+      offsetY: Math.round((clientHeight - dashboard.canvasHeight) / 2),
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Kiosk mode: no interactive pan/zoom (see wheel/pinch/pan guards below) —
+  // instead the canvas is continuously fit to its container, centered, the
+  // same as it always displayed pre-pan/zoom. Recomputes on container resize
+  // so rotating/resizing the kiosk window keeps the dashboard filling it.
+  useEffect(() => {
+    if (!kioskMode || !containerRef.current) return;
     const compute = () => {
       if (!containerRef.current) return;
       const { clientWidth, clientHeight } = containerRef.current;
       const s = Math.min(clientWidth / dashboard.canvasWidth, clientHeight / dashboard.canvasHeight);
-      const offsetX = Math.round((clientWidth  - dashboard.canvasWidth  * s) / 2);
-      const offsetY = Math.round((clientHeight - dashboard.canvasHeight * s) / 2);
-      setView({ scale: s, offsetX, offsetY });
+      setView({
+        scale: s,
+        offsetX: Math.round((clientWidth  - dashboard.canvasWidth  * s) / 2),
+        offsetY: Math.round((clientHeight - dashboard.canvasHeight * s) / 2),
+      });
     };
     compute();
     const ro = new ResizeObserver(compute);
-    if (containerRef.current) ro.observe(containerRef.current);
+    ro.observe(containerRef.current);
     return () => ro.disconnect();
-  }, [dashboard.canvasWidth, dashboard.canvasHeight]);
+  }, [kioskMode, dashboard.canvasWidth, dashboard.canvasHeight]);
 
-  // Scroll/pinch to scale selected node
+  // Wheel always zooms the whole canvas view, regardless of tool/selection —
+  // cursor-anchored so the point under the pointer stays fixed on screen.
+  // Edit mode only — kiosk mode stays fixed to its fit-to-container view.
   useEffect(() => {
     const el = containerRef.current;
-    if (!el) return;
+    if (!el || kioskMode) return;
     const onWheel = (e: WheelEvent) => {
-      const sid = selectedIdRef.current;
-      if (!sid) return;
       e.preventDefault();
-      const node = findNodeById(componentsRef.current, sid);
-      if (!node || node.type === 'group') return;
       const pixelDelta = e.deltaMode === 0 ? e.deltaY : e.deltaY * 16;
-      const sensitivity = e.ctrlKey ? 0.025 : 0.006;
-      const factor = 1 + Math.max(-0.3, Math.min(0.3, -pixelDelta * sensitivity));
-      onUpdateRef.current(sid, scaleNode(node, factor));
+      const factor = Math.exp(-pixelDelta * (e.ctrlKey ? 0.0025 : 0.0012));
+      setView(v => {
+        const newScale = Math.max(0.1, Math.min(8, v.scale * factor));
+        const rect = el.getBoundingClientRect();
+        const cx = e.clientX - rect.left, cy = e.clientY - rect.top;
+        const canvasX = (cx - v.offsetX) / v.scale, canvasY = (cy - v.offsetY) / v.scale;
+        return { scale: newScale, offsetX: Math.round(cx - canvasX * newScale), offsetY: Math.round(cy - canvasY * newScale) };
+      });
     };
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
-  }, []);
+  }, [kioskMode]);
+
+  // Pinch-to-zoom (mobile) — the touch analogue of the wheel handler above,
+  // zooming/panning so the midpoint between the two fingers stays fixed on
+  // screen. Tracked via CAPTURE-phase native listeners on the container so a
+  // second finger touching down is always seen even though children (drag
+  // handles, sprites, the pan-view/pan-bg starters below) call
+  // stopPropagation() on their own bubble-phase handlers — capture fires
+  // before that stopPropagation can have any effect. Deliberately reads/writes
+  // only via the `pointers`/`pinch` closures below (never React state) during
+  // the gesture itself; `setView` is only called with a freshly computed
+  // value, never a functional updater that would need `view` in its deps.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el || kioskMode) return;
+    const pointers = new Map<number, { x: number; y: number }>();
+    let pinch: { startDist: number; startScale: number; startMidCanvasX: number; startMidCanvasY: number } | null = null;
+
+    const dist = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(a.x - b.x, a.y - b.y);
+    const mid = (a: { x: number; y: number }, b: { x: number; y: number }) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+
+    const onDown = (e: PointerEvent) => {
+      if (e.pointerType !== 'touch') return;
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pointers.size === 2 && !overlayActiveRef.current) {
+        const [a, b] = [...pointers.values()];
+        const rect = el.getBoundingClientRect();
+        const m = mid(a, b);
+        const v = viewRef.current;
+        pinch = {
+          startDist: dist(a, b),
+          startScale: v.scale,
+          startMidCanvasX: (m.x - rect.left - v.offsetX) / v.scale,
+          startMidCanvasY: (m.y - rect.top - v.offsetY) / v.scale,
+        };
+        dragState.current = null; // a single-finger pan/move may already be in progress — pinch takes over
+      }
+    };
+    const onMove = (e: PointerEvent) => {
+      if (!pointers.has(e.pointerId)) return;
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pointers.size === 2 && pinch) {
+        e.preventDefault();
+        const [a, b] = [...pointers.values()];
+        const rect = el.getBoundingClientRect();
+        const m = mid(a, b);
+        const newScale = Math.max(0.1, Math.min(8, pinch.startScale * (dist(a, b) / pinch.startDist)));
+        setView({
+          scale: newScale,
+          offsetX: Math.round(m.x - rect.left - pinch.startMidCanvasX * newScale),
+          offsetY: Math.round(m.y - rect.top - pinch.startMidCanvasY * newScale),
+        });
+      }
+    };
+    const onUp = (e: PointerEvent) => {
+      pointers.delete(e.pointerId);
+      if (pointers.size < 2) pinch = null;
+    };
+
+    el.addEventListener('pointerdown', onDown, { capture: true });
+    el.addEventListener('pointermove', onMove, { capture: true });
+    el.addEventListener('pointerup', onUp, { capture: true });
+    el.addEventListener('pointercancel', onUp, { capture: true });
+    return () => {
+      el.removeEventListener('pointerdown', onDown, { capture: true });
+      el.removeEventListener('pointermove', onMove, { capture: true });
+      el.removeEventListener('pointerup', onUp, { capture: true });
+      el.removeEventListener('pointercancel', onUp, { capture: true });
+    };
+  }, [kioskMode]);
 
   const spriteUrl = useCallback(
     (file: string) => sprites.find(s => s.file === file)?.thumbnail ?? '',
@@ -1223,18 +1385,21 @@ const Canvas = forwardRef<CanvasHandle, Props>(({
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
   }, []);
 
-  const startGroupResize = useCallback((e: React.PointerEvent, node: ComponentNode, origW: number, origH: number) => {
-    e.stopPropagation();
-    dragState.current = { kind: 'resize-group', id: node.id, startX: e.clientX, startY: e.clientY, origW, origH, origChildren: node.children ?? [] };
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
-  }, []);
-
   const startBgPan = (e: React.PointerEvent) => {
     dragState.current = {
       kind: 'pan-bg',
       startX: e.clientX, startY: e.clientY,
       origOffsetX: dashboard.bgOffsetX ?? 0,
       origOffsetY: dashboard.bgOffsetY ?? 0,
+    };
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+  };
+
+  const startViewPan = (e: React.PointerEvent) => {
+    dragState.current = {
+      kind: 'pan-view',
+      startX: e.clientX, startY: e.clientY,
+      origOffsetX: view.offsetX, origOffsetY: view.offsetY,
     };
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
   };
@@ -1253,22 +1418,22 @@ const Canvas = forwardRef<CanvasHandle, Props>(({
         bgOffsetX: Math.round(ds.origOffsetX + (e.clientX - ds.startX) / s),
         bgOffsetY: Math.round(ds.origOffsetY + (e.clientY - ds.startY) / s),
       });
-    } else {
-      const newW = Math.max(20, ds.origW + (e.clientX - ds.startX) / s);
-      const newH = Math.max(20, ds.origH + (e.clientY - ds.startY) / s);
-      if (ds.origW > 0 && ds.origH > 0) {
-        onUpdate(ds.id, { children: scaleGroupChildren(ds.origChildren, newW / ds.origW, newH / ds.origH) });
-      }
+    } else if (ds.kind === 'pan-view') {
+      setView(v => ({ ...v, offsetX: ds.origOffsetX + (e.clientX - ds.startX), offsetY: ds.origOffsetY + (e.clientY - ds.startY) }));
     }
   };
 
-  const onPointerUp = () => { dragState.current = null; };
+  const onPointerUp = () => {
+    const ds = dragState.current;
+    if (ds && ds.kind === 'move') onDragCommit?.(ds.id);
+    dragState.current = null;
+  };
 
   const isNight = forceNightPreview ?? (isNightProp ?? false);
   const eb = dashboard.kioskExitButton ?? { x: 1240, y: 20, opacity: 0.15 };
 
   const nodeProps = {
-    selectedId, onSelect, startDrag, startGroupResize, spriteUrl, kioskMode,
+    selectedId, onSelect, startDrag, onUpdate, onDragCommit, activeTool, viewRef, containerRef, overlayActiveRef, spriteUrl, kioskMode,
     telemetryData: telemetryData ?? {},
     kioskSweepActive,
     isNight, dayNight: dashboard.dayNight, skipTransition: skipTransition ?? false,
@@ -1280,8 +1445,10 @@ const Canvas = forwardRef<CanvasHandle, Props>(({
   return (
     <div
       ref={containerRef}
-      style={{ width: '100%', height: '100%', background: '#111', position: 'relative', overflow: 'hidden', isolation: 'isolate' }}
-      onClick={() => onSelect(null)}
+      style={{ width: '100%', height: '100%', background: '#111', position: 'relative', overflow: 'hidden', isolation: 'isolate', touchAction: 'none' }}
+      onPointerDown={e => { if (!kioskMode && !panBgMode) startViewPan(e); }}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
     >
       <div
         ref={innerRef}

@@ -76,9 +76,16 @@ export function moveNode(
   if (nodeId === targetId) return nodes;
   const movingNode = findNodeById(nodes, nodeId);
   if (!movingNode) return nodes;
+  const oldParentId = findParentId(nodes, nodeId);
   const withoutNode = deleteNodeById(nodes, nodeId);
-  if (mode === 'inside') return addChildToNode(withoutNode, targetId, movingNode);
-  return insertNodeRelative(withoutNode, targetId, movingNode, mode);
+  // x/y are relative to the parent container — a node moving into a
+  // different parent (e.g. dropped onto/inside a group) has its coordinate
+  // origin change out from under it, so it must be re-zeroed or it renders
+  // at whatever offset it used to be from a completely different origin.
+  const newParentId = mode === 'inside' ? targetId : findParentId(withoutNode, targetId);
+  const nodeToInsert = newParentId !== oldParentId ? { ...movingNode, x: 0, y: 0 } : movingNode;
+  if (mode === 'inside') return addChildToNode(withoutNode, targetId, nodeToInsert);
+  return insertNodeRelative(withoutNode, targetId, nodeToInsert, mode);
 }
 
 export function findNodeById(nodes: ComponentNode[], id: string): ComponentNode | null {

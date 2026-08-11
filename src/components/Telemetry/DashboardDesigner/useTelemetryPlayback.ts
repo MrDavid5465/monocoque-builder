@@ -37,19 +37,16 @@ export function easeInOut(t: number): number {
   return t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
 }
 
-export function computeFrame(
-  config: SequenceConfig,
-  elapsed: number,
+// A single test value gets synthesized per telemetry field, shared across
+// every gauge bound to it — matching how a real field like rpm is one value
+// across the whole dashboard. When multiple gauges bind the same field with
+// different ranges (e.g. a full-range needle plus a redline-only background
+// gauge), the union of those ranges is used, not just whichever binding
+// happened to be encountered first — otherwise gauges with a wider range
+// than the first-seen one never see their low end swept/previewed at all.
+function collectFieldRanges(
   bindings: Array<{ binding?: TelemetryBinding }>,
-): { values: Record<string, number>; done: boolean } {
-  // A single test value gets synthesized per telemetry field, shared across
-  // every gauge bound to it — matching how a real field like rpm is one
-  // value across the whole dashboard. When multiple gauges bind the same
-  // field with different ranges (e.g. a full-range needle plus a redline-only
-  // background gauge), the sweep must cover the union of those ranges, not
-  // just whichever binding happened to be encountered first — otherwise
-  // gauges with a wider range than the first-seen one never see their low
-  // end swept at all.
+): Map<string, { inputMin: number; inputMax: number }> {
   const fields = new Map<string, { inputMin: number; inputMax: number }>();
   for (const item of bindings) {
     const b = item.binding;
@@ -59,6 +56,31 @@ export function computeFrame(
       ? { inputMin: Math.min(existing.inputMin, b.inputMin), inputMax: Math.max(existing.inputMax, b.inputMax) }
       : { inputMin: b.inputMin, inputMax: b.inputMax });
   }
+  return fields;
+}
+
+// Static counterpart to computeFrame's per-tick sweep/sine math — holds every
+// bound field at a fixed fraction (0 = inputMin, 1 = inputMax) instead of
+// animating it. Backs the editor's manual "preview position" slider, which
+// makes bound elements visible for placement without needing to run a sweep.
+export function computeStaticFrame(
+  fraction: number,
+  bindings: Array<{ binding?: TelemetryBinding }>,
+): Record<string, number> {
+  const fields = collectFieldRanges(bindings);
+  const values: Record<string, number> = {};
+  for (const [field, { inputMin, inputMax }] of fields) {
+    values[field] = inputMin + fraction * (inputMax - inputMin);
+  }
+  return values;
+}
+
+export function computeFrame(
+  config: SequenceConfig,
+  elapsed: number,
+  bindings: Array<{ binding?: TelemetryBinding }>,
+): { values: Record<string, number>; done: boolean } {
+  const fields = collectFieldRanges(bindings);
 
   if (config.type === 'sweep') {
     const { durationMs, peak, holdMs } = config.params;

@@ -22,3 +22,23 @@ export interface ComponentSchema {
   bindable?: boolean;
   bindingHint?: string;
 }
+
+export interface SpriteOption { text: string; value: string; }
+
+// Runtime data a schema factory function may need to fill in field options
+// it can't know statically (today: just the sprite file list, always
+// pre-built with the "— none —" placeholder as its first entry — see
+// ObjectExplorer.tsx's ComponentPropertiesPanel). Extend here, not with a
+// new ad hoc prop, if a future field type needs another runtime-only input.
+export interface SchemaProps {
+  spriteOptions: SpriteOption[];
+}
+
+// Most component schemas are static plain objects. A schema whose field
+// `options` depend on runtime data (sprite pickers) is instead authored as
+// a factory function taking SchemaProps — see
+// .claude/plans/schema-dispatcher-functions.md for the full rationale.
+// registry.ts's getSchema()/ALL_SCHEMAS normalize both shapes for callers,
+// so nothing outside this file and registry.ts needs to care which one a
+// given component type uses.
+export type ComponentSchemaSource = ComponentSchema | ((props: SchemaProps) => ComponentSchema);

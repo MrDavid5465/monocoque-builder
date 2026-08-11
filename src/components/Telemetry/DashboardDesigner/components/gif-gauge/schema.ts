@@ -1,7 +1,7 @@
-import { ComponentSchema } from '../types';
+import { ComponentSchema, SchemaProps } from '../types';
 import { COUNTER_ROTATE_FIELDS } from '../shared';
 
-export const gifGaugeSchema: ComponentSchema = {
+export const gifGaugeSchema = (props: SchemaProps): ComponentSchema => ({
   type: 'gif-gauge',
   label: 'GIF Gauge',
   icon: 'GIF',
@@ -10,7 +10,7 @@ export const gifGaugeSchema: ComponentSchema = {
   bindingHint: 'Only used in value-driven mode.',
   fields: {
     name:   { label: 'Name', type: 'text' },
-    file:   { label: 'Spritesheet', type: 'select', fileSelect: true },
+    file:   { label: 'Spritesheet', type: 'select', options: props.spriteOptions },
     x:      { label: 'X', type: 'slider', min: -1000, max: 5000, section: 'Layout' },
     y:      { label: 'Y', type: 'slider', min: -1000, max: 5000, section: 'Layout' },
     width:  { label: 'Width', type: 'slider', min: 4, max: 5000, section: 'Layout' },
@@ -27,4 +27,4 @@ export const gifGaugeSchema: ComponentSchema = {
     gifFps:  { label: 'FPS (startup mode)', type: 'slider', min: 1, max: 120, section: 'Animation' },
     ...COUNTER_ROTATE_FIELDS,
   },
-};
+});

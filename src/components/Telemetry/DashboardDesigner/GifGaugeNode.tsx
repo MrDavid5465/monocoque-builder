@@ -7,19 +7,17 @@ interface GifGaugeNodeProps {
   nodeAbsX: number;
   nodeAbsY: number;
   isSelected: boolean;
-  onSelect: (id: string | null) => void;
-  startDrag: (e: React.PointerEvent, id: string, origX: number, origY: number) => void;
   spriteUrl: (file: string) => string;
   telemetryData: Record<string, number>;
   excludeFromSweep?: boolean;
   simStatus: string;
   kioskMode: boolean;
-  registerCounterRotate: (id: string, el: HTMLDivElement | null, steerMaxDeg: number | undefined) => void;
+  registerCounterRotate: (id: string, el: HTMLDivElement | null, steerMaxDeg: number | undefined, rotationDeg: number | undefined) => void;
   childEls: React.ReactNode;
 }
 
 const GifGaugeNode: React.FC<GifGaugeNodeProps> = ({
-  node, nodeAbsX, nodeAbsY, isSelected, onSelect, startDrag,
+  node, nodeAbsX, nodeAbsY, isSelected,
   spriteUrl, telemetryData, excludeFromSweep = false, simStatus, kioskMode, registerCounterRotate, childEls,
 }) => {
   const frameCount = node.gifFrameCount ?? 1;
@@ -65,9 +63,7 @@ const GifGaugeNode: React.FC<GifGaugeNodeProps> = ({
   return (
     <>
       <div
-        ref={node.counterRotate ? (el => registerCounterRotate(node.id, el, node.steerMaxDeg)) : undefined}
-        onPointerDown={e => { if (kioskMode) return; startDrag(e, node.id, node.x, node.y); }}
-        onClick={e => { e.stopPropagation(); onSelect(node.id); }}
+        ref={node.counterRotate ? (el => registerCounterRotate(node.id, el, node.steerMaxDeg, node.rotation)) : undefined}
         style={{
           position: 'absolute',
           left: nodeAbsX,
@@ -76,8 +72,9 @@ const GifGaugeNode: React.FC<GifGaugeNodeProps> = ({
           height: h,
           overflow: 'hidden',
           outline: isSelected ? '2px solid #4af' : 'none',
-          cursor: kioskMode ? 'default' : 'move',
+          cursor: kioskMode ? 'default' : 'default',
           userSelect: 'none',
+          transform: node.counterRotate ? undefined : (node.rotation ? `rotate(${node.rotation}deg)` : undefined),
           transformOrigin: '50% 50%',
         }}
       >
