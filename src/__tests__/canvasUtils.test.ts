@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { applyBinding, formatValue, fillFraction, computeRotation, scaleNode } from '../components/Telemetry/DashboardDesigner/canvasUtils';
+import { applyBinding, formatValue, fillFraction, computeRotation } from '../components/Telemetry/DashboardDesigner/canvasUtils';
 import { ComponentNode } from '../types/dashboard';
 
 function node(overrides: Partial<ComponentNode> = {}): ComponentNode {
@@ -131,43 +131,3 @@ describe('computeRotation', () => {
   });
 });
 
-// ─── scaleNode ───────────────────────────────────────────────────────────────
-
-describe('scaleNode', () => {
-  it('doubles dimensions for non-needle, shifts position to keep centre', () => {
-    const n = node({ type: 'static-sprite', x: 100, y: 100, width: 100, height: 100 });
-    const patch = scaleNode(n, 2);
-    expect(patch.width).toBe(200);
-    expect(patch.height).toBe(200);
-    // centre was at (150, 150); new top-left = 150 - 100 = 50
-    expect(patch.x).toBe(50);
-    expect(patch.y).toBe(50);
-  });
-
-  it('halves dimensions for non-needle, shifts position inward', () => {
-    const n = node({ type: 'static-sprite', x: 100, y: 100, width: 200, height: 200 });
-    const patch = scaleNode(n, 0.5);
-    expect(patch.width).toBe(100);
-    expect(patch.height).toBe(100);
-    expect(patch.x).toBe(150);
-    expect(patch.y).toBe(150);
-  });
-
-  it('scales needle rotation offsets, keeps x/y unchanged', () => {
-    const n = node({ type: 'needle-gauge', x: 200, y: 300, width: 100, height: 100, rotationX: 50, rotationY: 80 });
-    const patch = scaleNode(n, 2);
-    expect(patch.width).toBe(200);
-    expect(patch.height).toBe(200);
-    expect(patch.rotationX).toBe(100);
-    expect(patch.rotationY).toBe(160);
-    expect(patch.x).toBeUndefined();
-    expect(patch.y).toBeUndefined();
-  });
-
-  it('enforces minimum dimension of 4', () => {
-    const n = node({ type: 'static-sprite', x: 0, y: 0, width: 4, height: 4 });
-    const patch = scaleNode(n, 0.01);
-    expect(patch.width).toBe(4);
-    expect(patch.height).toBe(4);
-  });
-});

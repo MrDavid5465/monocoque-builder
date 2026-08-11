@@ -58,14 +58,13 @@ const DEAD_KEYS = ['display', 'hint'];
 // (Dashboard Designer's outer type/label/fields wrapper), not a per-form
 // Field" — both shapes share `type`+`label`, so without this exclusion
 // every ComponentSchema false-positives as an unrecognized field type.
+// Note: a ComponentSchema may itself be nested inside a factory function's
+// return expression (`(props) => ({ type, label, icon, ..., fields: {...} })`)
+// rather than a top-level object literal — no special-casing needed for
+// that here, since `visit()` below recurses into every descendant
+// unconditionally (including arrow-function bodies), so the object literal
+// is found and walked the same way either way.
 const COMPONENT_SCHEMA_MARKERS = ['icon', 'allowChildren'];
-
-// `fileSelect: true` is a documented sentinel (ObjectExplorer.tsx's
-// `perFormSchema`) meaning "options are injected at render time from the
-// sprite list" — satisfies any options-requiring type without a static
-// `options` array. Not a real per-form/Fabric.tsx key; stripped before the
-// field ever reaches per-form.
-const DEFERRED_OPTIONS_SENTINEL = 'fileSelect';
 
 // ─── Small utilities ────────────────────────────────────────────────────────
 
@@ -171,8 +170,7 @@ function checkFile(filePath) {
           // statically check it, skip rather than guess.
         } else {
           const requiredExtra = REQUIRED_EXTRAS[typeValue];
-          const optionsDeferred = requiredExtra === 'options' && names.has(DEFERRED_OPTIONS_SENTINEL);
-          if (requiredExtra && !names.has(requiredExtra) && !optionsDeferred) {
+          if (requiredExtra && !names.has(requiredExtra)) {
             if (typeValue === 'gamepad-select') {
               // The only two real usages today (button-control/slider-control
               // schemas) deliberately omit this — ObjectExplorer.tsx's

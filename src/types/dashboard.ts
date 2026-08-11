@@ -17,7 +17,8 @@ export type ComponentType =
   | 'gif-gauge'
   | 'arc-gauge-face'
   | 'sprite-arc-gauge-face'
-  | 'transform-sprite';
+  | 'transform-sprite'
+  | 'sprite-arc-fill';
 export type BaseDashType = 'sprite' | '360';
 
 export interface BaseDashTypeInfo {
@@ -70,12 +71,28 @@ export interface ComponentNode {
   // For all other types: x/y is the image top-left.
   x: number;
   y: number;
+  // Manual/static rotation (degrees, CSS transform: rotate()), universal to every node
+  // type. Set by the Transform tool's rotate handle (or hand-edited here). Composes with
+  // any existing binding-driven transform the type already has — see Canvas.tsx.
+  rotation?: number;
   // sprite-based types:
   file?: string;
   width?: number;
   height?: number;
   backlit?: boolean;
   nightFile?: string;  // Optional sprite to crossfade in at night (sprite-type nodes)
+  // Crop tool: trims a fixed pixel inset off one or more edges of the
+  // rendered sprite, in the node's own unscaled width/height space — e.g.
+  // hiding a sprite's own baked-in edge glow where it would otherwise
+  // overlap a neighboring element. Combines with any binding-driven reveal
+  // (sprite-bar-gauge's fill clip) by taking the larger inset per side, so
+  // telemetry acts on whatever's left after the crop. Applies to every
+  // single-image sprite node type (static-sprite, needle-gauge, bar-gauge,
+  // sprite-bar-gauge, transform-sprite, sprite-arc-fill) — ignored elsewhere.
+  cropLeft?: number;
+  cropTop?: number;
+  cropRight?: number;
+  cropBottom?: number;
   // needle-gauge: pixel offset of the pivot WITHIN the image
   rotationX?: number;
   rotationY?: number;
@@ -85,6 +102,13 @@ export interface ComponentNode {
   moveAxis?: 'x' | 'y';
   moveMin?: number;
   moveMax?: number;
+  // sprite-arc-fill: pixel offset of the arc's rotational center WITHIN the image, plus the
+  // angular window (from arcStartAngle, sweeping arcSweepAngle degrees CW) the drawn arc
+  // physically occupies — the binding fraction reveals that window via a conic-gradient mask.
+  arcCenterX?: number;
+  arcCenterY?: number;
+  arcStartAngle?: number;
+  arcSweepAngle?: number;
   binding?: TelemetryBinding;
   // any type can nest children
   children?: ComponentNode[];
@@ -98,6 +122,10 @@ export interface ComponentNode {
   color?: string;
   fontWeight?: 'normal' | 'bold';
   textAlign?: 'left' | 'center' | 'right';
+  // sprite-text-gauge only: where x/y anchors within the rendered digit
+  // row's content box — 'left'/'top' (the defaults) keep x/y as the box's
+  // top-left corner, matching pre-existing behavior exactly.
+  verticalAlign?: 'top' | 'middle' | 'bottom';
 
   // --- sprite-text-gauge ---
   charWidth?: number;
@@ -105,6 +133,13 @@ export interface ComponentNode {
   charMap?: string;
   charSpacing?: number;
   numDigits?: number;
+  // Columns per row in the sprite sheet's character grid. Omitted/1 keeps the
+  // legacy single-row behavior; charMap indexes read in row-major order.
+  charGridCols?: number;
+  // When numDigits pads a shorter value, leave the leading pad cells blank
+  // instead of rendering charMap's index-0 glyph (padStart uses ' ', which
+  // isn't itself in charMap, so it falls back to index 0 otherwise).
+  hideLeadingZeros?: boolean;
 
   // --- sprite-bar-gauge: background sprite + fill direction ---
   backgroundFile?: string;

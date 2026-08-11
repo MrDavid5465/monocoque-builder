@@ -1,7 +1,7 @@
-import { ComponentSchema } from '../types';
+import { ComponentSchema, SchemaProps } from '../types';
 import { COUNTER_ROTATE_FIELDS } from '../shared';
 
-export const spriteArcGaugeFaceSchema: ComponentSchema = {
+export const spriteArcGaugeFaceSchema = (props: SchemaProps): ComponentSchema => ({
   type: 'sprite-arc-gauge-face',
   label: 'Sprite Arc Gauge Face',
   icon: 'NumberField',
@@ -35,7 +35,7 @@ export const spriteArcGaugeFaceSchema: ComponentSchema = {
     gaugeLabelRotate:  { label: 'Rotate labels tangent to arc', type: 'checkbox', section: 'Gauge Labels' },
     gaugeLabelDivisor: { label: 'Label divisor (e.g. 1000 → 9 not 9000)', type: 'slider', min: 1, max: 100000, section: 'Gauge Labels' },
     gaugeSubLabel:     { label: 'Sub-label text (e.g. ×1000 RPM)', type: 'text', section: 'Gauge Labels' },
-    file:        { label: 'Character strip (omit for individual-files mode)', type: 'select', fileSelect: true, section: 'Character Strip' },
+    file:        { label: 'Character strip (omit for individual-files mode)', type: 'select', options: props.spriteOptions, section: 'Character Strip' },
     charWidth:   { label: 'Char width px', type: 'slider', min: 1, max: 500, section: 'Character Strip' },
     charHeight:  { label: 'Char height px', type: 'slider', min: 1, max: 500, section: 'Character Strip' },
     charMap:     { label: 'Strip char order (e.g. 0123456789)', type: 'text', section: 'Character Strip' },
@@ -43,4 +43,4 @@ export const spriteArcGaugeFaceSchema: ComponentSchema = {
     backlit: { label: 'Backlit (shines above night overlay)', type: 'checkbox', section: 'Appearance' },
     ...COUNTER_ROTATE_FIELDS,
   },
-};
+});

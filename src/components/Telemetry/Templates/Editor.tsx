@@ -261,6 +261,7 @@ const TemplateEditor: React.FC<Props> = ({ template }) => {
               kioskMode={false}
               telemetryData={telemetryData}
               globalSteerMaxDeg={globalSteerMaxDeg}
+              activeTool="transform"
             />
           </div>
         </Stack.Item>

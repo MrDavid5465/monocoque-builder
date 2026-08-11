@@ -6,11 +6,9 @@ interface ArcGaugeFaceNodeProps {
   nodeAbsX: number;
   nodeAbsY: number;
   isSelected: boolean;
-  onSelect: (id: string | null) => void;
-  startDrag: (e: React.PointerEvent, id: string, origX: number, origY: number) => void;
   telemetryData: Record<string, number>;
   kioskMode: boolean;
-  registerCounterRotate: (id: string, el: HTMLDivElement | null, steerMaxDeg: number | undefined) => void;
+  registerCounterRotate: (id: string, el: HTMLDivElement | null, steerMaxDeg: number | undefined, rotationDeg: number | undefined) => void;
   childEls: React.ReactNode;
   spriteUrl: (file: string) => string;
   isNight?: boolean;
@@ -21,8 +19,8 @@ interface ArcGaugeFaceNodeProps {
 type Tier = 'major' | 'mid' | 'minor';
 
 const ArcGaugeFaceNode: React.FC<ArcGaugeFaceNodeProps> = ({
-  node, nodeAbsX, nodeAbsY, isSelected, onSelect, startDrag,
-  telemetryData, kioskMode, registerCounterRotate, childEls, spriteUrl,
+  node, nodeAbsX, nodeAbsY, isSelected,
+  telemetryData, registerCounterRotate, childEls, spriteUrl,
   isNight = false, dayNight = false, nightOverlayZ = 40,
 }) => {
   const backlitNight = node.backlit && dayNight && isNight;
@@ -142,9 +140,7 @@ const ArcGaugeFaceNode: React.FC<ArcGaugeFaceNodeProps> = ({
   return (
     <>
       <div
-        ref={node.counterRotate ? (el => registerCounterRotate(node.id, el, node.steerMaxDeg)) : undefined}
-        onPointerDown={e => { if (kioskMode) return; startDrag(e, node.id, node.x, node.y); }}
-        onClick={e => { e.stopPropagation(); onSelect(node.id); }}
+        ref={node.counterRotate ? (el => registerCounterRotate(node.id, el, node.steerMaxDeg, node.rotation)) : undefined}
         style={{
           position: 'absolute',
           left: nodeAbsX,
@@ -152,9 +148,10 @@ const ArcGaugeFaceNode: React.FC<ArcGaugeFaceNodeProps> = ({
           width: w,
           height: h,
           outline: isSelected ? '2px solid #4af' : 'none',
-          cursor: kioskMode ? 'default' : 'move',
           userSelect: 'none',
           zIndex: backlitNight ? nightOverlayZ + 5 : undefined,
+          transform: node.counterRotate ? undefined : (node.rotation ? `rotate(${node.rotation}deg)` : undefined),
+          transformOrigin: '50% 50%',
         }}
       />
 

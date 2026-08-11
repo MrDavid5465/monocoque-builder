@@ -30,6 +30,17 @@ interface Props {
   isDirty: boolean;
   onSave: () => void;
   onMoveNode: (nodeId: string, targetId: string, mode: DropMode) => void;
+  // Bumped by the parent whenever a canvas drag/resize commits, so the
+  // properties Form below (uncontrolled, snapshots once) remounts and
+  // re-syncs to the node's latest x/y/width/height.
+  formRevision?: number;
+  // Editor-only manual telemetry preview — see PlaybackPanel.
+  manualPreviewFraction?: number | null;
+  onManualPreviewFractionChange?: (v: number | null) => void;
+  // Editor-only: forces every bound element into the test sweep, ignoring
+  // per-binding startupSweep opt-out — see PlaybackPanel.
+  forceAllParticipate?: boolean;
+  onForceAllParticipateChange?: (v: boolean) => void;
   onSaveTemplate: (node: ComponentNode) => void;
   sequenceConfig: SequenceConfig;
   onSequenceConfigChange: (config: SequenceConfig) => void;
@@ -59,7 +70,9 @@ const PROPERTIES_WIDTH = 320;
 
 const ObjectExplorer: React.FC<Props> = ({
   dashboard, sprites, gamepadMappings = [], selectedId, onSelect, onUpdate, onUpdateDashboard,
-  onDelete, onDeleteDashboard, onFlip, isDirty, onSave, onMoveNode, onSaveTemplate,
+  onDelete, onDeleteDashboard, onFlip, isDirty, onSave, onMoveNode, formRevision, onSaveTemplate,
+  manualPreviewFraction, onManualPreviewFractionChange,
+  forceAllParticipate, onForceAllParticipateChange,
   sequenceConfig, onSequenceConfigChange, playing, onTogglePlay, onPreviewTelemetry,
   onGenerateThumbnails, isTemplate, editing360, onChange360,
   templates, onAdd, onRemoveTemplate, onUpload, onDeleteSprite,
@@ -80,6 +93,16 @@ const ObjectExplorer: React.FC<Props> = ({
   });
   const [dragNodeId, setDragNodeId] = React.useState<string | null>(null);
   const [dropTarget, setDropTarget] = React.useState<{ nodeId: string; mode: DropMode } | null>(null);
+  // Tree reordering uses pointer events rather than the native HTML5 Drag and
+  // Drop API — draggable/dragstart/dragover/drop is unreliable in the native
+  // Tauri window (WebKitGTK's DnD bridge under Wayland silently rejects every
+  // drop, always showing the "not allowed" cursor, even though the same code
+  // works fine in a plain browser tab). Canvas.tsx's node-dragging already
+  // avoids this the same way, via onPointerDown/pointermove — mirrored here.
+  const dragStateRef = useRef<{ nodeId: string; startX: number; startY: number; dragging: boolean } | null>(null);
+  const dropTargetRef = useRef<{ nodeId: string; mode: DropMode } | null>(null);
+  const didDragRef = useRef(false);
+  const DRAG_THRESHOLD_PX = 4;
 
   // Regenerate thumbnails 800ms after the node structure settles (debounced to
   // avoid firing during rapid drag). Falls back to icons for any node that
@@ -138,23 +161,72 @@ const ObjectExplorer: React.FC<Props> = ({
     'arc-gauge-face':        'CircleRing',
     'sprite-arc-gauge-face': 'NumberField',
     'transform-sprite':      'ArrowTallUpRight',
+    'sprite-arc-fill':       'CircleHalfFull',
   };
 
-  const calcDropMode = (e: React.DragEvent<HTMLElement>, targetNode: ComponentNode): DropMode => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const pct = (e.clientY - rect.top) / rect.height;
-    if (pct < 0.28) return 'before';
-    if (pct > 0.72) return 'after';
-    return targetNode.type === 'group' ? 'inside' : (pct > 0.5 ? 'after' : 'before');
+  // Hit-tests whatever tree row is actually under the pointer (via elementFromPoint,
+  // since pointer capture keeps move/up events targeted at the origin row rather than
+  // whatever's under the cursor) and computes the same before/after/inside drop mode
+  // the old dragover-based calcDropMode used, just fed a real DOM rect instead of one
+  // off a DragEvent.
+  const dropTargetAtPoint = (clientX: number, clientY: number, draggedNodeId: string): { nodeId: string; mode: DropMode } | null => {
+    const el = document.elementFromPoint(clientX, clientY);
+    const row = (el as HTMLElement | null)?.closest('[data-tree-node-id]') as HTMLElement | null;
+    const nodeId = row?.dataset.treeNodeId;
+    if (!row || !nodeId || nodeId === draggedNodeId) return null;
+    if (isDescendantOf(dashboard.components, draggedNodeId, nodeId)) return null;
+    const targetNode = findNodeById(dashboard.components, nodeId);
+    if (!targetNode) return null;
+    const rect = row.getBoundingClientRect();
+    const pct = (clientY - rect.top) / rect.height;
+    const mode: DropMode = pct < 0.28 ? 'before' : pct > 0.72 ? 'after' : (targetNode.type === 'group' ? 'inside' : (pct > 0.5 ? 'after' : 'before'));
+    return { nodeId, mode };
   };
 
-  const handleDrop = (targetNodeId: string) => {
-    if (!dragNodeId || dragNodeId === targetNodeId) return;
-    if (!dropTarget || dropTarget.nodeId !== targetNodeId) return;
-    if (isDescendantOf(dashboard.components, dragNodeId, targetNodeId)) return;
-    onMoveNode(dragNodeId, targetNodeId, dropTarget.mode);
+  const updateDropTarget = (val: { nodeId: string; mode: DropMode } | null) => {
+    dropTargetRef.current = val;
+    setDropTarget(val);
+  };
+
+  const handleTreePointerDown = (e: React.PointerEvent<HTMLElement>, nodeId: string) => {
+    if (e.button !== 0) return;
+    // preventDefault suppresses WebKitGTK's native text-selection-drag gesture,
+    // which native draggable used to swallow as a side effect — pointer events
+    // alone don't, so without this a drag also highlights the row's text.
+    e.preventDefault();
+    dragStateRef.current = { nodeId, startX: e.clientX, startY: e.clientY, dragging: false };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+
+  const handleTreePointerMove = (e: React.PointerEvent<HTMLElement>, nodeId: string) => {
+    const state = dragStateRef.current;
+    if (!state || state.nodeId !== nodeId) return;
+    if (!state.dragging) {
+      if (Math.hypot(e.clientX - state.startX, e.clientY - state.startY) < DRAG_THRESHOLD_PX) return;
+      state.dragging = true;
+      didDragRef.current = true;
+      setDragNodeId(nodeId);
+    }
+    updateDropTarget(dropTargetAtPoint(e.clientX, e.clientY, nodeId));
+  };
+
+  const handleTreePointerUp = (e: React.PointerEvent<HTMLElement>, nodeId: string) => {
+    const state = dragStateRef.current;
+    if (state?.dragging && dropTargetRef.current) {
+      onMoveNode(nodeId, dropTargetRef.current.nodeId, dropTargetRef.current.mode);
+    }
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+    dragStateRef.current = null;
     setDragNodeId(null);
-    setDropTarget(null);
+    updateDropTarget(null);
+  };
+
+  // The browser still fires a normal click after a drag's pointerdown/pointerup pair
+  // (pointer capture keeps both targeted at the origin row) — swallow that one click
+  // so finishing a real drag doesn't also re-select the node that was just dropped.
+  const handleTreeClick = (nodeId: string) => {
+    if (didDragRef.current) { didDragRef.current = false; return; }
+    handleNodeClick(nodeId);
   };
 
   const dropStyle = (nodeId: string): React.CSSProperties => {
@@ -176,18 +248,17 @@ const ObjectExplorer: React.FC<Props> = ({
           horizontal
           verticalAlign="center"
           tokens={{ childrenGap: 2 }}
-          draggable
-          onDragStart={e => { e.stopPropagation(); setDragNodeId(node.id); e.dataTransfer.effectAllowed = 'move'; }}
-          onDragOver={e => { e.preventDefault(); e.stopPropagation(); setDropTarget({ nodeId: node.id, mode: calcDropMode(e, node) }); }}
-          onDragLeave={e => { e.stopPropagation(); setDropTarget(prev => prev?.nodeId === node.id ? null : prev); }}
-          onDrop={e => { e.preventDefault(); e.stopPropagation(); handleDrop(node.id); }}
-          onDragEnd={() => { setDragNodeId(null); setDropTarget(null); }}
-          onClick={() => handleNodeClick(node.id)}
+          data-tree-node-id={node.id}
+          onPointerDown={e => handleTreePointerDown(e, node.id)}
+          onPointerMove={e => handleTreePointerMove(e, node.id)}
+          onPointerUp={e => handleTreePointerUp(e, node.id)}
+          onClick={() => handleTreeClick(node.id)}
           style={{
             padding: `0.3em 0.4em 0.3em ${0.4 + indent / 16}em`,
             cursor: 'grab',
             background: isSelected ? selectedBg : undefined,
             userSelect: 'none',
+            WebkitUserSelect: 'none',
             opacity: dragNodeId === node.id ? 0.4 : 1,
             boxSizing: 'border-box',
             ...dropStyle(node.id),
@@ -384,6 +455,7 @@ const ObjectExplorer: React.FC<Props> = ({
                   onUpdate={patch => onUpdate(selectedNode.id, patch)}
                   onPreviewTelemetry={onPreviewTelemetry}
                   onSaveAsTemplate={selectedNode.type === 'group' ? () => onSaveTemplate(selectedNode) : undefined}
+                  formRevision={formRevision}
                 />
               ) : (
                 <DashboardPropertiesPanel
@@ -394,6 +466,10 @@ const ObjectExplorer: React.FC<Props> = ({
                   onSequenceConfigChange={onSequenceConfigChange}
                   playing={playing}
                   onTogglePlay={onTogglePlay}
+                  manualPreviewFraction={manualPreviewFraction}
+                  onManualPreviewFractionChange={onManualPreviewFractionChange}
+                  forceAllParticipate={forceAllParticipate}
+                  onForceAllParticipateChange={onForceAllParticipateChange}
                 />
               )}
             </Stack>
@@ -480,9 +556,18 @@ const ComponentPropertiesPanel: React.FC<{
   onUpdate: (patch: Partial<ComponentNode>) => void;
   onPreviewTelemetry?: (data: Record<string, number> | null) => void;
   onSaveAsTemplate?: () => void;
-}> = ({ node, sprites, gamepadMappings, onUpdate, onPreviewTelemetry, onSaveAsTemplate }) => {
+  formRevision?: number;
+}> = ({ node, sprites, gamepadMappings, onUpdate, onPreviewTelemetry, onSaveAsTemplate, formRevision }) => {
   const theme = getTheme();
-  const schema = getSchema(node.type);
+  // Runtime data schema factory functions need to fill in field options they
+  // can't know statically — today, just the sprite file list (see
+  // components/types.ts's SchemaProps / ComponentSchemaSource). getSchema
+  // resolves both plain-object and factory-function schemas the same way.
+  const spriteOptions = useMemo(
+    () => [{ text: '— none —', value: '' }, ...sprites.map(s => ({ text: s.label, value: s.file }))],
+    [sprites],
+  );
+  const schema = useMemo(() => getSchema(node.type, { spriteOptions }), [node.type, spriteOptions]);
 
   // Telemetry binding's "Advanced expression" always starts collapsed, even
   // if an expression was previously saved (matches the field's original,
@@ -493,40 +578,41 @@ const ComponentPropertiesPanel: React.FC<{
   useEffect(() => setAdvancedEnabled(false), [node.id]);
   const draggingBindingField = useRef<DraggingBindingField>(null);
 
+  // The min/max drag preview (below) deliberately stays applied after you let
+  // go, instead of reverting to inputMin — otherwise every binding you edit
+  // snaps back to its rest position the instant you release, defeating the
+  // point of previewing where the boundary lands. It only needs clearing when
+  // you move on to a different node/binding, so that stops being confusing.
+  useEffect(() => {
+    return () => { onPreviewTelemetry?.(null); };
+  }, [node.id, onPreviewTelemetry]);
+
   const hasBinding = !!node.binding;
   const hasInfluence = !!node.binding?.influence;
 
-  // Static schemas declare intent (`fileSelect: true`, `type: 'gamepad-select'`)
-  // — this injects the runtime data those field types need (sprite options,
-  // the gamepad mapping list) that schema.ts files can't know about
-  // statically. Bindable schemas (`schema.bindable`) get the telemetry
-  // binding sub-schema merged directly into this same fields object — same
-  // Form, same Section grouping, not a field type or a Form of its own.
+  // `schema` above already has real sprite `options` baked in (resolved via
+  // getSchema/spriteOptions) — the one runtime-injection left here is
+  // `gamepad-select`, whose mapping list isn't part of SchemaProps (it's
+  // slated for replacement by a generalized `list` field, not migrated to
+  // the schema-factory pattern — see the form-schema skill). Bindable
+  // schemas (`schema.bindable`) get the telemetry binding sub-schema merged
+  // directly into this same fields object — same Form, same Section
+  // grouping, not a field type or a Form of its own.
   const perFormSchema = useMemo(() => {
     const out: Record<string, any> = {};
     for (const [key, field] of Object.entries(schema.fields)) {
-      const { fileSelect, ...rest } = field as any;
-      if (fileSelect) {
-        out[key] = {
-          ...rest,
-          options: [{ text: '— none —', value: '' }, ...sprites.map(s => ({ text: s.label, value: s.file }))],
-        };
-      } else if (field.type === 'gamepad-select') {
-        out[key] = { ...rest, gamepadMappings };
-      } else {
-        out[key] = rest;
-      }
+      out[key] = field.type === 'gamepad-select' ? { ...field, gamepadMappings } : field;
     }
     if (schema.bindable) {
       Object.assign(out, buildBindingFieldSchema(
         node.binding, advancedEnabled,
         f => { draggingBindingField.current = f; },
-        () => { draggingBindingField.current = null; onPreviewTelemetry?.(null); },
+        () => { draggingBindingField.current = null; },
         schema.bindingHint,
       ));
     }
     return out;
-  }, [schema, sprites, gamepadMappings, node.binding, advancedEnabled, onPreviewTelemetry]);
+  }, [schema, gamepadMappings, node.binding, advancedEnabled, onPreviewTelemetry]);
 
   // per-form's onChange fires with the whole current form state on every
   // change, always passing the form's own name (not the changed field) as
@@ -632,7 +718,7 @@ const ComponentPropertiesPanel: React.FC<{
       <div style={{ borderTop: `1px solid ${theme.palette.neutralLight}` }} />
 
       <Form
-        key={`${node.id}-${hasBinding ? 'b' : 'nb'}-${advancedEnabled ? 'a' : 's'}-${hasInfluence ? 'i' : 'ni'}`}
+        key={`${node.id}-${hasBinding ? 'b' : 'nb'}-${advancedEnabled ? 'a' : 's'}-${hasInfluence ? 'i' : 'ni'}-${formRevision ?? 0}`}
         form={perFormSchema}
         name={`component-${node.id}`}
         initialValues={initialValues}
@@ -736,7 +822,15 @@ const DashboardPropertiesPanel: React.FC<{
   onSequenceConfigChange: (c: SequenceConfig) => void;
   playing: boolean;
   onTogglePlay: () => void;
-}> = ({ dashboard, sprites, onUpdate, sequenceConfig, onSequenceConfigChange, playing, onTogglePlay }) => {
+  manualPreviewFraction?: number | null;
+  onManualPreviewFractionChange?: (v: number | null) => void;
+  forceAllParticipate?: boolean;
+  onForceAllParticipateChange?: (v: boolean) => void;
+}> = ({
+  dashboard, sprites, onUpdate, sequenceConfig, onSequenceConfigChange, playing, onTogglePlay,
+  manualPreviewFraction, onManualPreviewFractionChange,
+  forceAllParticipate, onForceAllParticipateChange,
+}) => {
   const { data: groupsData } = useQuery(GET_DASH_GROUPS);
   const groups: Array<{ id: string; name: string }> = (groupsData as any)?.getDashGroups ?? [];
 
@@ -951,6 +1045,10 @@ const DashboardPropertiesPanel: React.FC<{
           playing={playing}
           onTogglePlay={onTogglePlay}
           formKey={formKey}
+          manualPreviewFraction={manualPreviewFraction}
+          onManualPreviewFractionChange={onManualPreviewFractionChange}
+          forceAllParticipate={forceAllParticipate}
+          onForceAllParticipateChange={onForceAllParticipateChange}
         />
       </Section>
     </Stack>
@@ -974,13 +1072,29 @@ const SEQUENCE_SINE_SCHEMA = {
   loop:             { type: 'checkbox', label: 'Loop' },
 };
 
+const MANUAL_PREVIEW_SCHEMA = {
+  position: { type: 'slider', label: 'Preview position (%)', min: 0, max: 100, step: 1 },
+};
+
+const FORCE_PARTICIPATE_SCHEMA = {
+  force: { type: 'checkbox', label: 'Force all elements to participate (ignore per-element opt-out)' },
+};
+
 const PlaybackPanel: React.FC<{
   config: SequenceConfig;
   onChange: (c: SequenceConfig) => void;
   playing: boolean;
   onTogglePlay: () => void;
   formKey?: string;
-}> = ({ config, onChange, playing, onTogglePlay, formKey = 'sequence' }) => {
+  manualPreviewFraction?: number | null;
+  onManualPreviewFractionChange?: (v: number | null) => void;
+  forceAllParticipate?: boolean;
+  onForceAllParticipateChange?: (v: boolean) => void;
+}> = ({
+  config, onChange, playing, onTogglePlay, formKey = 'sequence',
+  manualPreviewFraction, onManualPreviewFractionChange,
+  forceAllParticipate = true, onForceAllParticipateChange,
+}) => {
   const switchType = (type: 'sweep' | 'sine') => {
     if (type === config.type) return;
     onChange(type === 'sweep' ? DEFAULT_SWEEP_CONFIG : DEFAULT_SINE_CONFIG);
@@ -990,6 +1104,33 @@ const PlaybackPanel: React.FC<{
 
   return (
     <Stack tokens={{ childrenGap: 8 }}>
+      {onManualPreviewFractionChange && (
+        <Stack tokens={{ childrenGap: 2 }}>
+          <span style={{ fontSize: '0.78em', opacity: 0.6 }}>
+            Holds every bound element at this value so hidden/rest-state elements
+            (e.g. an arc fill at 0%) are visible to place. Suppressed while a test
+            below is playing.
+          </span>
+          <Form
+            key={`${formKey}-manualPreview`}
+            form={MANUAL_PREVIEW_SCHEMA}
+            name="manualPreview"
+            initialValues={{ position: Math.round((manualPreviewFraction ?? 0) * 100) }}
+            onChange={(_n: string, { raw }: any) => onManualPreviewFractionChange(Number(raw.position ?? 0) / 100)}
+          />
+        </Stack>
+      )}
+
+      {onForceAllParticipateChange && (
+        <Form
+          key={`${formKey}-forceParticipate`}
+          form={FORCE_PARTICIPATE_SCHEMA}
+          name="forceParticipate"
+          initialValues={{ force: forceAllParticipate }}
+          onChange={(_n: string, { raw }: any) => onForceAllParticipateChange(!!raw.force)}
+        />
+      )}
+
       <Stack horizontal verticalAlign="center" horizontalAlign="end">
         <PlayButton
           onClick={onTogglePlay}

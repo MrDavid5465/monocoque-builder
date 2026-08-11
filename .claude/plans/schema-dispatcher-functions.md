@@ -1,8 +1,26 @@
 # Plan: schema/dispatcher definitions become functions where dynamic data is needed; remove `fileSelect`
 
-Status: **not started** — deferred until back at the real dev environment
-(this session ran in a remote/ephemeral container). Captured here so the
-next session has full context instead of re-deriving it.
+Status: **implemented** (sprite-select half only — see below). The
+`form-schema` skill's "Deferred options: schema-as-factory-function" section
+now documents the landed pattern directly; this doc is kept as historical
+rationale.
+
+**Scope correction found during implementation**: this doc's "Concrete
+changes" section below only names `button-control`/`slider-control` as
+needing conversion, and its step 2 says to delete the `fileSelect` branch in
+`ObjectExplorer.tsx` entirely on that basis. That undercounted the real
+scope — 13 schema files used `fileSelect: true` at implementation time, not
+2 (every sprite-bearing Dashboard Designer component: `static-sprite`,
+`needle-gauge`, `bar-gauge`, `sprite-bar-gauge`, `transform-sprite`,
+`sprite-arc-fill`, `gif-gauge`, `flag-display-sprite`, `encoder-control`,
+`sprite-arc-gauge-face`, `sprite-text-gauge`, plus the two named). All 13
+were converted to the factory-function pattern so "delete the `fileSelect`
+branch entirely" could actually happen as written.
+
+**Not implemented**: `gamepad-select`'s own separate runtime-injection
+mechanism (out of scope per this doc already — see "Explicitly out of
+scope" below) and the dispatcher-as-function half (item 3) — no concrete
+need for it has come up.
 
 ## Context
 

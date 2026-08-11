@@ -1,6 +1,6 @@
-import { ComponentSchema } from '../types';
+import { ComponentSchema, SchemaProps } from '../types';
 
-export const flagDisplaySpriteSchema: ComponentSchema = {
+export const flagDisplaySpriteSchema = (props: SchemaProps): ComponentSchema => ({
   type: 'flag-display-sprite',
   label: 'Flag Display (Sprite)',
   icon: 'Flag',
@@ -12,22 +12,22 @@ export const flagDisplaySpriteSchema: ComponentSchema = {
     y:      { label: 'Y', type: 'slider', min: -1000, max: 5000, section: 'Layout' },
     width:  { label: 'Width', type: 'slider', min: 4, max: 5000, section: 'Layout' },
     height: { label: 'Height', type: 'slider', min: 4, max: 5000, section: 'Layout' },
-    fileOff:         { label: 'Sprite — Off', type: 'select', fileSelect: true, section: 'Flag Images' },
-    fileGreen:       { label: 'Sprite — Green', type: 'select', fileSelect: true, section: 'Flag Images' },
-    fileYellow:      { label: 'Sprite — Yellow', type: 'select', fileSelect: true, section: 'Flag Images' },
-    fileRed:         { label: 'Sprite — Red', type: 'select', fileSelect: true, section: 'Flag Images' },
-    fileBlue:        { label: 'Sprite — Blue', type: 'select', fileSelect: true, section: 'Flag Images' },
-    fileWhite:       { label: 'Sprite — White', type: 'select', fileSelect: true, section: 'Flag Images' },
-    fileChequered:   { label: 'Sprite — Chequered', type: 'select', fileSelect: true, section: 'Flag Images' },
-    fileBlack:       { label: 'Sprite — Black', type: 'select', fileSelect: true, section: 'Flag Images' },
-    fileBlackWhite:  { label: 'Sprite — Black & White', type: 'select', fileSelect: true, section: 'Flag Images' },
-    fileBlackOrange: { label: 'Sprite — Black & Orange', type: 'select', fileSelect: true, section: 'Flag Images' },
-    fileOrange:      { label: 'Sprite — Orange', type: 'select', fileSelect: true, section: 'Flag Images' },
-    fileInPit:       { label: 'Sprite — In Pit', type: 'select', fileSelect: true, section: 'Flag Images' },
+    fileOff:         { label: 'Sprite — Off', type: 'select', options: props.spriteOptions, section: 'Flag Images' },
+    fileGreen:       { label: 'Sprite — Green', type: 'select', options: props.spriteOptions, section: 'Flag Images' },
+    fileYellow:      { label: 'Sprite — Yellow', type: 'select', options: props.spriteOptions, section: 'Flag Images' },
+    fileRed:         { label: 'Sprite — Red', type: 'select', options: props.spriteOptions, section: 'Flag Images' },
+    fileBlue:        { label: 'Sprite — Blue', type: 'select', options: props.spriteOptions, section: 'Flag Images' },
+    fileWhite:       { label: 'Sprite — White', type: 'select', options: props.spriteOptions, section: 'Flag Images' },
+    fileChequered:   { label: 'Sprite — Chequered', type: 'select', options: props.spriteOptions, section: 'Flag Images' },
+    fileBlack:       { label: 'Sprite — Black', type: 'select', options: props.spriteOptions, section: 'Flag Images' },
+    fileBlackWhite:  { label: 'Sprite — Black & White', type: 'select', options: props.spriteOptions, section: 'Flag Images' },
+    fileBlackOrange: { label: 'Sprite — Black & Orange', type: 'select', options: props.spriteOptions, section: 'Flag Images' },
+    fileOrange:      { label: 'Sprite — Orange', type: 'select', options: props.spriteOptions, section: 'Flag Images' },
+    fileInPit:       { label: 'Sprite — In Pit', type: 'select', options: props.spriteOptions, section: 'Flag Images' },
     showGear:     { label: 'Show gear (on green)', type: 'checkbox', section: 'Gear' },
     gearFontSize: { label: 'Gear font size', type: 'slider', min: 4, max: 400, section: 'Gear' },
     gearColor:    { label: 'Gear colour', type: 'text', section: 'Gear' },
     gearOffsetX:  { label: 'Gear offset X', type: 'slider', min: -500, max: 500, section: 'Gear' },
     gearOffsetY:  { label: 'Gear offset Y', type: 'slider', min: -500, max: 500, section: 'Gear' },
   },
-};
+});

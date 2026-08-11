@@ -1,6 +1,6 @@
-import { ComponentSchema } from '../types';
+import { ComponentSchema, SchemaProps } from '../types';
 
-export const buttonControlSchema: ComponentSchema = {
+export const buttonControlSchema = (props: SchemaProps): ComponentSchema => ({
   type: 'button-control',
   label: 'Button Control',
   icon: 'ToggleLeft',
@@ -36,21 +36,21 @@ export const buttonControlSchema: ComponentSchema = {
     ctrlOffBorderWidth: { label: 'Off: border width', type: 'slider', min: 0, max: 20, section: 'Off State' },
     ctrlOffColor:       { label: 'Off: text color', type: 'text', section: 'Off State' },
     ctrlOffOpacity:     { label: 'Off: opacity', type: 'slider', min: 0, max: 1, step: 0.05, section: 'Off State' },
-    ctrlOffFile:        { label: 'Off: sprite', type: 'select', fileSelect: true, section: 'Off State' },
+    ctrlOffFile:        { label: 'Off: sprite', type: 'select', options: props.spriteOptions, section: 'Off State' },
     // On state
     ctrlOnBg:          { label: 'On: background', type: 'text', section: 'On State' },
     ctrlOnBorder:      { label: 'On: border color', type: 'text', section: 'On State' },
     ctrlOnBorderWidth: { label: 'On: border width', type: 'slider', min: 0, max: 20, section: 'On State' },
     ctrlOnColor:       { label: 'On: text color', type: 'text', section: 'On State' },
     ctrlOnOpacity:     { label: 'On: opacity', type: 'slider', min: 0, max: 1, step: 0.05, section: 'On State' },
-    ctrlOnFile:        { label: 'On: sprite', type: 'select', fileSelect: true, section: 'On State' },
+    ctrlOnFile:        { label: 'On: sprite', type: 'select', options: props.spriteOptions, section: 'On State' },
     // Pressed state
     ctrlPressedBg:          { label: 'Pressed: background', type: 'text', section: 'Pressed State' },
     ctrlPressedBorder:      { label: 'Pressed: border color', type: 'text', section: 'Pressed State' },
     ctrlPressedBorderWidth: { label: 'Pressed: border width', type: 'slider', min: 0, max: 20, section: 'Pressed State' },
     ctrlPressedColor:       { label: 'Pressed: text color', type: 'text', section: 'Pressed State' },
     ctrlPressedOpacity:     { label: 'Pressed: opacity', type: 'slider', min: 0, max: 1, step: 0.05, section: 'Pressed State' },
-    ctrlPressedFile:        { label: 'Pressed: sprite', type: 'select', fileSelect: true, section: 'Pressed State' },
+    ctrlPressedFile:        { label: 'Pressed: sprite', type: 'select', options: props.spriteOptions, section: 'Pressed State' },
     // Transition
     ctrlTransition: {
       label: 'Transition type', type: 'select', section: 'Transition',
@@ -67,4 +67,4 @@ export const buttonControlSchema: ComponentSchema = {
     // Gamepad mapping
     gamepadMappingId: { label: 'Gamepad action', type: 'gamepad-select', gamepadFilter: 'button', section: 'Gamepad' },
   },
-};
+});

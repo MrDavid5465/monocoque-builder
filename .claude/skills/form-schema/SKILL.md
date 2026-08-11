@@ -59,41 +59,70 @@ when in doubt, check what Fluent component the type wraps (see Fabric.tsx).
 | `custom` | `onRender({value,onChange,name}) => ReactElement` | escape hatch, bypasses everything else |
 | *(unmatched string)* | — | plain `TextField`. `type` itself is never forwarded as a prop (Fabric.tsx destructures it out before `...rest` on **every** case) — `type: 'password'` does **not** get you a masked input, it silently renders as an ordinary `TextField`. `text`/`number`/`email`/`password`/`tel`/`url`/`textarea`/`search` are common intentional uses of this fallback. |
 
-### Deferred `options`: the `fileSelect` sentinel (current code — planned for removal)
+### Deferred `options`: schema-as-factory-function
 
 `select`/`multi-select`/`radio`/`picker`/`combobox` normally need a static
 `options` array in the schema itself — but when the option list can't be
-known until render time (e.g. a sprite file list fetched from disk), the
-established pattern (`ObjectExplorer.tsx`'s `perFormSchema`) is: the static
-schema sets `fileSelect: true` instead of `options`, and the component
-rendering the form injects real `options` into a copy of the schema right
-before passing it to `<Form>`. `fileSelect` is a sentinel this app invented,
-not a real per-form/Fabric.tsx key — it gets stripped before the field ever
-reaches per-form. See `button-control/schema.ts` and `slider-control/schema.ts`
-for the two real examples.
+known until render time (today: exactly one case, a sprite file list
+fetched from disk), the schema export is a **factory function** instead of
+a plain object:
 
-**This is slated for removal**, not just documentation of a stable pattern —
-see `.claude/plans/schema-dispatcher-functions.md` for the full plan (not
-yet implemented, deferred to the real dev env). Short version: schema
-exports that need runtime data become factory functions
-(`(props) => SchemaDefinition<T>`) instead of plain objects; the caller
-resolves the data it already has and calls the function, and a `fileSelect`
-field just becomes an ordinary `type: 'select'` with `options: props.spriteOptions`.
-No sentinel, no special-casing by field shape in `ObjectExplorer.tsx`. Until
-that plan lands, the table above still describes the real, current behavior
-— don't remove `fileSelect` from a schema on the strength of this note alone.
+```ts
+// components/types.ts
+export interface SchemaProps { spriteOptions: { text: string; value: string }[]; }
+export type ComponentSchemaSource = ComponentSchema | ((props: SchemaProps) => ComponentSchema);
+
+// components/button-control/schema.ts
+export const buttonControlSchema = (props: SchemaProps): ComponentSchema => ({
+  type: 'button-control',
+  // ...
+  fields: {
+    ctrlOffFile: { label: 'Off: sprite', type: 'select', options: props.spriteOptions, section: 'Off State' },
+    // ...
+  },
+});
+```
+
+The caller (`ObjectExplorer.tsx`'s `ComponentPropertiesPanel`) resolves the
+data it already has (the dashboard's sprite list) and calls
+`getSchema(node.type, { spriteOptions })`
+(`components/registry.ts`) — which normalizes both shapes
+(`typeof source === 'function' ? source(props) : source`), so nothing
+downstream of `getSchema`/`ALL_SCHEMAS` needs to know which one a given
+component type uses. `ALL_SCHEMAS` (used for palette metadata only —
+type/label/icon/allowChildren) resolves factory schemas with an empty
+sprite list, since those fields don't affect metadata.
+
+**Only schemas that actually need runtime data are factory functions** —
+every other schema in the app (`Shakers/schema.ts`, `CarDetail.tsx`'s inline
+schema, most ReactiveAdmin CRUD screens, and every Dashboard Designer
+component schema that has no sprite field) stays a plain object. Don't
+convert a schema to a function "for consistency" — only when it genuinely
+needs data a static object can't express. **Hard rule: a schema factory
+function must never make a network call** — all data resolution happens in
+the calling component, before the function is invoked.
+
+There used to be a `fileSelect: true` sentinel for this (a fake field
+property stripped by `ObjectExplorer.tsx` before reaching per-form) — it's
+gone. If you see `fileSelect` anywhere, that schema was missed in the
+migration; convert it to the factory-function pattern above rather than
+reviving the sentinel.
 
 ### `gamepad-select` is slated for replacement
 
-It works (via the same runtime-injection pattern as `fileSelect`, see
-`ObjectExplorer.tsx`), but it's too narrow — a **generalized `list` field**
-is planned to replace it: a repeating-rows field type that mounts a full
-nested per-row `useForm` (confirmed: real per-row dirty/touched/validation
-state, not flat updates), with add/remove-row UI built into the field
-itself (confirmed: not left to the schema author). Unlike `fileSelect`,
-this is **not part of** the schema-dispatcher-functions plan above — it's
-its own, not-yet-designed piece of work. Don't build new features on
-`gamepad-select` or invest in improving its validation further; a
+It works, but via its own separate, ad hoc runtime injection: unlike the
+sprite-select fields above, `gamepad-select` schemas stay plain objects and
+`ObjectExplorer.tsx`'s `perFormSchema` merges in `gamepadMappings` field-by-field
+at render time (`field.type === 'gamepad-select' ? { ...field, gamepadMappings } : field`)
+rather than going through the schema-factory pattern. It's too narrow either
+way — a **generalized `list` field** is planned to replace it: a
+repeating-rows field type that mounts a full nested per-row `useForm`
+(confirmed: real per-row dirty/touched/validation state, not flat updates),
+with add/remove-row UI built into the field itself (confirmed: not left to
+the schema author). This is **not part of** the schema-factory-function
+migration above — it's its own, not-yet-designed piece of work. Don't build
+new features on `gamepad-select` or invest in improving its validation
+further; a
 `list-schema` skill covering the replacement is coming next.
 
 ## Run the validator before calling a schema done

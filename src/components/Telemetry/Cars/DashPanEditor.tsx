@@ -80,6 +80,15 @@ const PanSession: React.FC<{
 }) => {
   const [pan, setPan] = useState<Pan>(initialPan);
   const idRef = useRef(existingId);
+  // GET_CAR_DASH_PANS is still in flight (cache-and-network) when this often
+  // mounts, so `existingId` frequently arrives undefined on the very first
+  // render and only resolves once the network response lands a moment later.
+  // Adopting it here (once, whenever it first becomes known) keeps `persist`
+  // below routed to updatePan on the real record — without this, a pan
+  // dragged before the query settles falls through to addPan and creates an
+  // orphaned duplicate override that the live kiosk view never picks up
+  // (its own lookup keeps matching the original, now-stale record).
+  if (!idRef.current && existingId) idRef.current = existingId;
   const initialPanRef = useRef(initialPan);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
   const [addPan] = useMutation(ADD_CAR_DASH_PAN);
