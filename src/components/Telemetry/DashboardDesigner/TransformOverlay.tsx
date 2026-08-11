@@ -175,7 +175,8 @@ const TransformOverlay: React.FC<Props> = ({ node, absX, absY, renderOffsetX, re
       const anchor = anchorFor(ds.handle, ds.box0);
       const w = ds.box0.boxW, h = ds.box0.boxH;
       const isCorner = HANDLES.find(h2 => h2.id === ds.handle)?.corner;
-      let sx = 1, sy = 1;
+      // Every branch below unconditionally assigns both before use.
+      let sx: number, sy: number;
       // Ceiling guards against a single wild pointermove reading (touch
       // coordinates are noisier than mouse, and a coalesced/large jump could
       // otherwise project to an enormous one-frame scale factor) blowing the
