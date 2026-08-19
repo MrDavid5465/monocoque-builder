@@ -57,7 +57,9 @@ fn sun_eq_of_center(t: f64) -> f64 {
     let sinm = mrad.sin();
     let sin2m = (2.0 * mrad).sin();
     let sin3m = (3.0 * mrad).sin();
-    sinm * (1.914602 - t * (0.004817 + 0.000014 * t)) + sin2m * (0.019993 - 0.000101 * t) + sin3m * 0.000289
+    sinm * (1.914602 - t * (0.004817 + 0.000014 * t))
+        + sin2m * (0.019993 - 0.000101 * t)
+        + sin3m * 0.000289
 }
 fn sun_true_long(t: f64) -> f64 {
     geom_mean_long_sun(t) + sun_eq_of_center(t)
@@ -96,7 +98,9 @@ fn equation_of_time(t: f64) -> f64 {
     let cos2l0 = (2.0 * deg2rad(l0)).cos();
     let sin4l0 = (4.0 * deg2rad(l0)).sin();
     let sin2m = (2.0 * deg2rad(m)).sin();
-    let e_time = y * sin2l0 - 2.0 * e * sinm + 4.0 * e * y * sinm * cos2l0 - 0.5 * y * y * sin4l0 - 1.25 * e * e * sin2m;
+    let e_time = y * sin2l0 - 2.0 * e * sinm + 4.0 * e * y * sinm * cos2l0
+        - 0.5 * y * y * sin4l0
+        - 1.25 * e * e * sin2m;
     rad2deg(e_time) * 4.0 // minutes of time
 }
 /// Hour angle (degrees) of sunrise/sunset — `90.833°` bakes in standard
@@ -106,7 +110,8 @@ fn equation_of_time(t: f64) -> f64 {
 fn hour_angle_deg(lat: f64, solar_dec: f64) -> Option<f64> {
     let lat_rad = deg2rad(lat);
     let sd_rad = deg2rad(solar_dec);
-    let ha_arg = deg2rad(90.833).cos() / (lat_rad.cos() * sd_rad.cos()) - lat_rad.tan() * sd_rad.tan();
+    let ha_arg =
+        deg2rad(90.833).cos() / (lat_rad.cos() * sd_rad.cos()) - lat_rad.tan() * sd_rad.tan();
     if !(-1.0..=1.0).contains(&ha_arg) {
         return None;
     }
@@ -118,7 +123,13 @@ fn hour_angle_deg(lat: f64, solar_dec: f64) -> Option<f64> {
 /// geographic convention — longitude positive East). Returns `None` for a
 /// date/latitude with no sunrise or sunset that day (polar day/night) — not
 /// expected for any real racing circuit, but handled rather than panicking.
-pub fn compute_sunrise_sunset(year: i32, month: u32, day: u32, latitude: f64, longitude: f64) -> Option<(f64, f64)> {
+pub fn compute_sunrise_sunset(
+    year: i32,
+    month: u32,
+    day: u32,
+    latitude: f64,
+    longitude: f64,
+) -> Option<(f64, f64)> {
     let jd = julian_day_number(year, month, day);
     let t = time_julian_cent(jd);
     let eq_time = equation_of_time(t);
@@ -132,7 +143,10 @@ pub fn compute_sunrise_sunset(year: i32, month: u32, day: u32, latitude: f64, lo
     let sunrise_min = 720.0 - 4.0 * (west_lon + ha_deg) - eq_time;
     let sunset_min = 720.0 - 4.0 * (west_lon - ha_deg) - eq_time;
 
-    Some((sunrise_min.rem_euclid(1440.0), sunset_min.rem_euclid(1440.0)))
+    Some((
+        sunrise_min.rem_euclid(1440.0),
+        sunset_min.rem_euclid(1440.0),
+    ))
 }
 
 /// Minutes since midnight -> "HH:MM", matching dayNightSim.ts's
@@ -154,8 +168,14 @@ mod tests {
         // 06:00/18:00 UTC. This checks the algorithm from first principles,
         // independent of any recalled/possibly-misremembered almanac value.
         let (rise, set) = compute_sunrise_sunset(2024, 3, 20, 0.0, 0.0).unwrap();
-        assert!((rise - 6.0 * 60.0).abs() < 15.0, "sunrise {rise} not close to 06:00");
-        assert!((set - 18.0 * 60.0).abs() < 15.0, "sunset {set} not close to 18:00");
+        assert!(
+            (rise - 6.0 * 60.0).abs() < 15.0,
+            "sunrise {rise} not close to 06:00"
+        );
+        assert!(
+            (set - 18.0 * 60.0).abs() < 15.0,
+            "sunset {set} not close to 18:00"
+        );
     }
 
     // These check well-known, independently-verifiable astronomical facts
@@ -175,7 +195,10 @@ mod tests {
         // solstice is ~16h45m-16h50m.
         let (rise, set) = compute_sunrise_sunset(2024, 6, 21, 52.0786, -1.0169).unwrap();
         let day_length_min = set - rise;
-        assert!((16.5 * 60.0..17.0 * 60.0).contains(&day_length_min), "day length {day_length_min} min not in expected 16.5-17h range");
+        assert!(
+            (16.5 * 60.0..17.0 * 60.0).contains(&day_length_min),
+            "day length {day_length_min} min not in expected 16.5-17h range"
+        );
         // Solar noon (near-longitude-0 site) should fall near 12:00 UTC.
         assert!((rise + set) / 2.0 - 12.0 * 60.0 < 15.0);
     }
@@ -189,7 +212,10 @@ mod tests {
         // constant) — typically 10-14 minutes over, not under.
         let (rise, set) = compute_sunrise_sunset(2024, 3, 20, 45.6156, 9.2811).unwrap();
         let day_length_min = set - rise;
-        assert!((12.0 * 60.0..12.0 * 60.0 + 20.0).contains(&day_length_min), "day length {day_length_min} min not in expected 12h-12h20m range");
+        assert!(
+            (12.0 * 60.0..12.0 * 60.0 + 20.0).contains(&day_length_min),
+            "day length {day_length_min} min not in expected 12h-12h20m range"
+        );
     }
 
     #[test]

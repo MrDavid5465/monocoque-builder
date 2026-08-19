@@ -46,10 +46,9 @@ impl TrackGeocodeQuery {
             .send()
             .await
             .map_err(|e| async_graphql::Error::new(format!("geocode search failed: {e}")))?;
-        let results: Vec<NominatimResult> = resp
-            .json()
-            .await
-            .map_err(|e| async_graphql::Error::new(format!("geocode search returned unexpected data: {e}")))?;
+        let results: Vec<NominatimResult> = resp.json().await.map_err(|e| {
+            async_graphql::Error::new(format!("geocode search returned unexpected data: {e}"))
+        })?;
         Ok(results
             .into_iter()
             .filter_map(|r| {

@@ -6,10 +6,10 @@
 #![recursion_limit = "256"]
 mod api;
 mod config_manager;
+mod device_enumeration;
 mod gamepad;
 mod graphql;
 mod pipewire_dsp;
-mod device_enumeration;
 mod sun_position;
 mod telemetry;
 mod typiql_types;

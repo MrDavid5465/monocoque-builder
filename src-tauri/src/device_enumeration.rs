@@ -79,7 +79,10 @@ pub fn list_serial_devices() -> Vec<SerialDeviceInfo> {
             for entry in entries.flatten() {
                 let name = entry.file_name().to_string_lossy().into_owned();
                 if name.starts_with("ttyACM") || name.starts_with("ttyUSB") {
-                    out.push(SerialDeviceInfo { devpath: format!("/dev/{name}"), label: name });
+                    out.push(SerialDeviceInfo {
+                        devpath: format!("/dev/{name}"),
+                        label: name,
+                    });
                 }
             }
         }

@@ -21,7 +21,9 @@ pub use track_geocode::TrackGeocodeQuery;
 
 use crate::telemetry::recording as telemetry_recording;
 use crate::telemetry::{build_frame, read_simdata, types::TelemetryFrame};
-use crate::typiql_types::{DashTemplateChanged, DashboardEntryChanged, DeviceDefaultChanged, NightModeChanged};
+use crate::typiql_types::{
+    DashTemplateChanged, DashboardEntryChanged, DeviceDefaultChanged, NightModeChanged,
+};
 use async_graphql::{Context, Object, SimpleObject, Subscription};
 use futures_util::stream::{select, Stream, StreamExt};
 use std::sync::Arc;
@@ -154,7 +156,10 @@ impl QueryRoot {
     /// popup) can render the real current time immediately on open instead
     /// of showing a placeholder until the subscription's first push
     /// arrives.
-    async fn night_clock_snapshot(&self, ctx: &Context<'_>) -> async_graphql::Result<NightClockTick> {
+    async fn night_clock_snapshot(
+        &self,
+        ctx: &Context<'_>,
+    ) -> async_graphql::Result<NightClockTick> {
         let adapter = default_adapter(ctx)?;
         Ok(night_clock_tick(&adapter).await)
     }
@@ -163,7 +168,9 @@ impl QueryRoot {
     /// "Device ID" picker (see device_enumeration.rs's own doc comment for
     /// the devid format). Read-only sysfs enumeration on Linux, no special
     /// permissions needed just to list.
-    async fn get_usb_devices(&self) -> async_graphql::Result<Vec<crate::device_enumeration::UsbDeviceInfo>> {
+    async fn get_usb_devices(
+        &self,
+    ) -> async_graphql::Result<Vec<crate::device_enumeration::UsbDeviceInfo>> {
         crate::device_enumeration::list_usb_devices().map_err(async_graphql::Error::new)
     }
 
@@ -199,7 +206,10 @@ impl SubscriptionRoot {
     /// same persisted anchor + this server's own clock, fixing a previous
     /// bug where each kiosk device extrapolated independently from its own
     /// local clock and drifted apart from other devices over hours.
-    async fn night_mode_updates(&self, ctx: &Context<'_>) -> async_graphql::Result<impl Stream<Item = NightModeUpdateEvent>> {
+    async fn night_mode_updates(
+        &self,
+        ctx: &Context<'_>,
+    ) -> async_graphql::Result<impl Stream<Item = NightModeUpdateEvent>> {
         let adapter = default_adapter(ctx)?;
         let s1 = TypiQLBroker::<NightModeChanged>::subscribe().map(NightModeUpdateEvent::Changed);
         // 16ms (~60Hz), matching `telemetry`/`dashboard_updates`'s own tick
@@ -209,10 +219,11 @@ impl SubscriptionRoot {
         // (TrackLocation table scan + write) only actually runs on a track
         // CHANGE, not every tick, so this doesn't 60x the adapter load — see
         // that function's own doc comment.
-        let s2 = IntervalStream::new(tokio::time::interval(Duration::from_millis(16))).then(move |_| {
-            let adapter = adapter.clone();
-            async move { NightModeUpdateEvent::Clock(night_clock_tick(&adapter).await) }
-        });
+        let s2 =
+            IntervalStream::new(tokio::time::interval(Duration::from_millis(16))).then(move |_| {
+                let adapter = adapter.clone();
+                async move { NightModeUpdateEvent::Clock(night_clock_tick(&adapter).await) }
+            });
         Ok(select(s1, s2))
     }
 

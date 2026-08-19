@@ -47,7 +47,10 @@ fn to_gql_err(e: impl std::fmt::Display) -> async_graphql::Error {
 /// adapter directly (not `resolve_list`, which needs a request-scoped
 /// `Context`) so this is usable from both the mutation below AND the
 /// ctx-free background tick (`maybe_auto_recompute_sun_times`).
-async fn find_track_location(adapter: &Arc<dyn TypiQLAdapter>, track: &str) -> Option<TrackLocation> {
+async fn find_track_location(
+    adapter: &Arc<dyn TypiQLAdapter>,
+    track: &str,
+) -> Option<TrackLocation> {
     adapter
         .get_many(TrackLocation::collection_name().into(), vec![])
         .await
@@ -85,16 +88,26 @@ fn live_track() -> Option<String> {
 /// subscription's per-tick closure, which has outlived any request-scoped
 /// `Context` by the time it runs.
 pub async fn maybe_auto_recompute_sun_times(adapter: &Arc<dyn TypiQLAdapter>, record: &NightMode) {
-    let Some(last_date) = record.sim_sunrise_sunset_date.as_deref() else { return };
-    let Some((year, month, day)) = crate::sun_position::parse_iso_date(last_date) else { return };
+    let Some(last_date) = record.sim_sunrise_sunset_date.as_deref() else {
+        return;
+    };
+    let Some((year, month, day)) = crate::sun_position::parse_iso_date(last_date) else {
+        return;
+    };
     let Some(track) = live_track() else { return };
     if record.sim_last_computed_track.as_deref() == Some(track.as_str()) {
         return;
     }
-    let Some(location) = find_track_location(adapter, &track).await else { return };
-    let Some((sunrise_min, sunset_min)) =
-        crate::sun_position::compute_sunrise_sunset(year, month, day, location.latitude, location.longitude)
-    else {
+    let Some(location) = find_track_location(adapter, &track).await else {
+        return;
+    };
+    let Some((sunrise_min, sunset_min)) = crate::sun_position::compute_sunrise_sunset(
+        year,
+        month,
+        day,
+        location.latitude,
+        location.longitude,
+    ) else {
         return;
     };
 
@@ -104,7 +117,12 @@ pub async fn maybe_auto_recompute_sun_times(adapter: &Arc<dyn TypiQLAdapter>, re
         "sim_last_computed_track": track,
     });
     let Some(updated_val) = adapter
-        .update(NightMode::collection_name().into(), NightMode::key_field(), &record.id, patch)
+        .update(
+            NightMode::collection_name().into(),
+            NightMode::key_field(),
+            &record.id,
+            patch,
+        )
         .await
     else {
         return;
@@ -201,7 +219,11 @@ impl NightClockMutation {
     /// Sets the day/night cycle length in real-world hours (e.g. 2.0 = a
     /// 2-hour real cycle covers a 24-hour in-game day — 24/hours*100 as a
     /// speed percentage). Rebases the anchor to server-now in the same call.
-    async fn set_night_clock_cycle_hours(&self, ctx: &Context<'_>, hours: f64) -> GqlResult<NightMode> {
+    async fn set_night_clock_cycle_hours(
+        &self,
+        ctx: &Context<'_>,
+        hours: f64,
+    ) -> GqlResult<NightMode> {
         let adapter = crate::graphql::default_adapter(ctx)?;
         let now = now_ms();
         let record = ensure_record(&adapter, ctx, now).await?;
@@ -217,9 +239,14 @@ impl NightClockMutation {
     /// step (no live track, unrecognized track id, track known but no
     /// location set yet) rather than silently no-op-ing, since the frontend
     /// surfaces these directly to the user as the next action to take.
-    async fn set_sunrise_sunset_from_date(&self, ctx: &Context<'_>, date: String) -> GqlResult<NightMode> {
-        let (year, month, day) = crate::sun_position::parse_iso_date(&date)
-            .ok_or_else(|| async_graphql::Error::new(format!("invalid date {date:?}, expected YYYY-MM-DD")))?;
+    async fn set_sunrise_sunset_from_date(
+        &self,
+        ctx: &Context<'_>,
+        date: String,
+    ) -> GqlResult<NightMode> {
+        let (year, month, day) = crate::sun_position::parse_iso_date(&date).ok_or_else(|| {
+            async_graphql::Error::new(format!("invalid date {date:?}, expected YYYY-MM-DD"))
+        })?;
 
         let track = live_track().ok_or_else(|| {
             async_graphql::Error::new("no live telemetry track detected — load into a track first")
@@ -232,14 +259,19 @@ impl NightClockMutation {
             ))
         })?;
 
-        let (sunrise_min, sunset_min) =
-            crate::sun_position::compute_sunrise_sunset(year, month, day, location.latitude, location.longitude)
-                .ok_or_else(|| {
-                    async_graphql::Error::new(format!(
-                        "no sunrise/sunset on {date} at {} (latitude {})",
-                        location.name, location.latitude
-                    ))
-                })?;
+        let (sunrise_min, sunset_min) = crate::sun_position::compute_sunrise_sunset(
+            year,
+            month,
+            day,
+            location.latitude,
+            location.longitude,
+        )
+        .ok_or_else(|| {
+            async_graphql::Error::new(format!(
+                "no sunrise/sunset on {date} at {} (latitude {})",
+                location.name, location.latitude
+            ))
+        })?;
 
         let now = now_ms();
         let record = ensure_record(&adapter, ctx, now).await?;
