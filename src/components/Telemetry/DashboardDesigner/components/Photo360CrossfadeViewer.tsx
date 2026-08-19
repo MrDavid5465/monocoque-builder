@@ -6,7 +6,10 @@ interface Props {
   // Undefined when this car has no night variant — falls back to a single
   // static day viewer, no crossfade machinery at all.
   nightPhotoUrl?: string;
-  isNight: boolean;
+  // 0 = full day, 1 = full night, continuous — see dayNightSim.ts. A manual
+  // toggle produces a hard 0/1 (the CSS transition below still smooths it);
+  // the simulated clock produces a real ramp through dawn/dusk.
+  nightAmount: number;
   yaw: number;
   pitch: number;
   fov: number;
@@ -38,7 +41,7 @@ const TRANSITION = 'opacity 2.5s ease';
 // Only the currently-visible layer is interactive, so dragging/zooming always
 // affects the one you can actually see.
 const Photo360CrossfadeViewer = forwardRef<Photo360Handle, Props>(({
-  dayPhotoUrl, nightPhotoUrl, isNight, displayWidth, displayHeight, readOnly, ...rest
+  dayPhotoUrl, nightPhotoUrl, nightAmount, displayWidth, displayHeight, readOnly, ...rest
 }, ref) => {
   if (!nightPhotoUrl) {
     return (
@@ -53,35 +56,39 @@ const Photo360CrossfadeViewer = forwardRef<Photo360Handle, Props>(({
     );
   }
 
+  // Only one layer captures ref/interaction at a time — whichever is more
+  // than half-visible — even though opacity itself blends continuously.
+  const nightSide = nightAmount >= 0.5;
+
   return (
     <div style={{ position: 'relative', width: displayWidth, height: displayHeight, flexShrink: 0 }}>
       <div style={{
         position: 'absolute', inset: 0,
-        opacity: isNight ? 0 : 1,
+        opacity: 1 - nightAmount,
         transition: TRANSITION,
-        pointerEvents: isNight ? 'none' : 'auto',
+        pointerEvents: nightSide ? 'none' : 'auto',
       }}>
         <Photo360Viewer
-          ref={isNight ? undefined : ref}
+          ref={nightSide ? undefined : ref}
           photoUrl={dayPhotoUrl}
           displayWidth={displayWidth}
           displayHeight={displayHeight}
-          readOnly={readOnly || isNight}
+          readOnly={readOnly || nightSide}
           {...rest}
         />
       </div>
       <div style={{
         position: 'absolute', inset: 0,
-        opacity: isNight ? 1 : 0,
+        opacity: nightAmount,
         transition: TRANSITION,
-        pointerEvents: isNight ? 'auto' : 'none',
+        pointerEvents: nightSide ? 'auto' : 'none',
       }}>
         <Photo360Viewer
-          ref={isNight ? ref : undefined}
+          ref={nightSide ? ref : undefined}
           photoUrl={nightPhotoUrl}
           displayWidth={displayWidth}
           displayHeight={displayHeight}
-          readOnly={readOnly || !isNight}
+          readOnly={readOnly || !nightSide}
           {...rest}
         />
       </div>

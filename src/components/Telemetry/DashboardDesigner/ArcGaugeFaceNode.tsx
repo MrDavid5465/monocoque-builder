@@ -12,6 +12,7 @@ interface ArcGaugeFaceNodeProps {
   childEls: React.ReactNode;
   spriteUrl: (file: string) => string;
   isNight?: boolean;
+  nightAmount?: number;
   dayNight?: boolean;
   nightOverlayZ?: number;
 }
@@ -21,9 +22,11 @@ type Tier = 'major' | 'mid' | 'minor';
 const ArcGaugeFaceNode: React.FC<ArcGaugeFaceNodeProps> = ({
   node, nodeAbsX, nodeAbsY, isSelected,
   telemetryData, registerCounterRotate, childEls, spriteUrl,
-  isNight = false, dayNight = false, nightOverlayZ = 40,
+  isNight = false, nightAmount, dayNight = false, nightOverlayZ = 40,
 }) => {
-  const backlitNight = node.backlit && dayNight && isNight;
+  // Falls back to the binary isNight (as 0/1) if a caller hasn't been
+  // updated to pass the continuous value yet.
+  const backlitAmount = (node.backlit && dayNight) ? (nightAmount ?? (isNight ? 1 : 0)) : 0;
   const w = node.width ?? 200;
   const h = node.height ?? 200;
   const cx = w / 2;
@@ -149,7 +152,7 @@ const ArcGaugeFaceNode: React.FC<ArcGaugeFaceNodeProps> = ({
           height: h,
           outline: isSelected ? '2px solid #4af' : 'none',
           userSelect: 'none',
-          zIndex: backlitNight ? nightOverlayZ + 5 : undefined,
+          zIndex: backlitAmount >= 0.5 ? nightOverlayZ + 5 : undefined,
           transform: node.counterRotate ? undefined : (node.rotation ? `rotate(${node.rotation}deg)` : undefined),
           transformOrigin: '50% 50%',
         }}
@@ -161,8 +164,8 @@ const ArcGaugeFaceNode: React.FC<ArcGaugeFaceNodeProps> = ({
         height={h}
         style={{
           position: 'absolute', left: nodeAbsX, top: nodeAbsY, overflow: 'visible', pointerEvents: 'none',
-          zIndex: backlitNight ? nightOverlayZ + 5 : undefined,
-          filter: backlitNight ? 'drop-shadow(0 0 5px rgba(255, 210, 80, 0.8))' : undefined,
+          zIndex: backlitAmount >= 0.5 ? nightOverlayZ + 5 : undefined,
+          filter: backlitAmount > 0 ? `drop-shadow(0 0 5px rgba(255, 210, 80, ${(0.8 * backlitAmount).toFixed(3)}))` : undefined,
         }}
       >
         {redlineD && (
@@ -238,7 +241,7 @@ const ArcGaugeFaceNode: React.FC<ArcGaugeFaceNodeProps> = ({
       {/* Sprite labels (sprite-arc-gauge-face only) */}
       {isSprite && majorTicks.map(({ value }) => {
         const el = renderSpriteLabel(value, valueToAngle(value));
-        if (!backlitNight || !el) return el;
+        if (backlitAmount < 0.5 || !el) return el;
         return React.cloneElement(el as React.ReactElement, {
           style: {
             ...(el as React.ReactElement).props.style,

@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { createContext, useState, useCallback, useContext, useMemo, useRef } from 'react';
 import { useQuery, useMutation, useSubscription } from '@apollo/client/react';
 import {
   GET_PREVIEW_CARS,
@@ -7,6 +7,25 @@ import {
   PREVIEW_CAR_CHANGED,
   PreviewCarRecord,
 } from './previewCarQueries';
+
+// Wrapped in an object (rather than passing `PreviewCarRecord | undefined`
+// directly) so "a feed is being provided, but no record has arrived over it
+// yet" (`{record: undefined}`) is distinguishable from "no feed at all"
+// (parameter/context omitted entirely) — same reasoning as
+// useGlobalNightMode's NightModeLiveFeed.
+export interface PreviewCarLiveFeed {
+  record: PreviewCarRecord | undefined;
+}
+
+// Lets ONE useGlobalPreviewCar() call on a page (the one nearest the root)
+// share the single previewCarChanged subscription it opens with every OTHER
+// useGlobalPreviewCar() call nested underneath it — purely on the frontend,
+// no backend schema changes involved. Same pattern and same reason as
+// useGlobalNightMode's NightModeFeedContext (a second always-on subscription
+// on the same page can starve the browser's per-origin HTTP/1.1 connection
+// pool and hang unrelated mutations).
+const PreviewCarFeedContext = createContext<PreviewCarLiveFeed | null>(null);
+export const PreviewCarFeedProvider = PreviewCarFeedContext.Provider;
 
 // A global "preview car" — set from a car's config page so kiosks (when the
 // sim isn't actually running) can preview that car's 360° photo/pan without
@@ -19,24 +38,45 @@ import {
 // — otherwise it can't tell an already-existing record (from a previous
 // session) apart from "none yet", and would create a duplicate via `add`
 // instead of updating the real one.
-export function useGlobalPreviewCar(): { previewCarId: string; setPreviewCarId: (carId: string) => void; ready: boolean } {
+//
+// The FIRST call site on a page (DashboardDesigner/index.tsx) calls this
+// with no argument, opens the one real `previewCarChanged` subscription, and
+// re-provides its own resolved `feed` (part of this hook's return value) via
+// `<PreviewCarFeedProvider>` around its subtree, so nested call sites pick it
+// up via context instead of opening a second connection. `externalFeed` is
+// there for a caller that already tracks the data some other way. Only when
+// neither an explicit feed nor a provider ancestor is present does this fall
+// back to opening its own subscription (fine for a lone consumer like
+// Cars/CarDetail).
+export function useGlobalPreviewCar(externalFeed?: PreviewCarLiveFeed): { previewCarId: string; setPreviewCarId: (carId: string) => void; ready: boolean; feed: PreviewCarLiveFeed } {
   const { data } = useQuery(GET_PREVIEW_CARS, { fetchPolicy: 'cache-and-network' });
   const [addPreviewCar] = useMutation(ADD_PREVIEW_CAR);
   const [updatePreviewCar] = useMutation(UPDATE_PREVIEW_CAR);
 
   const queried = ((data as any)?.getPreviewCars ?? [])[0] as PreviewCarRecord | undefined;
-  const [live, setLive] = useState<PreviewCarRecord | undefined>(undefined);
+
+  const contextFeed = useContext(PreviewCarFeedContext);
+  const feed = externalFeed ?? contextFeed ?? undefined;
+
+  const [ownLive, setOwnLive] = useState<PreviewCarRecord | undefined>(undefined);
 
   useSubscription(PREVIEW_CAR_CHANGED, {
+    skip: feed !== undefined,
     onData: ({ data }: any) => {
       const value = data.data?.previewCarChanged?.value;
-      if (value) setLive(value);
+      if (value) setOwnLive(value);
     },
   });
 
+  const live = feed ? feed.record : ownLive;
   const current = live ?? queried;
   const currentRef = useRef(current);
   currentRef.current = current;
+
+  // Memoized for the same reason as useGlobalNightMode's resolvedFeed — a
+  // Provider passing this straight through as its context value shouldn't
+  // re-render every nested consumer on every unrelated re-render.
+  const resolvedFeed = useMemo<PreviewCarLiveFeed>(() => ({ record: live }), [live]);
 
   // Guards against a race where setPreviewCarId is called again (e.g. an
   // effect re-firing as a query resolves) before the first `add` — with no
@@ -61,5 +101,5 @@ export function useGlobalPreviewCar(): { previewCarId: string; setPreviewCarId: 
     promise.then(() => { pendingAddRef.current = null; });
   }, [updatePreviewCar, addPreviewCar]);
 
-  return { previewCarId: current?.carId ?? '', setPreviewCarId, ready: data !== undefined };
+  return { previewCarId: current?.carId ?? '', setPreviewCarId, ready: data !== undefined, feed: resolvedFeed };
 }

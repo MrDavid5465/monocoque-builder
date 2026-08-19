@@ -65,6 +65,7 @@ const PanSession: React.FC<{
   photoUrl: string;
   nightPhotoUrl?: string;
   isNight: boolean;
+  nightAmount: number;
   onToggleNightMode: () => void;
   width: number;
   height: number;
@@ -75,7 +76,7 @@ const PanSession: React.FC<{
   hasThumbnail?: boolean;
   onThumbnailChanged?: () => void;
 }> = ({
-  carId, dashName, dashOptions, onDashNameChange, photoUrl, nightPhotoUrl, isNight, onToggleNightMode, width, height,
+  carId, dashName, dashOptions, onDashNameChange, photoUrl, nightPhotoUrl, isNight, nightAmount, onToggleNightMode, width, height,
   initialPan, existingId, onPersisted, photoId, hasThumbnail, onThumbnailChanged,
 }) => {
   const [pan, setPan] = useState<Pan>(initialPan);
@@ -197,7 +198,7 @@ const PanSession: React.FC<{
           <Photo360CrossfadeViewer
             dayPhotoUrl={photoUrl}
             nightPhotoUrl={nightPhotoUrl}
-            isNight={isNight}
+            nightAmount={nightAmount}
             yaw={pan.yaw}
             pitch={pan.pitch}
             fov={pan.fov}
@@ -211,7 +212,7 @@ const PanSession: React.FC<{
             <div style={{
               position: 'absolute', inset: 0,
               background: 'rgba(0, 0, 0, 0.850)',
-              opacity: isNight ? 1 : 0,
+              opacity: nightAmount,
               transition: 'opacity 2s ease',
               pointerEvents: 'none',
             }} />
@@ -274,7 +275,7 @@ const DashPanEditor: React.FC<Props> = ({ carId, photoId, photoUrl, nightPhotoUr
   const theme = getTheme();
   const [selectedDashName, setSelectedDashName] = useState('');
   const [resetCounter, setResetCounter] = useState(0);
-  const { isNight, toggleNightMode } = useGlobalNightMode();
+  const { isNight, nightAmount, toggleNightMode } = useGlobalNightMode();
 
   const { data: dashData } = useQuery(GET_DASHBOARDS, { fetchPolicy: 'cache-and-network' });
   const { data: panData, refetch: refetchPans } = useQuery(GET_CAR_DASH_PANS, { fetchPolicy: 'cache-and-network' });
@@ -346,6 +347,7 @@ const DashPanEditor: React.FC<Props> = ({ carId, photoId, photoUrl, nightPhotoUr
             photoUrl={photoUrl}
             nightPhotoUrl={nightPhotoUrl}
             isNight={isNight}
+            nightAmount={nightAmount}
             onToggleNightMode={toggleNightMode}
             width={width}
             height={height}
