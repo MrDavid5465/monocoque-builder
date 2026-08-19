@@ -162,6 +162,8 @@ const ObjectExplorer: React.FC<Props> = ({
     'sprite-arc-gauge-face': 'NumberField',
     'transform-sprite':      'ArrowTallUpRight',
     'sprite-arc-fill':       'CircleHalfFull',
+    'clock-text':            'Clock',
+    'clock-sprite':          'Clock',
   };
 
   // Hit-tests whatever tree row is actually under the pointer (via elementFromPoint,

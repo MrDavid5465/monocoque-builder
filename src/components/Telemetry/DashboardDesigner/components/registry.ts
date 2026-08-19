@@ -18,6 +18,8 @@ import { arcGaugeFaceSchema } from './arc-gauge-face/schema';
 import { spriteArcGaugeFaceSchema } from './sprite-arc-gauge-face/schema';
 import { transformSpriteSchema } from './transform-sprite/schema';
 import { spriteArcFillSchema } from './sprite-arc-fill/schema';
+import { clockTextSchema } from './clock-text/schema';
+import { clockSpriteSchema } from './clock-sprite/schema';
 
 const REGISTRY: Record<ComponentType, ComponentSchemaSource> = {
   'static-sprite':       staticSpriteSchema,
@@ -38,6 +40,8 @@ const REGISTRY: Record<ComponentType, ComponentSchemaSource> = {
   'sprite-arc-gauge-face': spriteArcGaugeFaceSchema,
   'transform-sprite':      transformSpriteSchema,
   'sprite-arc-fill':       spriteArcFillSchema,
+  'clock-text':            clockTextSchema,
+  'clock-sprite':          clockSpriteSchema,
 };
 
 // Metadata-only callers (ALL_SCHEMAS below, and anything just checking
@@ -60,11 +64,11 @@ export const ALL_SCHEMAS: ComponentSchema[] = Object.values(REGISTRY).map(
 );
 
 export const SPRITE_TYPES = new Set<ComponentType>([
-  'static-sprite', 'needle-gauge', 'bar-gauge', 'sprite-bar-gauge', 'sprite-text-gauge', 'gif-gauge', 'transform-sprite', 'sprite-arc-fill',
+  'static-sprite', 'needle-gauge', 'bar-gauge', 'sprite-bar-gauge', 'sprite-text-gauge', 'gif-gauge', 'transform-sprite', 'sprite-arc-fill', 'clock-sprite',
 ]);
 
 export const FREEFORM_TYPES = new Set<ComponentType>([
   'text-gauge', 'graph-bar-gauge', 'group', 'flag-display', 'flag-display-sprite',
   'button-control', 'slider-control', 'encoder-control',
-  'arc-gauge-face', 'sprite-arc-gauge-face',
+  'arc-gauge-face', 'sprite-arc-gauge-face', 'clock-text',
 ]);

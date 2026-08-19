@@ -7,13 +7,13 @@ const ALL_TYPES: ComponentType[] = [
   'text-gauge', 'sprite-text-gauge', 'graph-bar-gauge', 'group',
   'flag-display', 'flag-display-sprite',
   'button-control', 'slider-control', 'encoder-control',
-  'transform-sprite', 'sprite-arc-fill',
+  'transform-sprite', 'sprite-arc-fill', 'clock-text', 'clock-sprite',
 ];
 
 const GAUGE_TYPES: ComponentType[] = [
   'static-sprite', 'needle-gauge', 'bar-gauge', 'sprite-bar-gauge',
   'text-gauge', 'sprite-text-gauge', 'graph-bar-gauge', 'group',
-  'transform-sprite', 'sprite-arc-fill',
+  'transform-sprite', 'sprite-arc-fill', 'clock-text', 'clock-sprite',
 ];
 
 // ─── getSchema ────────────────────────────────────────────────────────────────
@@ -35,8 +35,8 @@ describe('getSchema', () => {
 // ─── ALL_SCHEMAS ──────────────────────────────────────────────────────────────
 
 describe('ALL_SCHEMAS', () => {
-  it('contains exactly 18 schemas', () => {
-    expect(ALL_SCHEMAS).toHaveLength(18);
+  it('contains exactly 20 schemas', () => {
+    expect(ALL_SCHEMAS).toHaveLength(20);
   });
 
   it('every schema has required shape', () => {
@@ -90,20 +90,37 @@ describe('ALL_SCHEMAS', () => {
     }
   });
 
-  it('sprite-text-gauge uses charWidth/charHeight instead of width/height', () => {
-    const schema = getSchema('sprite-text-gauge');
-    expect(schema.fields.charWidth).toBeDefined();
-    expect(schema.fields.charHeight).toBeDefined();
-    expect(schema.fields.width).toBeUndefined();
+  it('sprite-text-gauge and clock-sprite use charWidth/charHeight instead of width/height', () => {
+    for (const type of ['sprite-text-gauge', 'clock-sprite'] as const) {
+      const schema = getSchema(type);
+      expect(schema.fields.charWidth, `${type} missing charWidth`).toBeDefined();
+      expect(schema.fields.charHeight, `${type} missing charHeight`).toBeDefined();
+      expect(schema.fields.width, `${type} should not have width`).toBeUndefined();
+    }
   });
 
-  it('non-sprite-text schemas that are sprite-based have width/height', () => {
+  // Per-character sprite-sheet types (sprite-text-gauge, clock-sprite) size
+  // themselves from charWidth/charHeight * character count instead of a
+  // fixed width/height — same class of exception, not a fixed-size sprite.
+  const CHAR_SHEET_TYPES: ComponentType[] = ['sprite-text-gauge', 'clock-sprite'];
+
+  it('non-char-sheet schemas that are sprite-based have width/height', () => {
     const spriteSchemas = ALL_SCHEMAS.filter(
-      s => SPRITE_TYPES.has(s.type) && s.type !== 'sprite-text-gauge'
+      s => SPRITE_TYPES.has(s.type) && !CHAR_SHEET_TYPES.includes(s.type)
     );
     for (const schema of spriteSchemas) {
       expect(schema.fields.width, `${schema.type} missing width`).toBeDefined();
       expect(schema.fields.height, `${schema.type} missing height`).toBeDefined();
+    }
+  });
+
+  it('clock-text and clock-sprite are not bindable and have clock fields', () => {
+    for (const type of ['clock-text', 'clock-sprite'] as const) {
+      const schema = getSchema(type);
+      expect(schema.bindable, `${type} should not be bindable`).toBeFalsy();
+      expect(schema.fields.clockSource, `${type} missing clockSource`).toBeDefined();
+      expect(schema.fields.clockFormat, `${type} missing clockFormat`).toBeDefined();
+      expect(schema.fields.showSeconds, `${type} missing showSeconds`).toBeDefined();
     }
   });
 
@@ -154,7 +171,7 @@ describe('ALL_SCHEMAS', () => {
 
 describe('SPRITE_TYPES', () => {
   it('contains sprite-based types', () => {
-    const expected: ComponentType[] = ['static-sprite', 'needle-gauge', 'bar-gauge', 'sprite-bar-gauge', 'sprite-text-gauge', 'transform-sprite', 'sprite-arc-fill'];
+    const expected: ComponentType[] = ['static-sprite', 'needle-gauge', 'bar-gauge', 'sprite-bar-gauge', 'sprite-text-gauge', 'transform-sprite', 'sprite-arc-fill', 'clock-sprite'];
     for (const t of expected) expect(SPRITE_TYPES.has(t), `expected ${t} in SPRITE_TYPES`).toBe(true);
   });
 
@@ -167,7 +184,7 @@ describe('SPRITE_TYPES', () => {
 
 describe('FREEFORM_TYPES', () => {
   it('contains freeform types', () => {
-    const expected: ComponentType[] = ['text-gauge', 'graph-bar-gauge', 'group'];
+    const expected: ComponentType[] = ['text-gauge', 'graph-bar-gauge', 'group', 'clock-text'];
     for (const t of expected) expect(FREEFORM_TYPES.has(t), `expected ${t} in FREEFORM_TYPES`).toBe(true);
   });
 

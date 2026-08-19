@@ -18,7 +18,9 @@ export type ComponentType =
   | 'arc-gauge-face'
   | 'sprite-arc-gauge-face'
   | 'transform-sprite'
-  | 'sprite-arc-fill';
+  | 'sprite-arc-fill'
+  | 'clock-text'
+  | 'clock-sprite';
 export type BaseDashType = 'sprite' | '360';
 
 export interface BaseDashTypeInfo {
@@ -293,6 +295,16 @@ export interface ComponentNode {
   gaugeLabelColor?: string;
   gaugeSubLabelSize?: number;
   gaugeSubLabelColor?: string;
+
+  // --- clock-text & clock-sprite ---
+  // Real time uses the VIEWER's own local timezone (an ordinary wall
+  // clock, one per device); simulated time is UTC-only by convention (see
+  // dayNightSim.ts) since it's a purely artificial in-game clock with no
+  // real-world timezone of its own — every viewer must read the identical
+  // simulated hour/minute regardless of where the device physically is.
+  clockSource?: 'real' | 'simulated';
+  clockFormat?: '12h' | '24h';
+  showSeconds?: boolean;
 
   // --- counter-rotation (wheel-mounted display) ---
   // Rotates this element opposite to the steering input so it appears stationary.

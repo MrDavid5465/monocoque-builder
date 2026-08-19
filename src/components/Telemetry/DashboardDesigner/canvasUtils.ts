@@ -67,6 +67,29 @@ export function computeTranslate(node: ComponentNode, data: Record<string, numbe
   return node.moveAxis === 'y' ? { x: 0, y: offset } : { x: offset, y: 0 };
 }
 
+export interface ClockParts {
+  // Display hour: 0-23 for '24h', 1-12 for '12h' (never 0 in 12h mode).
+  hour: number;
+  minute: number;
+  second: number;
+  // Meaningful only in '12h' mode.
+  isPM: boolean;
+}
+
+// Shared by ClockTextNode/ClockSpriteNode — `useUtc` must be true for
+// simulated time (dayNightSim.ts's convention: simTimeMs is UTC-only, an
+// artificial in-game clock with no real-world timezone) and false for real
+// time (an ordinary wall clock reads the VIEWER's own local timezone).
+export function computeClockParts(ms: number, useUtc: boolean, format: '12h' | '24h'): ClockParts {
+  const d = new Date(ms);
+  const rawHour = useUtc ? d.getUTCHours() : d.getHours();
+  const minute = useUtc ? d.getUTCMinutes() : d.getMinutes();
+  const second = useUtc ? d.getUTCSeconds() : d.getSeconds();
+  const isPM = rawHour >= 12;
+  const hour = format === '12h' ? (rawHour % 12 === 0 ? 12 : rawHour % 12) : rawHour;
+  return { hour, minute, second, isPM };
+}
+
 // Whether a bound node should render nothing because its telemetry value has gone
 // outside [inputMin, inputMax] and its binding opted into 'hide' (vs. the default
 // 'stop', which clamps to the boundary and keeps rendering). Deliberately uses the

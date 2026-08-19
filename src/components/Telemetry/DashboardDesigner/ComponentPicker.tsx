@@ -104,6 +104,8 @@ const ComponentPicker: React.FC<Props> = ({
       } : {}),
       ...(activeType === 'text-gauge' ? { fontSize: 36, color: '#ffffff', format: 'integer' as const } : {}),
       ...(activeType === 'graph-bar-gauge' ? { width: 200, height: 24, graphType: 'h-bar' as const, colorLow: '#00cc44', colorHigh: '#cc2200', backgroundColor: '#222' } : {}),
+      ...(activeType === 'clock-text' ? { fontSize: 36, color: '#ffffff', clockSource: 'real' as const, clockFormat: '24h' as const } : {}),
+      ...(activeType === 'clock-sprite' ? { clockSource: 'real' as const, clockFormat: '24h' as const } : {}),
     };
     onAdd(node, parentId());
   };
