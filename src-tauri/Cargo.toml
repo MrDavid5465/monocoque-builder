@@ -5,7 +5,7 @@ members = [
 
 [package]
 name = "typiql"
-version = "0.3.0"
+version = "0.2.0"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -43,7 +43,9 @@ dns-lookup = "3.0.1"
 base64 = "0.22"
 sha2 = "0.10"
 uuid = { version = "1", features = ["v4"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 typiql = { path = "../../../typiql-rs/crates/typiql-core", package = "typiql-core" }
 typiql-adapter-json = { path = "../../../typiql-rs/crates/typiql-adapter-json" }
 typiql-adapter-duckdb = { path = "../../../typiql-rs/crates/typiql-adapter-duckdb" }
 evdev = "0.12"
+nusb = "0.2.7"

@@ -9,6 +9,8 @@ mod config_manager;
 mod gamepad;
 mod graphql;
 mod pipewire_dsp;
+mod device_enumeration;
+mod sun_position;
 mod telemetry;
 mod typiql_types;
 

@@ -5,19 +5,23 @@ pub mod clients;
 pub mod dashboard_entry;
 pub mod dashboard_files;
 pub mod gamepad;
+pub mod night_clock;
 pub mod recording;
 pub mod shaker_dsp;
 pub mod templates;
+pub mod track_geocode;
 pub use car::{CarFileMutation, CarPhotoSyncQuery};
 pub use dashboard_entry::DashboardMutation;
 pub use gamepad::GamepadMutation;
+pub use night_clock::NightClockMutation;
 pub use recording::RecordingControlMutation;
 pub use shaker_dsp::{ShakerDspMutation, ShakerDspQuery};
 pub use templates::DashTemplateThumbnailMutation;
+pub use track_geocode::TrackGeocodeQuery;
 
 use crate::telemetry::recording as telemetry_recording;
 use crate::telemetry::{build_frame, read_simdata, types::TelemetryFrame};
-use crate::typiql_types::{DashTemplateChanged, DashboardEntryChanged, DeviceDefaultChanged};
+use crate::typiql_types::{DashTemplateChanged, DashboardEntryChanged, DeviceDefaultChanged, NightModeChanged};
 use async_graphql::{Context, Object, SimpleObject, Subscription};
 use futures_util::stream::{select, Stream, StreamExt};
 use std::sync::Arc;
@@ -54,6 +58,63 @@ enum DashboardUpdateEvent {
     Telemetry(TelemetryEvent),
 }
 
+/// One tick of the server-authoritative simulated in-game clock (see
+/// `night_clock.rs`). `sim_time_ms`/`real_time_ms` are both ms-since-epoch —
+/// `real_time_ms` is always this server's own clock at the moment the tick
+/// was computed, included so a future consumer could interpolate between
+/// ticks if ever needed, though the current frontend just renders whatever
+/// tick arrives most recently (same direct-render convention as the
+/// `telemetry` subscription below).
+#[derive(async_graphql::SimpleObject, Clone)]
+pub struct NightClockTick {
+    pub sim_time_ms: f64,
+    pub real_time_ms: f64,
+}
+
+/// `nightModeUpdates` merges two logically-separate things (the record's
+/// own add/update/remove events, and the ~60Hz simulated-clock tick) into
+/// ONE subscription connection — deliberately not two independent
+/// subscriptions. A browser holds only ~6 concurrent HTTP/1.1 connections
+/// per origin, and this app's dashboard pages already keep 1-2 long-lived
+/// subscriptions open (dashboardUpdates, this one); a separate always-on
+/// nightClock subscription on top of that was enough to starve the pool and
+/// hang unrelated mutations mid-request (discovered live: an updateNightMode
+/// mutation's request was sent but its response never arrived while a
+/// standalone nightClock subscription was also open on the same page). Same
+/// merge pattern as `dashboard_updates` below (event-driven broker streams
+/// `select()`-ed with an interval stream).
+#[derive(async_graphql::Union, Clone)]
+enum NightModeUpdateEvent {
+    Changed(NightModeChanged),
+    Clock(NightClockTick),
+}
+
+/// Computes one `NightClockTick` from the current persisted anchor. Reads
+/// the adapter directly (not via `resolve_list`, which needs a
+/// request-scoped `Context` this per-tick closure has already outlived) —
+/// see `night_clock::read_current`/`current_sim_ms`. Falls back to a
+/// harmless "sim time == real time" tick when no record exists yet or the
+/// anchor isn't fully configured; the client only acts on this when its own
+/// `simEnabled` is true, so an unconfigured tick is simply unused.
+async fn night_clock_tick(adapter: &Arc<dyn TypiQLAdapter>) -> NightClockTick {
+    let now = night_clock::now_ms();
+    let record = night_clock::read_current(adapter).await;
+    // Reacts to the live telemetry track changing the same way the 360°
+    // photo viewer reacts to the car changing — see this function's own
+    // doc comment for why it needs a remembered date to do that, since
+    // telemetry has no "what date is it in-game" signal of its own.
+    if let Some(record) = &record {
+        night_clock::maybe_auto_recompute_sun_times(adapter, record).await;
+    }
+    let sim_time_ms = record
+        .and_then(|record| night_clock::current_sim_ms(&record, now))
+        .unwrap_or(now);
+    NightClockTick {
+        sim_time_ms,
+        real_time_ms: now,
+    }
+}
+
 #[derive(SimpleObject)]
 pub struct RecordingStatus {
     pub is_recording: bool,
@@ -86,6 +147,32 @@ impl QueryRoot {
             playing_id: telemetry_recording::playing_id(),
         }
     }
+
+    /// One-shot read of the current simulated-clock tick — same rationale
+    /// as `telemetry_snapshot` above (a plain query mirroring what the
+    /// subscription pushes) so a freshly-mounted consumer (the day/night
+    /// popup) can render the real current time immediately on open instead
+    /// of showing a placeholder until the subscription's first push
+    /// arrives.
+    async fn night_clock_snapshot(&self, ctx: &Context<'_>) -> async_graphql::Result<NightClockTick> {
+        let adapter = default_adapter(ctx)?;
+        Ok(night_clock_tick(&adapter).await)
+    }
+
+    /// Every USB device currently visible to the OS — for the Shift Lights
+    /// "Device ID" picker (see device_enumeration.rs's own doc comment for
+    /// the devid format). Read-only sysfs enumeration on Linux, no special
+    /// permissions needed just to list.
+    async fn get_usb_devices(&self) -> async_graphql::Result<Vec<crate::device_enumeration::UsbDeviceInfo>> {
+        crate::device_enumeration::list_usb_devices().map_err(async_graphql::Error::new)
+    }
+
+    /// Every serial (tty) device currently visible to the OS, resolved via
+    /// `/dev/serial/by-id` — for the Device Path combobox on Shift Lights/
+    /// LED Controllers/SimWind rows.
+    async fn get_serial_devices(&self) -> Vec<crate::device_enumeration::SerialDeviceInfo> {
+        crate::device_enumeration::list_serial_devices()
+    }
 }
 
 #[derive(Default)]
@@ -101,6 +188,32 @@ impl SubscriptionRoot {
     async fn telemetry(&self) -> impl Stream<Item = Option<TelemetryFrame>> {
         IntervalStream::new(tokio::time::interval(Duration::from_millis(33)))
             .map(|_| current_frame())
+    }
+
+    /// Replaces the macro-generated `nightModeChanged` subscription as the
+    /// one connection every NightMode consumer subscribes to — record
+    /// add/update/remove events plus a ~60Hz server-authoritative
+    /// simulated-clock tick (see `night_clock.rs`), merged (see
+    /// `NightModeUpdateEvent`'s doc comment for why this isn't two separate
+    /// subscriptions). Every subscriber's clock tick is computed from the
+    /// same persisted anchor + this server's own clock, fixing a previous
+    /// bug where each kiosk device extrapolated independently from its own
+    /// local clock and drifted apart from other devices over hours.
+    async fn night_mode_updates(&self, ctx: &Context<'_>) -> async_graphql::Result<impl Stream<Item = NightModeUpdateEvent>> {
+        let adapter = default_adapter(ctx)?;
+        let s1 = TypiQLBroker::<NightModeChanged>::subscribe().map(NightModeUpdateEvent::Changed);
+        // 16ms (~60Hz), matching `telemetry`/`dashboard_updates`'s own tick
+        // rate — so the simulated clock display advances as smoothly as the
+        // telemetry-driven gauges rather than visibly stepping once a
+        // second. `maybe_auto_recompute_sun_times`'s own expensive path
+        // (TrackLocation table scan + write) only actually runs on a track
+        // CHANGE, not every tick, so this doesn't 60x the adapter load — see
+        // that function's own doc comment.
+        let s2 = IntervalStream::new(tokio::time::interval(Duration::from_millis(16))).then(move |_| {
+            let adapter = adapter.clone();
+            async move { NightModeUpdateEvent::Clock(night_clock_tick(&adapter).await) }
+        });
+        Ok(select(s1, s2))
     }
 
     async fn dashboard_updates(&self) -> impl Stream<Item = DashboardUpdateEvent> {
