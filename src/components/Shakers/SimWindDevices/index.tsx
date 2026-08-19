@@ -7,6 +7,7 @@ import { RowButtonConfig } from '../../../lib/typical-admin-fabric/lib/ListContr
 import { DisplaySchema } from '../../../lib/typical-admin';
 import { GET_SIM_WINDS, CREATE_SIM_WIND, UPDATE_SIM_WIND, REMOVE_SIM_WIND, SIM_WIND_CHANGED, SimWindDeviceRec } from './queries';
 import { DEFAULT_SIM_WIND_DEVICE } from '../../../mock/simWindDeviceMock';
+import { useMonocoqueExport } from '../useMonocoqueExport';
 
 interface Props { profileId?: string | null; }
 
@@ -43,6 +44,8 @@ const SimWindDevices: React.FC<Props> = ({ profileId = null }) => {
   const [update] = useMutation(UPDATE_SIM_WIND, { refetchQueries: [{ query: GET_SIM_WINDS }] });
   const [remove] = useMutation(REMOVE_SIM_WIND, { refetchQueries: [{ query: GET_SIM_WINDS }] });
 
+  const { status: exportStatus, handleExport, handleRestart } = useMonocoqueExport();
+
   const allRecords: SimWindDeviceRec[] = (data as any)?.getMonocoqueSimWindDevices ?? [];
   const records = allRecords.filter(r => (r.profileId ?? null) === profileId);
 
@@ -74,13 +77,28 @@ const SimWindDevices: React.FC<Props> = ({ profileId = null }) => {
 
   return (
     <div style={{ padding: profileId ? 0 : 16, color: theme.palette.neutralPrimary }}>
-      {!profileId && <h3 style={{ margin: '0 0 10px' }}>SimWind Controllers</h3>}
+      {!profileId && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+          <h3 style={{ margin: '0 10px 0 0' }}>SimWind Controllers</h3>
+          {exportStatus && <span style={{ fontSize: '0.8em', opacity: 0.6 }}>{exportStatus}</span>}
+        </div>
+      )}
       {records.length === 0 && (
         <div style={{ opacity: 0.5, padding: '0 0 8px' }}>
           No SimWind controllers configured yet — click "Add" (top-right of the grid) to get started.
         </div>
       )}
-      <DetailsGrid name="SimWindDevices" items={records} schema={schema} onAdd={handleAdd} rowButtons={rowButtons} />
+      <DetailsGrid
+        name="SimWindDevices"
+        items={records}
+        schema={schema}
+        onAdd={handleAdd}
+        customButtons={[
+          { key: 'export', label: 'Export to Config', icon: 'CloudDownload', onClick: handleExport },
+          { key: 'restart', label: 'Restart Monocoque', icon: 'Refresh', onClick: handleRestart },
+        ]}
+        rowButtons={rowButtons}
+      />
     </div>
   );
 };

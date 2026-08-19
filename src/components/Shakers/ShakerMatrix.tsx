@@ -5,7 +5,7 @@ import { getTheme, Form, FormCard } from '../../lib/denim/lib';
 import settingsDispatcher from '../../lib/denim/lib/queries';
 import { confirmAsync } from '../../lib/denim/components/ConfirmDialog';
 import { GET_ITEMS, UPDATE_ITEM, CREATE_ITEM, REMOVE_ITEM, ITEM_CHANGED } from './queries';
-import { EffectRow, EFFECTS, EFFECT_LABELS, TYRE_EFFECTS, ShakerRec } from './EffectRow';
+import { EffectRow, EFFECTS, EFFECT_LABELS, ShakerRec } from './EffectRow';
 import { LfeRow } from './LfeRow';
 import ChannelHeader from './ChannelHeader';
 import {
@@ -23,6 +23,10 @@ import {
   SHAKER_CHANNEL_CHANGED, ShakerChannel,
 } from './channelQueries';
 import { ADD_PROFILE, GET_PROFILES, SoundDeviceProfile } from './Profiles/queries';
+import { GET_SHIFT_LIGHTS, ShiftLightRec } from './ShiftLights/queries';
+import { GET_LEDS, LedsDeviceRec } from './LedsDevices/queries';
+import { GET_SIM_WINDS, SimWindDeviceRec } from './SimWindDevices/queries';
+import { buildSoundDeviceBlocks, buildFullMonocoqueConfig, wrapMonocoqueConfigBlocks } from './monocoqueConfig';
 import DetailsGrid from '../../lib/typical-admin-fabric/lib/List';
 import { DisplaySchema } from '../../lib/typical-admin';
 
@@ -30,61 +34,12 @@ const TYRE_ORDER = ['FrontLeft', 'FrontRight', 'RearLeft', 'RearRight', 'Front',
 
 export type { ShakerRec };
 
-// PipeWire node names can't safely contain arbitrary devid characters
-// (dots/dashes/etc) — must match pipewire_dsp::device_slug's sanitization
-// exactly (non `[a-zA-Z0-9_]` -> `_`) since the backend derives its actual
-// running sink names the same way.
-function deviceSlug(devid: string): string {
-  return devid.replace(/[^a-zA-Z0-9_]/g, '_');
-}
-
-// While DSP is enabled, each (device, effect) pair's exported devid/volume
-// are substituted fresh at export time only — computed here, never
-// persisted to storage (see ShakerChannel.devid's backend doc comment for
-// the full reasoning: the DSP-mode override is inherently per-*effect*
-// *per-device*, since every effect gets its own isolated capture sink per
-// device it has corners on — see pipewire_dsp::load_filter_chain's doc
-// comment — while devid itself now lives per-*channel*, so the substitution
-// moved to export time, the same place pan/channels/dsp_slot substitution
-// already lived under the prior per-slot design).
-function dspEffectSinkName(devid: string, effect: string): string {
-  return `shaker_dsp_${deviceSlug(devid)}_${effect.toLowerCase()}_in`;
-}
-
+// Sound-blocks-only, wrapped — kept for existing test coverage
+// (shakerUtils.test.ts) and any other Sound-only caller. Every page's
+// "Export to Config" button uses buildFullMonocoqueConfig instead (see
+// monocoqueConfig.ts's own doc comment for why a partial export is unsafe).
 export function buildConfigText(records: ShakerRec[], shakerChannels: ShakerChannel[], dspEnabled: boolean): string {
-  const channelsById = new Map(shakerChannels.map(c => [c.id, c]));
-  const blocks = records.map(r => {
-    const channel = channelsById.get(r.channelId);
-    const isTyreEffect = TYRE_EFFECTS.has(r.effect.toLowerCase());
-    const effectiveDevid = dspEnabled && channel
-      ? dspEffectSinkName(channel.devid, r.effect)
-      : (channel?.devid ?? '');
-    const effectiveVolume = dspEnabled ? 100 : r.volume;
-    const lines = [
-      `            device       = "Sound";`,
-      `            effect       = "${r.effect}";`,
-      // Only emitted for tyre-capable effects — Monocoque's gettyre() is
-      // only ever called when effect_type is TYRESLIP/TYRELOCK/ABSBRAKES/
-      // SUSPENSION (confirmed directly against confighelper.c this
-      // session), so omitting the line entirely for engine/gear cannot hit
-      // the known uninitialized-pointer crash in gettyre() — that code path
-      // is simply never reached for them. `channel?.position` is always
-      // real once a position has been picked; "AllFour" is only a fallback
-      // for the rare case a tyre effect exists before its channel has one.
-      ...(isTyreEffect ? [`            tyre         = "${channel?.position ?? 'AllFour'}";`] : []),
-      `            devid        = "${effectiveDevid}";`,
-      `            channels     = ${channel?.channels ?? 4};`,
-      `            pan          = ${channel?.pan ?? 0};`,
-      `            volume       = ${effectiveVolume};`,
-      `            modulation   = "${r.modulation}";`,
-      ...(r.frequency != null ? [`            frequency    = ${r.frequency};`] : []),
-      ...(r.frequencyMax != null ? [`            frequencyMax = ${r.frequencyMax};`] : []),
-      ...(r.amplitude != null ? [`            amplitude    = ${r.amplitude};`] : []),
-      ...(r.amplitudeMax != null ? [`            amplitudeMax = ${r.amplitudeMax};`] : []),
-    ];
-    return `        {\n${lines.join('\n')}\n        }`;
-  });
-  return `configs = (\n    {\n        sim = "default";\n        car = "default";\n        devices = (\n${blocks.join(',\n')}\n        );\n    }\n);\n`;
+  return wrapMonocoqueConfigBlocks(buildSoundDeviceBlocks(records, shakerChannels, dspEnabled));
 }
 
 // Every MonocoqueSoundDevice row gets a permanent, globally-unique dspSlot
@@ -175,6 +130,22 @@ const ShakerMatrix: React.FC<{ profileId?: string | null }> = ({ profileId = nul
   const [disableDsp] = useMutation(DISABLE_SHAKER_DSP, { refetchQueries: [{ query: settingsDispatcher.my }, { query: GET_ITEMS }] });
   const [writeConfig] = useMutation(WRITE_MONOCOQUE_CONFIG);
   const [reloadMonocoque] = useMutation(RELOAD_MONOCOQUE);
+
+  // ── Other device categories, read-only here — exporting from this page
+  // still has to write the WHOLE monocoque config, so it needs every
+  // category's live rows too, not just this page's own Sound devices (see
+  // monocoqueConfig.ts's doc comment). Deliberately plain useQuery, no
+  // useSubscription — this page already runs 4 long-lived subscriptions
+  // (ITEM_CHANGED, SHAKER_CHANNEL_CHANGED, DSP_CHANNEL_CHANGED,
+  // LFE_CHANNEL_CHANGED) and the browser's ~6-connection HTTP/1.1 pool means
+  // more would risk starving this page's own mutations (see
+  // feedback_subscription_connection_limit). handleExport explicitly
+  // refetches all three right before building the combined config instead,
+  // so a stale cache (e.g. edited on another page in another tab) can't
+  // silently drop a device from the exported file.
+  const { refetch: refetchShiftLights } = useQuery(GET_SHIFT_LIGHTS);
+  const { refetch: refetchLeds } = useQuery(GET_LEDS);
+  const { refetch: refetchSimWind } = useQuery(GET_SIM_WINDS);
 
   const dspEnabled: boolean = (myData as any)?.my?.settings?.shakerDspEnabled ?? false;
   const audioSinks: AudioSinkInfo[] = (sinksData as any)?.getAudioSinks ?? [];
@@ -457,7 +428,16 @@ const ShakerMatrix: React.FC<{ profileId?: string | null }> = ({ profileId = nul
   const handleExport = async () => {
     setExportStatus('Exporting…');
     try {
-      await writeConfig({ variables: { config: buildConfigText(records, shakerChannels, dspEnabled) } });
+      const [shiftLightsRes, ledsRes, simWindRes] = await Promise.all([refetchShiftLights(), refetchLeds(), refetchSimWind()]);
+      const config = buildFullMonocoqueConfig({
+        shakerRecords: records,
+        shakerChannels,
+        dspEnabled,
+        shiftLights: ((shiftLightsRes.data as any)?.getMonocoqueShiftLights ?? []).filter((r: ShiftLightRec) => (r.profileId ?? null) === null),
+        ledsDevices: ((ledsRes.data as any)?.getMonocoqueLedsDevices ?? []).filter((r: LedsDeviceRec) => (r.profileId ?? null) === null),
+        simWindDevices: ((simWindRes.data as any)?.getMonocoqueSimWindDevices ?? []).filter((r: SimWindDeviceRec) => (r.profileId ?? null) === null),
+      });
+      await writeConfig({ variables: { config } });
       setExportStatus('Exported.');
     } catch (e: any) {
       setExportStatus(`Error: ${e?.message ?? e}`);
