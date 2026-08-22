@@ -7,6 +7,15 @@ export interface Photo360Handle {
 
 interface Props {
   photoUrl: string;
+  // Optional second (night) equirectangular photo, blended with `photoUrl`
+  // on ONE mesh/material/WebGL context via a custom shader (see the
+  // onBeforeCompile hook below) rather than layering two full Photo360Viewer
+  // instances — see this file's own top-of-GL-setup-effect comment for why
+  // context count matters (a real, browser-capped GPU resource). `nightAmount`
+  // (0=day, 1=night) drives the blend; changes are smoothed with a ~2.5s
+  // ease in the render loop, matching the CSS crossfade this replaced.
+  nightPhotoUrl?: string;
+  nightAmount?: number;
   yaw: number;
   pitch: number;
   fov: number;
@@ -39,7 +48,7 @@ const SWAY_YAW_DEG_PER_G   = 1.5;
 const SWAY_PITCH_DEG_PER_G = 0.75;
 
 const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
-  photoUrl, yaw, pitch, fov, roll, displayWidth, displayHeight, onChange, readOnly = false,
+  photoUrl, nightPhotoUrl, nightAmount = 0, yaw, pitch, fov, roll, displayWidth, displayHeight, onChange, readOnly = false,
   telemetryData, swayEnabled = false, swayGainX = 1, swayGainY = 1, swayDisableX = false, swayDisableY = false,
   onLoaded,
 }, ref) => {
@@ -48,8 +57,21 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
   const cameraRef   = useRef<THREE.PerspectiveCamera | null>(null);
   const sceneRef    = useRef<THREE.Scene | null>(null);
   const materialRef = useRef<THREE.MeshBasicMaterial | null>(null);
-  const stateRef    = useRef({ yaw, pitch, fov, roll, displayWidth, displayHeight });
-  stateRef.current  = { yaw, pitch, fov, roll, displayWidth, displayHeight };
+  // Populated by the material's onBeforeCompile hook below, once the shader
+  // actually compiles — the nightMap/mixAmount uniforms it injects live here,
+  // not on the material itself (see the GL-setup effect's comment on why
+  // this is one material/context instead of two layered viewers).
+  const shaderRef   = useRef<THREE.WebGLProgramParametersWithUniforms | null>(null);
+  const mixAmountRef = useRef(0);
+  // Decouples "night texture finished loading" from "shader finished
+  // compiling" — both happen asynchronously and in no guaranteed order (the
+  // shader only actually compiles on Three's first render of this material,
+  // one requestAnimationFrame after mount; a texture can load before or
+  // after that). The render loop reconciles both every frame instead of
+  // either side waiting on the other.
+  const nightTextureRef = useRef<THREE.Texture | null>(null);
+  const stateRef    = useRef({ yaw, pitch, fov, roll, displayWidth, displayHeight, nightAmount });
+  stateRef.current  = { yaw, pitch, fov, roll, displayWidth, displayHeight, nightAmount };
   const dragRef     = useRef<{ startX: number; startY: number; startYaw: number; startPitch: number } | null>(null);
 
   const telemetryRef = useRef(telemetryData);
@@ -95,6 +117,32 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
     // synchronously in the same effect-flush, before the first
     // requestAnimationFrame paints.
     const material = new THREE.MeshBasicMaterial();
+    // Always attached (even when this instance never ends up with a
+    // nightPhotoUrl) so the shader's *capability* to blend a second texture
+    // is baked in from the one-time compile — mixAmount just stays 0 (day
+    // texel only) when unused. Built on top of Three's own map_fragment
+    // chunk (via onBeforeCompile) rather than a from-scratch ShaderMaterial,
+    // so tone-mapping/color-space handling stays exactly what
+    // MeshBasicMaterial already gets right, instead of reimplementing it.
+    material.onBeforeCompile = (shader) => {
+      shader.uniforms.nightMap = { value: null };
+      shader.uniforms.mixAmount = { value: 0 };
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          '#include <common>',
+          '#include <common>\nuniform sampler2D nightMap;\nuniform float mixAmount;',
+        )
+        .replace(
+          '#include <map_fragment>',
+          `#ifdef USE_MAP
+            vec4 dayTexel = texture2D( map, vMapUv );
+            vec4 nightTexel = texture2D( nightMap, vMapUv );
+            vec4 sampledDiffuseColor = mix( dayTexel, nightTexel, mixAmount );
+            diffuseColor *= sampledDiffuseColor;
+          #endif`,
+        );
+      shaderRef.current = shader;
+    };
     materialRef.current = material;
     const sphere = new THREE.Mesh(geometry, material);
     scene.add(sphere);
@@ -105,8 +153,12 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
     const sway = { yaw: 0, pitch: 0 };
     let lastWidth = displayWidth;
     let lastHeight = displayHeight;
+    let lastFrameTime = performance.now();
     const render = () => {
       rafId = requestAnimationFrame(render);
+      const now = performance.now();
+      const dtMs = now - lastFrameTime;
+      lastFrameTime = now;
       // Skip actual render work while this tab is backgrounded. Two or
       // more tabs each running a continuous WebGL render loop (e.g. a
       // kiosk tab and this car's own live-preview tab) compete for
@@ -148,6 +200,28 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
         );
         cameraRef.current.quaternion.setFromEuler(euler);
       }
+
+      // Time-based exponential smoothing toward the target nightAmount —
+      // replaces the old `opacity 2.5s ease` CSS transition (this now
+      // drives a single shader uniform instead of two layered elements'
+      // opacity). tau chosen so ~3*tau ≈ 2.5s (the old transition's
+      // duration), i.e. ~95% converged by then. Target is forced to 0 when
+      // there's no real night texture (nightTextureRef null) — sampling an
+      // unbound `nightMap` uniform resolves to black in WebGL, so without
+      // this guard the day photo would visibly fade toward solid black as
+      // mixAmount ramped up for a car/dashboard with no night photo at all.
+      // The 0.95 cap (matching the flat CSS night overlay in Canvas.tsx/
+      // DashPanEditor.tsx) means full night never fully replaces the day
+      // texture even when a real night photo exists.
+      if (shaderRef.current) {
+        const tauMs = 830;
+        const smoothing = 1 - Math.exp(-dtMs / tauMs);
+        const target = nightTextureRef.current ? stateRef.current.nightAmount * 0.95 : 0;
+        mixAmountRef.current = lerp(mixAmountRef.current, target, smoothing);
+        shaderRef.current.uniforms.mixAmount.value = mixAmountRef.current;
+        shaderRef.current.uniforms.nightMap.value = nightTextureRef.current;
+      }
+
       renderer.render(scene, cameraRef.current!);
     };
     render();
@@ -164,6 +238,7 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
       sceneRef.current = null;
       cameraRef.current = null;
       materialRef.current = null;
+      shaderRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -191,6 +266,31 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
       texture.dispose();
     };
   }, [photoUrl, glGeneration]);
+
+  // Same shape as the day-texture effect above, targeting nightTextureRef
+  // (synced into the shader's nightMap uniform every frame — see the render
+  // loop) instead of material.map directly. onLoaded isn't re-fired here:
+  // its contract ("first frame ready") is already satisfied by the day
+  // texture, which is always present; the night layer loading in is a
+  // continuation, not a first paint.
+  useEffect(() => {
+    if (!nightPhotoUrl) {
+      nightTextureRef.current = null;
+      return;
+    }
+    // Assigned synchronously, same as the day-texture effect — leaving
+    // nightTextureRef null until the image data finishes loading would mean
+    // the shader samples a null nightMap uniform whenever mixAmount is
+    // already nonzero at mount (e.g. loading straight into night mode).
+    const texture = new THREE.TextureLoader().load(nightPhotoUrl);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    nightTextureRef.current = texture;
+
+    return () => {
+      if (nightTextureRef.current === texture) nightTextureRef.current = null;
+      texture.dispose();
+    };
+  }, [nightPhotoUrl, glGeneration]);
 
   useImperativeHandle(ref, () => ({
     capture: async (captureWidth: number, captureHeight: number): Promise<string> => {
