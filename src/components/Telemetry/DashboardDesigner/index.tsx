@@ -18,6 +18,7 @@ import { useGlobalNightMode, NightModeFeedProvider } from '../useGlobalNightMode
 import { useGlobalPreviewCar, PreviewCarFeedProvider } from '../useGlobalPreviewCar';
 import { GET_CARS, parseCarIds, CarRecord } from '../carQueries';
 import { GET_CAR_DASH_PANS, CAR_DASH_PAN_CHANGED } from '../carDashPanQueries';
+import { useHealthPoll } from '../../../graphql/health';
 import { DashboardConfig, ComponentNode } from '../../../types/dashboard';
 import {
   findNodeById,
@@ -71,6 +72,18 @@ const MOBILE_BREAKPOINT = 768;
 const MIN_EXPLORER_HEIGHT = 120;
 const MAX_EXPLORER_HEIGHT = 600;
 const DEFAULT_EXPLORER_HEIGHT = 280;
+
+// Telemetry's `values` record is flat (string -> number), so a one-level
+// key comparison is enough — no need for a general deep-equal utility.
+function shallowEqualRecord(a: Record<string, number>, b: Record<string, number>): boolean {
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  if (aKeys.length !== bKeys.length) return false;
+  for (const key of aKeys) {
+    if (a[key] !== b[key]) return false;
+  }
+  return true;
+}
 
 const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
   const navigate = useNavigate();
@@ -217,7 +230,7 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
   // useGlobalNightMode.ts/useGlobalPreviewCar.ts's doc comments for why a
   // second always-on subscription on the same page is a real bug here
   // (browser per-origin HTTP connection exhaustion hung unrelated mutations).
-  const { isNight, nightAmount, simTimeMs, toggleNightMode, feed: nightModeFeed } = useGlobalNightMode();
+  const { isNight, nightAmount, simTimeMs, toggleNightMode, feed: nightModeFeed } = useGlobalNightMode(undefined, { liveClock: kioskMode });
   const { previewCarId, feed: previewCarFeed } = useGlobalPreviewCar();
 
   const { data: carsData } = useQuery(GET_CARS, {
@@ -250,6 +263,18 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
     simStatus,
   );
 
+  // computeTelemetryValues builds a brand-new `values` object on every call
+  // (even `{}` when there's no live frame at all), so calling setLiveValues
+  // unconditionally at the subscription's ~60Hz tick rate committed a new
+  // object reference every single tick regardless of whether any value
+  // actually changed — a permanent, edit-mode-and-kiosk-mode-agnostic
+  // re-render source for the whole DashboardDesigner tree. setCar/
+  // setSimStatus don't have this problem (React already bails out of a
+  // state update when the new value is a primitive `Object.is`-equal to the
+  // old one), only the object-valued `values` does. liveValuesRef mirrors
+  // the last *committed* values so this can compare-before-set without
+  // depending on stale closure state inside this useCallback.
+  const liveValuesRef = useRef<Record<string, number>>({});
   const handleSubscriptionData = useCallback(({ data }: any) => {
     const event = (data.data as any)?.dashboardUpdates;
     if (!event) return;
@@ -257,20 +282,43 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
     if (typename === 'DashboardEntryChanged') handleDashboardUpdate(event);
     else if (typename === 'DashTemplateChanged') refetchTemplates();
     else if (typename === 'DeviceDefaultChanged' && kioskMode) handleDeviceDefaultEvent(event);
-    else if (typename === 'TelemetryEvent') {
+    else if (typename === 'TelemetryEvent' && kioskMode) {
+      // Not consumed at all while editing — baseTelemetry (below) only reads
+      // liveValues when `kioskMode && kioskSweepDone`; the editor always
+      // shows playbackData (manual/sweep test data) instead. So this ~60Hz
+      // event stream has zero visual purpose in edit mode, only a 60Hz
+      // re-render cost — skip touching state for it entirely there rather
+      // than computing-and-discarding a value nothing reads.
       const { values, car: c, simStatus: s } = computeTelemetryValues(event.frame);
-      setLiveValues(values);
+      if (!shallowEqualRecord(liveValuesRef.current, values)) {
+        liveValuesRef.current = values;
+        setLiveValues(values);
+      }
       setCar(c);
       setSimStatus(s);
     }
   }, [handleDashboardUpdate, refetchTemplates, handleDeviceDefaultEvent, kioskMode]);
 
+  // A backend restart (e.g. a dev-mode rebuild) breaks the underlying
+  // multipart HTTP stream this subscription runs over — Apollo surfaces
+  // that as onError and does NOT auto-retry, so without this the active
+  // dashboard's telemetry/live-update feed would stay dead until a manual
+  // reload (confirmed by user report). `subscriptionDown` toggles `skip` to
+  // tear the subscription down the moment it errors, then `useHealthPoll`
+  // brings it back the moment the server actually answers again — plain
+  // exponential-less retry-on-error would just error again identically
+  // while the server is still down.
+  const [subscriptionDown, setSubscriptionDown] = useState(false);
+  useHealthPoll(subscriptionDown, () => setSubscriptionDown(false));
+
   // Skip until dashboard is loaded — avoids a useSyncExternalStore commit during
   // the initial mount burst when Apollo is already processing multiple queries.
   useSubscription(DASHBOARD_UPDATES_SUB, {
     fetchPolicy: 'no-cache',
-    skip: !dashboard,
+    skip: !dashboard || subscriptionDown,
+    variables: { includeTelemetry: kioskMode },
     onData: handleSubscriptionData,
+    onError: () => setSubscriptionDown(true),
   });
 
   const resizingRef = useRef(false);

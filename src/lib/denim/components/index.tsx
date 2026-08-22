@@ -16,6 +16,7 @@ import Splashscreen from "./Splashscreen";
 import { IMy } from "../lib/queries";
 import dispatcher from "../lib/queries";
 import IconSVG, { IconProps } from "../logo";
+import { useHealthPoll } from "../../../graphql/health";
 
 const THEME_CACHE_KEY = 'denim-theme';
 
@@ -90,8 +91,21 @@ const App: React.FC<Props> = ({
   Controls,
   ExternalApps
 }) => {
-  const { loading, data } : { loading?: boolean, data?: IMy } = useQuery(dispatcher.my);
+  const myResult: any = useQuery(dispatcher.my);
+  const { loading, data } : { loading?: boolean, data?: IMy } = myResult;
+  const refetch: () => void = myResult.refetch;
   const settings = (data && data.my && data.my.settings) || {};
+
+  // Covers two related startup/reconnect races: the native app's frontend
+  // webview loading before the Tauri-managed backend has finished starting
+  // (this initial `my` fetch fails outright, `loading` settles to false with
+  // no data, and nothing would ever retry it on its own — splash screen
+  // stuck forever), and a client sitting on a non-dashboard page whose
+  // connection drops mid-session for any reason. Only active once the fetch
+  // has actually *finished* failing (`!loading && !data`), not during the
+  // normal brief initial loading state.
+  const stuckOnSplash = !loading && !data;
+  useHealthPoll(stuckOnSplash, () => { refetch(); });
   // Bumped after every setTheme() call below to force one more render pass
   // — see the effect's own comment for why this is necessary, not optional.
   const [, forceRerender] = React.useReducer((n: number) => n + 1, 0);
@@ -136,7 +150,7 @@ const App: React.FC<Props> = ({
   }, [loading, data, settings.theme, settings.fontSize]);
 
   if (loading || !data) {
-    return <Splashscreen Icon={Logo} />;
+    return <Splashscreen Icon={Logo} statusText={stuckOnSplash ? 'Waiting for server…' : undefined} />;
   }
   const style = getStyle();
   return (

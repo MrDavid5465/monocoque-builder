@@ -193,8 +193,8 @@ export const TEMPLATE_CHANGED_SUB = gql`
 `;
 
 export const DASHBOARD_UPDATES_SUB = gql`
-  subscription dashboardUpdates {
-    dashboardUpdates {
+  subscription dashboardUpdates($includeTelemetry: Boolean) {
+    dashboardUpdates(includeTelemetry: $includeTelemetry) {
       ... on DashboardEntryChanged {
         operationName
         value {

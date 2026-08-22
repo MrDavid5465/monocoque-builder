@@ -10,6 +10,7 @@ import {
   UPDATE_NIGHT_MODE,
 } from './nightModeQueries';
 import { computeEffectiveNightState, computeToggleDeltaMinutes } from './dayNightSim';
+import { useHealthPoll } from '../../graphql/health';
 
 export interface NightModeLiveFeed {
   record: NightModeRecord | undefined;
@@ -66,7 +67,7 @@ export const NightModeFeedProvider = NightModeFeedContext.Provider;
 // provider ancestor is present does this fall back to opening its own
 // subscription — correct for a lone consumer like Cars/DashPanEditor, or
 // DayNightSimPanel rendered from the standalone Settings modal.
-export function useGlobalNightMode(externalFeed?: NightModeLiveFeed): {
+export function useGlobalNightMode(externalFeed?: NightModeLiveFeed, opts?: { liveClock?: boolean }): {
   isNight: boolean;
   nightAmount: number;
   simEnabled: boolean;
@@ -75,6 +76,26 @@ export function useGlobalNightMode(externalFeed?: NightModeLiveFeed): {
   setSimActive: (active: boolean) => void;
   feed: NightModeLiveFeed;
 } {
+  // Defaults to true (unthrottled) for every existing caller (DayNightSimPanel,
+  // Cars/DashPanEditor) — DashboardDesigner/index.tsx is the one caller that
+  // passes false while editing (kioskMode === false). See the onData handler
+  // below for why: at the root of the page, ~60Hz simTimeMs churn cascades
+  // into a re-render of the ENTIRE editor tree (ObjectExplorer included) on
+  // every tick, since simTimeMs lives in this hook's own React state, not a
+  // context only actual consumers subscribe to. That's harmless in kiosk/live
+  // view (nothing else is competing for renders), but combined with the many
+  // simultaneous <Form> instances the dashboard-root properties panel mounts,
+  // it was enough nested-update volume within one synchronous batch to trip
+  // React's "Maximum update depth exceeded" heuristic — reproduced live by
+  // just opening that panel, with or without any clock component present.
+  // Nothing in edit mode actually needs a live-ticking value: clock nodes
+  // show a static "00:00" placeholder while !kioskMode (see ClockTextNode/
+  // ClockSpriteNode), and the gear-icon popup only ever renders in kiosk mode
+  // (Canvas.tsx's nightModeButton gate) — so simply not updating simTimeMs
+  // more than once (via the snapshot query below) is both sufficient and
+  // correct here, not just a workaround.
+  const liveClock = opts?.liveClock ?? true;
+
   const { data } = useQuery(GET_NIGHT_MODES, { fetchPolicy: 'cache-and-network' });
   const [addNightMode] = useMutation(ADD_NIGHT_MODE);
   const [updateNightMode] = useMutation(UPDATE_NIGHT_MODE);
@@ -100,8 +121,28 @@ export function useGlobalNightMode(externalFeed?: NightModeLiveFeed): {
     skip: feed !== undefined,
   });
 
+  // Skipped entirely (not just ignored) while !liveClock — merely ignoring
+  // NightClockTick events in onData still leaves the subscription open, and
+  // Apollo notifies (re-renders) every subscribed component for EVERY
+  // incoming message regardless of what onData does with it, since that
+  // notification happens inside Apollo's own useSyncExternalStore-based
+  // store layer, not react state this component controls. At the server's
+  // ~60Hz clock tick rate that was still enough incoming-message volume to
+  // trip React's nested-update limit on its own. The tradeoff: a manual
+  // night-mode toggle from another client won't live-update while editing
+  // (falls back to the one-shot GET_NIGHT_MODES query's `queried` value,
+  // refreshed on mount) — acceptable, since edit mode already only shows a
+  // static preview, not a value anything needs to track live.
+  // Auto-reconnect on a backend restart — same rationale/mechanism as
+  // DashboardDesigner/index.tsx's DASHBOARD_UPDATES_SUB: Apollo doesn't
+  // retry a subscription whose underlying stream errored, so without this
+  // the day/night dimming would freeze at its last value until a manual
+  // reload once the server comes back.
+  const [subscriptionDown, setSubscriptionDown] = useState(false);
+  useHealthPoll(subscriptionDown, () => setSubscriptionDown(false));
+
   useSubscription(NIGHT_MODE_UPDATES, {
-    skip: feed !== undefined,
+    skip: feed !== undefined || !liveClock || subscriptionDown,
     onData: ({ data }: any) => {
       const event = data.data?.nightModeUpdates;
       if (!event) return;
@@ -111,6 +152,7 @@ export function useGlobalNightMode(externalFeed?: NightModeLiveFeed): {
         setOwnSimTimeMs(event.simTimeMs);
       }
     },
+    onError: () => setSubscriptionDown(true),
   });
 
   const live = feed ? feed.record : ownLive;

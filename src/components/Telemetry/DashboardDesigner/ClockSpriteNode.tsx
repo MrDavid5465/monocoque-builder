@@ -11,6 +11,7 @@ interface ClockSpriteNodeProps {
   spriteUrl: (file: string) => string;
   registerCounterRotate: (id: string, el: HTMLDivElement | null, steerMaxDeg: number | undefined, rotationDeg: number | undefined) => void;
   childEls: React.ReactNode;
+  kioskMode: boolean;
 }
 
 // Renders the current time as individually-cropped sprite-sheet cells — the
@@ -20,34 +21,41 @@ interface ClockSpriteNodeProps {
 // why real-time mode ticks its own timer, and why simulated mode throttles
 // its display to whole-second updates instead of re-rendering on every ~60Hz
 // tick push.
-const ClockSpriteNode: React.FC<ClockSpriteNodeProps> = ({ node, nodeAbsX, nodeAbsY, isSelected, spriteUrl, registerCounterRotate, childEls }) => {
+const ClockSpriteNode: React.FC<ClockSpriteNodeProps> = ({ node, nodeAbsX, nodeAbsY, isSelected, spriteUrl, registerCounterRotate, childEls, kioskMode }) => {
   const isSimulated = node.clockSource === 'simulated';
   // Read via Context, not a prop — see clockTimeContext.ts's doc comment.
   const simTimeMs = useContext(ClockTimeContext);
 
   const [realNowMs, setRealNowMs] = useState(() => Date.now());
   useEffect(() => {
-    if (isSimulated) return;
+    // Don't tick outside kiosk/live view — see ClockTextNode's matching
+    // effect for why (Maximum update depth exceeded while editing).
+    if (!kioskMode || isSimulated) return;
     const id = setInterval(() => setRealNowMs(Date.now()), 1000);
     return () => clearInterval(id);
-  }, [isSimulated]);
+  }, [kioskMode, isSimulated]);
 
   const [simDisplayMs, setSimDisplayMs] = useState(() => simTimeMs ?? Date.now());
   useEffect(() => {
-    if (!isSimulated || simTimeMs == null) return;
+    if (!kioskMode || !isSimulated || simTimeMs == null) return;
     setSimDisplayMs(prev => (Math.floor(simTimeMs / 1000) !== Math.floor(prev / 1000) ? simTimeMs : prev));
-  }, [isSimulated, simTimeMs]);
+  }, [kioskMode, isSimulated, simTimeMs]);
 
-  const nowMs = isSimulated ? simDisplayMs : realNowMs;
   const format = node.clockFormat ?? '24h';
-  const { hour, minute, second } = computeClockParts(nowMs, isSimulated, format);
-  const hh = format === '12h' ? String(hour) : String(hour).padStart(2, '0');
-  const mm = String(minute).padStart(2, '0');
-  const ss = String(second).padStart(2, '0');
-  // No AM/PM suffix here — an arbitrary sprite sheet isn't guaranteed to
-  // have AM/PM glyphs (see clock-sprite/schema.ts's clockFormat field
-  // comment); use clock-text if that distinction needs to be visible.
-  const display = `${hh}:${mm}${node.showSeconds ? `:${ss}` : ''}`;
+  let display: string;
+  if (!kioskMode) {
+    display = '00:00';
+  } else {
+    const nowMs = isSimulated ? simDisplayMs : realNowMs;
+    const { hour, minute, second } = computeClockParts(nowMs, isSimulated, format);
+    const hh = format === '12h' ? String(hour) : String(hour).padStart(2, '0');
+    const mm = String(minute).padStart(2, '0');
+    const ss = String(second).padStart(2, '0');
+    // No AM/PM suffix here — an arbitrary sprite sheet isn't guaranteed to
+    // have AM/PM glyphs (see clock-sprite/schema.ts's clockFormat field
+    // comment); use clock-text if that distinction needs to be visible.
+    display = `${hh}:${mm}${node.showSeconds ? `:${ss}` : ''}`;
+  }
 
   if (!node.charWidth || !node.charHeight) {
     // Unconfigured character grid — nothing sensible to crop yet, matches

@@ -227,18 +227,43 @@ impl SubscriptionRoot {
         Ok(select(s1, s2))
     }
 
-    async fn dashboard_updates(&self) -> impl Stream<Item = DashboardUpdateEvent> {
+    /// `includeTelemetry` defaults to true (unchanged behavior for kiosk/
+    /// live view). The dashboard designer passes false while editing — it
+    /// has no use for a live telemetry frame there (its preview data comes
+    /// from PlaybackPanel's manual/sweep test values instead, see
+    /// DashboardDesigner/index.tsx's `baseTelemetry`), and merely receiving
+    /// this ~60Hz stream (even with the frontend ignoring its payload) was
+    /// enough incoming-message volume on its own to trip React's nested-
+    /// update limit in the editor — confirmed live, independent of night
+    /// mode or any other subscription. This can't just be left to the
+    /// frontend's `skip` option because s1/s2/s3 (dashboard/template/
+    /// device-default change events) still need to stay live while editing;
+    /// only the telemetry sub-stream needs to be conditionally excluded
+    /// from this merged subscription, not the whole thing.
+    async fn dashboard_updates(
+        &self,
+        #[graphql(default = true)] include_telemetry: bool,
+    ) -> impl Stream<Item = DashboardUpdateEvent> {
         let s1 =
             TypiQLBroker::<DashboardEntryChanged>::subscribe().map(DashboardUpdateEvent::Dashboard);
         let s2 =
             TypiQLBroker::<DashTemplateChanged>::subscribe().map(DashboardUpdateEvent::Template);
         let s3 = TypiQLBroker::<DeviceDefaultChanged>::subscribe()
             .map(DashboardUpdateEvent::DeviceDefault);
-        let s4 = IntervalStream::new(tokio::time::interval(Duration::from_millis(16))).map(|_| {
-            DashboardUpdateEvent::Telemetry(TelemetryEvent {
-                frame: current_frame(),
-            })
-        });
+        let s4: std::pin::Pin<Box<dyn Stream<Item = DashboardUpdateEvent> + Send>> =
+            if include_telemetry {
+                Box::pin(
+                    IntervalStream::new(tokio::time::interval(Duration::from_millis(16))).map(
+                        |_| {
+                            DashboardUpdateEvent::Telemetry(TelemetryEvent {
+                                frame: current_frame(),
+                            })
+                        },
+                    ),
+                )
+            } else {
+                Box::pin(futures_util::stream::empty())
+            };
         select(s4, select(s1, select(s2, s3)))
     }
 }

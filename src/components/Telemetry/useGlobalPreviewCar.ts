@@ -7,6 +7,7 @@ import {
   PREVIEW_CAR_CHANGED,
   PreviewCarRecord,
 } from './previewCarQueries';
+import { useHealthPoll } from '../../graphql/health';
 
 // Wrapped in an object (rather than passing `PreviewCarRecord | undefined`
 // directly) so "a feed is being provided, but no record has arrived over it
@@ -60,12 +61,18 @@ export function useGlobalPreviewCar(externalFeed?: PreviewCarLiveFeed): { previe
 
   const [ownLive, setOwnLive] = useState<PreviewCarRecord | undefined>(undefined);
 
+  // Auto-reconnect on a backend restart — same rationale as
+  // useGlobalNightMode's matching subscription.
+  const [subscriptionDown, setSubscriptionDown] = useState(false);
+  useHealthPoll(subscriptionDown, () => setSubscriptionDown(false));
+
   useSubscription(PREVIEW_CAR_CHANGED, {
-    skip: feed !== undefined,
+    skip: feed !== undefined || subscriptionDown,
     onData: ({ data }: any) => {
       const value = data.data?.previewCarChanged?.value;
       if (value) setOwnLive(value);
     },
+    onError: () => setSubscriptionDown(true),
   });
 
   const live = feed ? feed.record : ownLive;

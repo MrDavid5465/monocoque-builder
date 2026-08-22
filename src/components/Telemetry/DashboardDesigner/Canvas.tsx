@@ -1153,6 +1153,7 @@ const NodeRenderer: React.FC<NodeRendererProps> = ({
           node={node} nodeAbsX={nodeAbsX} nodeAbsY={nodeAbsY}
           isSelected={isSelected}
           registerCounterRotate={registerCounterRotate} childEls={childEls}
+          kioskMode={kioskMode}
         />
         {overlay}
       </>
@@ -1165,6 +1166,7 @@ const NodeRenderer: React.FC<NodeRendererProps> = ({
           node={node} nodeAbsX={nodeAbsX} nodeAbsY={nodeAbsY}
           isSelected={isSelected} spriteUrl={spriteUrl}
           registerCounterRotate={registerCounterRotate} childEls={childEls}
+          kioskMode={kioskMode}
         />
         {overlay}
       </>
