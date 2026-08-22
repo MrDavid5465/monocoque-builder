@@ -22,7 +22,8 @@ pub use track_geocode::TrackGeocodeQuery;
 use crate::telemetry::recording as telemetry_recording;
 use crate::telemetry::{build_frame, read_simdata, types::TelemetryFrame};
 use crate::typiql_types::{
-    DashTemplateChanged, DashboardEntryChanged, DeviceDefaultChanged, NightModeChanged,
+    CarDashPanChanged, DashTemplateChanged, DashboardEntryChanged, DeviceDefaultChanged,
+    NightModeChanged, PreviewCarChanged,
 };
 use async_graphql::{Context, Object, SimpleObject, Subscription};
 use futures_util::stream::{select, Stream, StreamExt};
@@ -58,6 +59,24 @@ enum DashboardUpdateEvent {
     Template(DashTemplateChanged),
     DeviceDefault(DeviceDefaultChanged),
     Telemetry(TelemetryEvent),
+    // NightMode/NightClock/PreviewCar/CarDashPan folded in below so a
+    // window showing a dashboard needs only ONE persistent subscription
+    // instead of four (this one plus standalone night_mode_updates/
+    // previewCarChanged/carDashPanChanged) — see dashboard_updates' own doc
+    // comment for why that count matters. The standalone subscriptions
+    // still exist unchanged for consumers that aren't DashboardDesigner
+    // (Cars/DashPanEditor's lone useGlobalNightMode() call, Cars/CarDetail's
+    // lone useGlobalPreviewCar() call) — this is an additional way to reach
+    // the same events, not a replacement.
+    NightMode(NightModeChanged),
+    NightClock(NightClockTick),
+    PreviewCar(PreviewCarChanged),
+    CarDashPan(CarDashPanChanged),
+    // Replaces Controls.tsx's old 1s recordingStatus poll (fired from every
+    // mounted window, since Controls is on the always-present nav bar) — see
+    // publish_recording_status' own doc comment for where this gets
+    // published from.
+    Recording(RecordingStatus),
 }
 
 /// One tick of the server-authoritative simulated in-game clock (see
@@ -117,12 +136,34 @@ async fn night_clock_tick(adapter: &Arc<dyn TypiQLAdapter>) -> NightClockTick {
     }
 }
 
-#[derive(SimpleObject)]
+#[derive(SimpleObject, Clone)]
 pub struct RecordingStatus {
     pub is_recording: bool,
     pub is_playing: bool,
     pub recording_id: Option<String>,
     pub playing_id: Option<String>,
+}
+
+impl RecordingStatus {
+    fn current() -> Self {
+        RecordingStatus {
+            is_recording: telemetry_recording::is_recording(),
+            is_playing: telemetry_recording::is_playing(),
+            recording_id: telemetry_recording::recording_id(),
+            playing_id: telemetry_recording::playing_id(),
+        }
+    }
+}
+
+/// `RecordingStatus` isn't a typiql CRUD type (recording/playback state
+/// lives in `telemetry::recording`'s in-process statics, not an adapter
+/// table), so unlike NightModeChanged/CarDashPanChanged there's no stock
+/// mutation to auto-publish it — `RecordingControlMutation`'s hand-written
+/// resolvers (`recording.rs`) call this explicitly after each state change,
+/// same manual-publish requirement documented on `night_clock.rs`'s own
+/// mutations.
+pub fn publish_recording_status() {
+    TypiQLBroker::publish(RecordingStatus::current());
 }
 
 /// What every telemetry subscriber/query should currently see: a recorded
@@ -142,12 +183,7 @@ impl QueryRoot {
     }
 
     async fn recording_status(&self) -> RecordingStatus {
-        RecordingStatus {
-            is_recording: telemetry_recording::is_recording(),
-            is_playing: telemetry_recording::is_playing(),
-            recording_id: telemetry_recording::recording_id(),
-            playing_id: telemetry_recording::playing_id(),
-        }
+        RecordingStatus::current()
     }
 
     /// One-shot read of the current simulated-clock tick — same rationale
@@ -240,30 +276,77 @@ impl SubscriptionRoot {
     /// device-default change events) still need to stay live while editing;
     /// only the telemetry sub-stream needs to be conditionally excluded
     /// from this merged subscription, not the whole thing.
+    ///
+    /// `includeNightClock` is a SEPARATE flag, not reused from
+    /// includeTelemetry — a caller can legitimately want one without the
+    /// other (e.g. Cars/DashPanEditor, via the frontend hub in
+    /// liveUpdatesHub.tsx, wants the ~60Hz night-clock tick — it drives that
+    /// page's own day/night preview toggle — but never wants telemetry
+    /// frames at all, it's not a live dashboard). Defaults to true, matching
+    /// night_mode_updates' own unconditional behavior — DashboardDesigner is
+    /// the one caller that explicitly ties it to kioskMode, same as
+    /// includeTelemetry.
     async fn dashboard_updates(
         &self,
+        ctx: &Context<'_>,
         #[graphql(default = true)] include_telemetry: bool,
-    ) -> impl Stream<Item = DashboardUpdateEvent> {
-        let s1 =
-            TypiQLBroker::<DashboardEntryChanged>::subscribe().map(DashboardUpdateEvent::Dashboard);
-        let s2 =
-            TypiQLBroker::<DashTemplateChanged>::subscribe().map(DashboardUpdateEvent::Template);
+        #[graphql(default = true)] include_night_clock: bool,
+    ) -> async_graphql::Result<impl Stream<Item = DashboardUpdateEvent>> {
+        let adapter = default_adapter(ctx)?;
+
+        let s1 = TypiQLBroker::<DashboardEntryChanged>::subscribe()
+            .map(DashboardUpdateEvent::Dashboard)
+            .boxed();
+        let s2 = TypiQLBroker::<DashTemplateChanged>::subscribe()
+            .map(DashboardUpdateEvent::Template)
+            .boxed();
         let s3 = TypiQLBroker::<DeviceDefaultChanged>::subscribe()
-            .map(DashboardUpdateEvent::DeviceDefault);
+            .map(DashboardUpdateEvent::DeviceDefault)
+            .boxed();
         let s4: std::pin::Pin<Box<dyn Stream<Item = DashboardUpdateEvent> + Send>> =
             if include_telemetry {
-                Box::pin(
-                    IntervalStream::new(tokio::time::interval(Duration::from_millis(16))).map(
-                        |_| {
-                            DashboardUpdateEvent::Telemetry(TelemetryEvent {
-                                frame: current_frame(),
-                            })
-                        },
-                    ),
-                )
+                IntervalStream::new(tokio::time::interval(Duration::from_millis(16)))
+                    .map(|_| {
+                        DashboardUpdateEvent::Telemetry(TelemetryEvent {
+                            frame: current_frame(),
+                        })
+                    })
+                    .boxed()
             } else {
-                Box::pin(futures_util::stream::empty())
+                futures_util::stream::empty().boxed()
             };
-        select(s4, select(s1, select(s2, s3)))
+        // Same NightModeChanged/NightClockTick merge night_mode_updates does
+        // on its own — duplicated here (not derived from that subscription)
+        // since a GraphQL subscription field can't subscribe to another
+        // subscription field internally, only to the underlying
+        // TypiQLBroker streams both pull from.
+        let s5 = TypiQLBroker::<NightModeChanged>::subscribe()
+            .map(DashboardUpdateEvent::NightMode)
+            .boxed();
+        let s6: std::pin::Pin<Box<dyn Stream<Item = DashboardUpdateEvent> + Send>> =
+            if include_night_clock {
+                let adapter = adapter.clone();
+                IntervalStream::new(tokio::time::interval(Duration::from_millis(16)))
+                    .then(move |_| {
+                        let adapter = adapter.clone();
+                        async move { DashboardUpdateEvent::NightClock(night_clock_tick(&adapter).await) }
+                    })
+                    .boxed()
+            } else {
+                futures_util::stream::empty().boxed()
+            };
+        let s7 = TypiQLBroker::<PreviewCarChanged>::subscribe()
+            .map(DashboardUpdateEvent::PreviewCar)
+            .boxed();
+        let s8 = TypiQLBroker::<CarDashPanChanged>::subscribe()
+            .map(DashboardUpdateEvent::CarDashPan)
+            .boxed();
+        let s9 = TypiQLBroker::<RecordingStatus>::subscribe()
+            .map(DashboardUpdateEvent::Recording)
+            .boxed();
+
+        Ok(futures_util::stream::select_all([
+            s1, s2, s3, s4, s5, s6, s7, s8, s9,
+        ]))
     }
 }

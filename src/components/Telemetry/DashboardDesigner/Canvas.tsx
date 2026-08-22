@@ -7,7 +7,6 @@ import GifGaugeNode from './GifGaugeNode';
 import ArcGaugeFaceNode from './ArcGaugeFaceNode';
 import ClockTextNode from './ClockTextNode';
 import ClockSpriteNode from './ClockSpriteNode';
-import { ClockTimeContext } from './clockTimeContext';
 import TransformOverlay from './TransformOverlay';
 import CropOverlay from './CropOverlay';
 import DayNightSimPanel from '../DayNightSimPanel';
@@ -44,11 +43,6 @@ interface Props {
   // crossfade/glow; `isNight` above stays around for purely-binary bits
   // (the toolbar toggle icon, usingCarNightPhoto's photo selection).
   nightAmount?: number;
-  // Server-authoritative simulated clock, ms since epoch UTC — see
-  // useGlobalNightMode.ts. Only read by clock-text/clock-sprite nodes whose
-  // clockSource is 'simulated'; real-clock nodes ignore this and tick off
-  // their own local timer instead (see ClockTextNode/ClockSpriteNode).
-  simTimeMs?: number | null;
   onToggleNightMode?: () => void;
   forceNightPreview?: boolean;
   skipTransition?: boolean;
@@ -1179,8 +1173,17 @@ const NodeRenderer: React.FC<NodeRendererProps> = ({
 // ---------------------------------------------------------------------------
 // Canvas
 // ---------------------------------------------------------------------------
-const Canvas = forwardRef<CanvasHandle, Props>(({
-  dashboard, sprites, gamepadMappings = [], selectedId, onSelect, onUpdate, onUpdateDashboard, kioskMode, onKioskButton, isNight: isNightProp, nightAmount: nightAmountProp, simTimeMs, onToggleNightMode, forceNightPreview, skipTransition, telemetryData,
+// Memoized so the ~60Hz simTimeMs tick (delivered via ClockTimeContext from
+// outside, see index.tsx's canvasEl) doesn't force this whole node tree to
+// re-render on every tick — only ClockTextNode/ClockSpriteNode, the actual
+// context consumers, react to it. Without this, React's default behavior
+// (a re-rendered parent re-invokes every unmemoized child regardless of
+// whether its own props changed) meant every node on the dashboard —
+// gauges, sprites, everything — was reconciled 60x/sec purely because
+// index.tsx itself re-rendered from the clock tick, even before any
+// clock-text/clock-sprite node existed to make the resulting jank visible.
+const Canvas = React.memo(forwardRef<CanvasHandle, Props>(({
+  dashboard, sprites, gamepadMappings = [], selectedId, onSelect, onUpdate, onUpdateDashboard, kioskMode, onKioskButton, isNight: isNightProp, nightAmount: nightAmountProp, onToggleNightMode, forceNightPreview, skipTransition, telemetryData,
   kioskSweepActive = false,
   globalSteerMaxDeg, panBgMode, liveBackground, liveBackgroundInteractive, liveBackgroundIsNightPhoto, simStatus = '',
   onDragCommit, activeTool,
@@ -1269,6 +1272,7 @@ const Canvas = forwardRef<CanvasHandle, Props>(({
     const sway = { x: 0, y: 0, rot: 0 };
     let rafId: number;
     const tick = () => {
+      if (document.hidden) { rafId = requestAnimationFrame(tick); return; }
       const data   = telemetryDataRef.current;
       const active = neckFxRef.current && !hasLiveBackgroundRef.current;
       const gLat = active ? Math.max(-3, Math.min(3, data['gLat'] ?? 0)) : 0;
@@ -1536,7 +1540,7 @@ const Canvas = forwardRef<CanvasHandle, Props>(({
               position: 'absolute', inset: 0,
               zIndex: NIGHT_OVERLAY_Z,
               background: 'rgba(0, 0, 0, 0.850)',
-              opacity: nightAmount,
+              opacity: nightAmount * 0.95,
               transition: skipTransition ? undefined : 'opacity 2s ease',
               pointerEvents: 'none',
             }}
@@ -1575,11 +1579,9 @@ const Canvas = forwardRef<CanvasHandle, Props>(({
             />
           );
         })()}
-        <ClockTimeContext.Provider value={simTimeMs ?? null}>
-          {dashboard.components.map(node => (
-            <NodeRenderer key={node.id} node={node} absX={0} absY={0} {...nodeProps} />
-          ))}
-        </ClockTimeContext.Provider>
+        {dashboard.components.map(node => (
+          <NodeRenderer key={node.id} node={node} absX={0} absY={0} {...nodeProps} />
+        ))}
 
         <button
           onClick={e => { e.stopPropagation(); onKioskButton?.(); }}
@@ -1640,6 +1642,6 @@ const Canvas = forwardRef<CanvasHandle, Props>(({
       </div>
     </div>
   );
-});
+}));
 
 export default Canvas;

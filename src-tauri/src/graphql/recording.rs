@@ -244,6 +244,7 @@ impl RecordingControlMutation {
         };
         let created = resolve_add::<Recording>(ctx, entry).await?;
         rec::start(created.id.clone(), sample_rate_hz);
+        crate::graphql::publish_recording_status();
         Ok(created)
     }
 
@@ -255,6 +256,7 @@ impl RecordingControlMutation {
         let Some((id, frames)) = rec::stop() else {
             return Ok(None);
         };
+        crate::graphql::publish_recording_status();
 
         let Some(row_val) = adapter
             .get_one(Location::Named("recordings".into()), "id", &id)
@@ -329,11 +331,13 @@ impl RecordingControlMutation {
         let frames: Vec<TelemetryFrame> =
             recording_frames.into_iter().map(unflatten_frame).collect();
         rec::play(row.id.clone(), frames, row.sample_rate_hz);
+        crate::graphql::publish_recording_status();
         Ok(true)
     }
 
     async fn stop_playback(&self) -> bool {
         rec::stop_playback();
+        crate::graphql::publish_recording_status();
         true
     }
 

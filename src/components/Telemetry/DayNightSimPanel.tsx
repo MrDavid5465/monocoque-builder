@@ -120,11 +120,25 @@ const DayNightSimPanel: React.FC = () => {
   // linked to a Track Location yet) are shown here directly.
   const [computeDate, setComputeDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [computeError, setComputeError] = useState<string | null>(null);
+  // Bumped on every successful Compute-from-date call and folded into the
+  // config Form's `key` below — per-form's <Form> is uncontrolled and only
+  // reads `initialValues` at mount (see that Form's own comment), so the
+  // Sunrise/Sunset ComboBoxes otherwise kept showing whatever was on screen
+  // before the click even after `current.simSunrise`/`simSunset` updated
+  // via the mutation's response (same NightMode id, so the id-only key
+  // never changed). A plain user edit debounce-saving back through the
+  // subscription must NOT remount this Form (that would interrupt typing),
+  // which is why the key still isn't simply tied to simSunrise/simSunset
+  // directly — only this specific external, discrete action forces a fresh
+  // snapshot.
+  const [computeNonce, setComputeNonce] = useState(0);
   const handleComputeFromDate = () => {
     setComputeError(null);
-    setSunriseSunsetFromDate({ variables: { date: computeDate } }).catch((err: any) => {
-      setComputeError(err?.message ?? 'Failed to compute sunrise/sunset');
-    });
+    setSunriseSunsetFromDate({ variables: { date: computeDate } })
+      .then(() => setComputeNonce(n => n + 1))
+      .catch((err: any) => {
+        setComputeError(err?.message ?? 'Failed to compute sunrise/sunset');
+      });
   };
 
   // Reuses useGlobalNightMode's subscription for the live clock tick rather
@@ -132,7 +146,15 @@ const DayNightSimPanel: React.FC = () => {
   // that's not just a style preference (a second always-on subscription on
   // top of this one starved the browser's connection pool and hung
   // unrelated mutations).
-  const { simTimeMs } = useGlobalNightMode();
+  //
+  // tickThrottleMs: 1000 — this panel only ever displays simTimeMs as a
+  // "HH:MM" label (see below), so sub-second precision is thrown away
+  // anyway. Left unthrottled, the raw ~60Hz tick re-rendered this whole
+  // panel — including its two per-form <Form>s and their Fluent ComboBoxes
+  // — 60x/sec whenever the popup was open, which reproduced a real
+  // "Maximum update depth exceeded" warning (see useGlobalNightMode's own
+  // doc comment on tickThrottleMs for the live repro).
+  const { simTimeMs, hubSubscriber } = useGlobalNightMode(undefined, { tickThrottleMs: 1000 });
 
   const save = (update: Partial<NightModeRecord>) => {
     if (current?.id) {
@@ -229,6 +251,7 @@ const DayNightSimPanel: React.FC = () => {
 
   return (
     <Stack tokens={{ childrenGap: '0.77em' }} style={{ minWidth: 320 }}>
+      {hubSubscriber}
       <span style={{ fontSize: '0.78em', opacity: 0.65 }}>
         Since telemetry doesn't report the sim's own clock, the server tracks it for you — nudge it to match what's
         currently shown in-game, and every dashboard follows the same clock through a gradual dawn/dusk.
@@ -274,7 +297,7 @@ const DayNightSimPanel: React.FC = () => {
       <Separator />
 
       <Form
-        key={current ? `loaded-config-${current.id}` : 'loading-config'}
+        key={current ? `loaded-config-${current.id}-${computeNonce}` : 'loading-config'}
         form={configSchema}
         name="dayNightSimConfig"
         initialValues={configInitialValues}

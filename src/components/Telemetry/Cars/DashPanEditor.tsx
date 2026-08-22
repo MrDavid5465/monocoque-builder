@@ -212,7 +212,7 @@ const PanSession: React.FC<{
             <div style={{
               position: 'absolute', inset: 0,
               background: 'rgba(0, 0, 0, 0.850)',
-              opacity: nightAmount,
+              opacity: nightAmount * 0.95,
               transition: 'opacity 2s ease',
               pointerEvents: 'none',
             }} />
@@ -275,7 +275,7 @@ const DashPanEditor: React.FC<Props> = ({ carId, photoId, photoUrl, nightPhotoUr
   const theme = getTheme();
   const [selectedDashName, setSelectedDashName] = useState('');
   const [resetCounter, setResetCounter] = useState(0);
-  const { isNight, nightAmount, toggleNightMode } = useGlobalNightMode();
+  const { isNight, nightAmount, toggleNightMode, hubSubscriber } = useGlobalNightMode();
 
   const { data: dashData } = useQuery(GET_DASHBOARDS, { fetchPolicy: 'cache-and-network' });
   const { data: panData, refetch: refetchPans } = useQuery(GET_CAR_DASH_PANS, { fetchPolicy: 'cache-and-network' });
@@ -319,6 +319,7 @@ const DashPanEditor: React.FC<Props> = ({ carId, photoId, photoUrl, nightPhotoUr
 
   return (
     <Stack tokens={{ childrenGap: 8 }}>
+      {hubSubscriber}
       <Stack horizontal horizontalAlign="space-between" verticalAlign="start">
         <Stack tokens={{ childrenGap: 4 }}>
           <span style={{ fontWeight: 600, fontSize: '0.95em' }}>Per-Dashboard Pan</span>
