@@ -15,12 +15,20 @@ import {
   DatePicker,
   PrimaryButton,
   DefaultButton,
+  DirectionalHint,
 } from '@fluentui/react';
 import { format, parseISO } from 'date-fns';
 import { TyreGrid } from '../../../../components/shared/TyreGrid';
 interface IndexableObject {
   [key: string]: any;
 }
+// Used by the `timetoday` field's three hour/minute/AM-PM ComboBoxes.
+// Without an explicit directionalHint, Fluent's default auto-collision
+// logic picks a side based on available viewport space — inside a popup
+// already anchored to a screen corner (e.g. the Day/Night sim panel's
+// gear-icon Callout), there's little room below/above, so it was falling
+// back to opening sideways instead of the expected downward dropdown.
+const TIME_COMBO_CALLOUT_PROPS = { directionalHint: DirectionalHint.bottomLeftEdge, directionalHintFixed: true };
 const getStyle = () => {
   const theme = getTheme();
   return mergeStyleSets({
@@ -637,6 +645,7 @@ export default function Raw(props: any): ReactElement {
             <Label>{label}</Label>
             <Stack horizontal tokens={{ childrenGap: '0.77em' }}>
               <ComboBox
+                calloutProps={TIME_COMBO_CALLOUT_PROPS}
                 selectedKey={hour}
                 options={[
                   { key: -1, text: '' },
@@ -663,6 +672,7 @@ export default function Raw(props: any): ReactElement {
                 }}
               />
               <ComboBox
+                calloutProps={TIME_COMBO_CALLOUT_PROPS}
                 selectedKey={minute}
                 options={
                   rest.minuteOptions?.length > 0
@@ -686,6 +696,7 @@ export default function Raw(props: any): ReactElement {
                 }
               />
               <ComboBox
+                calloutProps={TIME_COMBO_CALLOUT_PROPS}
                 selectedKey={ampm}
                 options={[
                   { key: 'AM', text: 'AM' },
