@@ -1511,6 +1511,20 @@ const Canvas = forwardRef<CanvasHandle, Props>(({
           left: view.offsetX, top: view.offsetY,
           width: dashboard.canvasWidth, height: dashboard.canvasHeight,
           zoom: view.scale,
+          // Edit-mode-only — the canvas itself has no background color of its
+          // own (only whatever `dashboard.background` sprite/photo is set),
+          // so with none set it was rendering fully transparent over this
+          // panel's dark container, making the dashboard's actual edges
+          // invisible while laying it out. `outline` (not `border`) so it
+          // doesn't add to the box's own size — every child is positioned in
+          // absolute coordinates against `canvasWidth`/`canvasHeight`
+          // exactly, and a border would throw that off by 1px. Stripped
+          // back out of the captured image explicitly in
+          // captureCanvasScreenshot regardless (thumbnails should show the
+          // dashboard as kiosk/live view renders it, not this editor
+          // affordance), not relied on implicitly just because it's edit-
+          // mode-only here too.
+          outline: kioskMode ? undefined : '1px solid rgba(255, 255, 255, 0.3)',
         }}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
