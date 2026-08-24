@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { useMatch } from 'react-router-dom';
 import { useMutation, useQuery } from '@apollo/client/react';
 import { mergeStyles, keyframes } from '@fluentui/react';
@@ -6,6 +6,7 @@ import { useLiveTelemetry } from './useLiveTelemetry';
 import { REGISTER_CAR } from './clientsQueries';
 import { GET_KNOWN_CARS } from './Groups/queries';
 import { RECORDING_STATUS } from './Recordings/queries';
+import { LiveUpdatesContext, useHubListener, useLiveUpdatesHub } from './liveUpdatesHub';
 
 const blink = keyframes({
   '0%, 100%': { opacity: 1 },
@@ -70,12 +71,32 @@ const TelemetryControls: React.FC = () => {
   // recording/playing anywhere, not which one; per-recording pages use
   // recordingId/playingId themselves (RecordingChart) to tell "this one" vs
   // "some other one" apart.
-  const { data: statusData } = useQuery(RECORDING_STATUS, {
-    pollInterval: 1000,
-    fetchPolicy: 'network-only',
-  });
-  const isRecording = !!(statusData as any)?.recordingStatus?.isRecording;
-  const isPlaying = !!(statusData as any)?.recordingStatus?.isPlaying;
+  //
+  // One-shot preload (so the dot shows the real state immediately instead
+  // of "idle" until the hub's first push) plus live updates via the shared
+  // hub below — replaces the old 1s poll, which used to fire from every
+  // mounted window's nav bar simultaneously and was enough to noticeably
+  // lag a second window (each poll competing for the same ~6-connection
+  // per-origin budget the hub exists to protect).
+  const { data: statusData } = useQuery(RECORDING_STATUS, { fetchPolicy: 'cache-and-network' });
+  const [liveStatus, setLiveStatus] = useState<{ isRecording: boolean; isPlaying: boolean } | undefined>(undefined);
+
+  const contextHub = useContext(LiveUpdatesContext);
+  // Controls is rendered on the nav bar for every route, never nested
+  // inside DashboardDesigner's own <LiveUpdatesContext.Provider> (that's
+  // scoped to the dashboard-show route's tree) — so there's normally no
+  // ambient hub to pick up and this opens its own. `skip` still checks
+  // context first in case that ever changes.
+  const [ownHub, ownHubSubscriber] = useLiveUpdatesHub({ includeTelemetry: false, includeNightClock: false, skip: !!contextHub });
+  const hub = contextHub ?? ownHub;
+
+  const onRecordingChanged = useCallback((event: any) => {
+    setLiveStatus({ isRecording: !!event.isRecording, isPlaying: !!event.isPlaying });
+  }, []);
+  useHubListener(hub, 'RecordingStatus', onRecordingChanged);
+
+  const isRecording = liveStatus?.isRecording ?? !!(statusData as any)?.recordingStatus?.isRecording;
+  const isPlaying = liveStatus?.isPlaying ?? !!(statusData as any)?.recordingStatus?.isPlaying;
   const mode: DotMode = isRecording ? 'recording' : isPlaying ? 'playing' : isActive ? 'active' : 'idle';
 
   const [registerCar] = useMutation(REGISTER_CAR, {
@@ -90,7 +111,7 @@ const TelemetryControls: React.FC = () => {
     }
   }, [car, simStatus, onDashRoute, registerCar]);
 
-  return <StatusDot mode={mode} />;
+  return <>{ownHubSubscriber}<StatusDot mode={mode} /></>;
 };
 
 export default TelemetryControls;

@@ -53,6 +53,10 @@ pub fn applications() -> Vec<AppEntry> {
                     path: "recordings".into(),
                     text: "Recordings".into(),
                 },
+                AppLink {
+                    path: "tracks".into(),
+                    text: "Tracks".into(),
+                },
             ],
         },
         AppEntry {

@@ -3,10 +3,14 @@ import Photo360Viewer, { Photo360Handle } from './Photo360Viewer';
 
 interface Props {
   dayPhotoUrl: string;
-  // Undefined when this car has no night variant — falls back to a single
-  // static day viewer, no crossfade machinery at all.
+  // Undefined when this car has no night variant — Photo360Viewer just
+  // renders the day photo alone in that case (mixAmount never leaves 0).
   nightPhotoUrl?: string;
-  isNight: boolean;
+  // 0 = full day, 1 = full night, continuous — see dayNightSim.ts. A manual
+  // toggle produces a hard 0/1; Photo360Viewer's own render loop eases that
+  // into a smooth transition (see its onBeforeCompile/render-loop comments),
+  // the simulated clock produces a real ramp through dawn/dusk already.
+  nightAmount: number;
   yaw: number;
   pitch: number;
   fov: number;
@@ -21,73 +25,36 @@ interface Props {
   swayGainY?: number;
   swayDisableX?: boolean;
   swayDisableY?: boolean;
-  // Fires once the day layer has actually painted a frame. In the crossfade
-  // (two-layer) case the night layer also wires this up via ...rest, so it
-  // may fire twice — callers relying on "first frame ready" should guard
-  // against that themselves.
   onLoaded?: () => void;
 }
 
-const TRANSITION = 'opacity 2.5s ease';
-
-// Three.js doesn't cross-blend two textures on one mesh without a custom
-// shader, so this layers two full Photo360Viewer instances (sharing the same
-// pan — same camera position, different lighting) and crossfades them with a
-// CSS opacity transition, mirroring the pattern already used for the night
-// darkening overlay and backlit sprite day/night swap elsewhere in Canvas.tsx.
-// Only the currently-visible layer is interactive, so dragging/zooming always
-// affects the one you can actually see.
+// Thin pass-through onto Photo360Viewer, which does the actual day/night
+// blending itself now (one shader, one WebGL context, one texture pair) —
+// this used to layer two full Photo360Viewer instances and crossfade them
+// with CSS opacity, which meant two WebGLRenderers (two live GPU contexts)
+// per 360 dashboard. Browsers cap simultaneous WebGL contexts per process
+// (commonly ~16) — with a few kiosk windows open across multiple screens
+// (all sharing that same per-process budget), doubling the context count
+// per window was enough to exhaust it, silently losing context on whichever
+// window's viewer the browser evicted first (confirmed live: only one
+// window's 360 viewer would render at a time, and switching to a different
+// browser — a fresh GPU process, fresh budget — "fixed" it, which is the
+// signature of a context-limit issue rather than an app bug). Kept as its
+// own component (rather than inlining at each of DashPanEditor's/
+// DashboardDesigner's two call sites) purely so neither has to know
+// Photo360Viewer's day/night prop names changed here if that internal
+// design changes again.
 const Photo360CrossfadeViewer = forwardRef<Photo360Handle, Props>(({
-  dayPhotoUrl, nightPhotoUrl, isNight, displayWidth, displayHeight, readOnly, ...rest
-}, ref) => {
-  if (!nightPhotoUrl) {
-    return (
-      <Photo360Viewer
-        ref={ref}
-        photoUrl={dayPhotoUrl}
-        displayWidth={displayWidth}
-        displayHeight={displayHeight}
-        readOnly={readOnly}
-        {...rest}
-      />
-    );
-  }
-
-  return (
-    <div style={{ position: 'relative', width: displayWidth, height: displayHeight, flexShrink: 0 }}>
-      <div style={{
-        position: 'absolute', inset: 0,
-        opacity: isNight ? 0 : 1,
-        transition: TRANSITION,
-        pointerEvents: isNight ? 'none' : 'auto',
-      }}>
-        <Photo360Viewer
-          ref={isNight ? undefined : ref}
-          photoUrl={dayPhotoUrl}
-          displayWidth={displayWidth}
-          displayHeight={displayHeight}
-          readOnly={readOnly || isNight}
-          {...rest}
-        />
-      </div>
-      <div style={{
-        position: 'absolute', inset: 0,
-        opacity: isNight ? 1 : 0,
-        transition: TRANSITION,
-        pointerEvents: isNight ? 'auto' : 'none',
-      }}>
-        <Photo360Viewer
-          ref={isNight ? ref : undefined}
-          photoUrl={nightPhotoUrl}
-          displayWidth={displayWidth}
-          displayHeight={displayHeight}
-          readOnly={readOnly || !isNight}
-          {...rest}
-        />
-      </div>
-    </div>
-  );
-});
+  dayPhotoUrl, nightPhotoUrl, nightAmount, ...rest
+}, ref) => (
+  <Photo360Viewer
+    ref={ref}
+    photoUrl={dayPhotoUrl}
+    nightPhotoUrl={nightPhotoUrl}
+    nightAmount={nightAmount}
+    {...rest}
+  />
+));
 
 Photo360CrossfadeViewer.displayName = 'Photo360CrossfadeViewer';
 export default Photo360CrossfadeViewer;

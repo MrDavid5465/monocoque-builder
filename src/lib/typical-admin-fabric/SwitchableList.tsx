@@ -32,6 +32,7 @@ interface Props {
   thumbnailField?: string;
   cardWidth?: number;
   thumbnailHeight?: number;
+  thumbnailFit?: 'cover' | 'contain';
   defaultView?: ViewMode;
   // List-view-only — forwarded straight through to lib/List, see its own
   // doc comments. Card view has no notion of columns, so these are simply
@@ -60,6 +61,7 @@ const SwitchableList: React.FC<Props> = ({
   thumbnailField,
   cardWidth,
   thumbnailHeight,
+  thumbnailFit,
   defaultView = 'list',
   columnSelectable,
   storageKey,
@@ -112,6 +114,7 @@ const SwitchableList: React.FC<Props> = ({
           thumbnailField={thumbnailField}
           cardWidth={cardWidth}
           thumbnailHeight={thumbnailHeight}
+          thumbnailFit={thumbnailFit}
           hideHeader
         />
       ) : (

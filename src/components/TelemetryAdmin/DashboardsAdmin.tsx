@@ -34,7 +34,7 @@ const DashboardsAdmin: React.FC = () => (
     schemaDefinition={schemaDefinition}
     components={{
       list: (props: any) => (
-        <SwitchableList {...props} queryResultKey="getDashboardEntries" titleField="name" thumbnailField="thumbnailDay" idField="name" defaultView="card" />
+        <SwitchableList {...props} queryResultKey="getDashboardEntries" titleField="name" thumbnailField="thumbnailDay" idField="name" defaultView="card" thumbnailFit="contain" />
       ),
       show: DashboardShow,
       edit: DashboardEdit,

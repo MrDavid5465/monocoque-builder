@@ -12,7 +12,8 @@ use crate::graphql::clients::ClientsMutation;
 use crate::graphql::dashboard_files::{DashboardFileSyncQuery, DashboardFileUploadMutation};
 use crate::graphql::{
     CarFileMutation, CarPhotoSyncQuery, DashTemplateThumbnailMutation, DashboardMutation,
-    GamepadMutation, RecordingControlMutation, ShakerDspMutation, ShakerDspQuery,
+    GamepadMutation, NightClockMutation, RecordingControlMutation, ShakerDspMutation,
+    ShakerDspQuery, TrackGeocodeQuery,
 };
 use crate::graphql::{QueryRoot, SubscriptionRoot};
 use crate::telemetry::types::{CourseFlag, SimStatus};
@@ -245,15 +246,27 @@ pub struct MonocoqueLedsDevice {
     pub profile_id: Option<String>,
 }
 
-/// USB tachometer / shift-light indicator (e.g. Revburner).
+/// USB tachometer / shift-light indicator (e.g. Revburner), or a wheelbase's
+/// built-in serial shift-light strip (e.g. Moza R5/R12/R3/R8, KS Pro Wheel —
+/// monocoque dispatches these as `device = "Serial"; type = "Wheel"`,
+/// identified by `subtype` + `devpath`/`baud`, not USB VID/PID). `deviceKind`
+/// picks which of the two shapes this row represents: "usb" uses
+/// devid/subtype/granularity/config (subtype e.g. "Revburner"); "serial"
+/// uses subtype/devpath/baud (subtype e.g. "MozaR5"/"MozaNew"/
+/// "MozaKSProWheel") and leaves devid/granularity/config unused. Both kinds
+/// share one type rather than splitting into two, since a user picks between
+/// them per-row via a device-kind selector, not per-schema.
 #[typiql_type]
 pub struct MonocoqueShiftLight {
     #[typiql(key)]
     pub id: String,
+    pub device_kind: String,
     pub devid: String,
     pub subtype: String,
     pub granularity: u8,
     pub config: String,
+    pub devpath: Option<String>,
+    pub baud: Option<u32>,
     pub profile_id: Option<String>,
 }
 
@@ -387,11 +400,66 @@ pub struct Car {
 /// via the auto-generated `nightModeChanged` subscription. Effectively a
 /// singleton — the app operates on whichever single record exists, creating
 /// one on first use.
+///
+/// Two independent sources can drive `is_night`: a manual toggle (the
+/// existing kiosk Day/Night button) and a simulated in-game clock (since
+/// telemetry never reports the sim's own date/time). Both are stored on this
+/// same record rather than as separate types. `sim_enabled` is an explicit
+/// mode switch (not a recency-based heuristic) — a UI control alongside the
+/// day/night toggle lets the user pick manual vs simulated directly; whichever
+/// is selected is authoritative until switched again.
 #[typiql_type]
 pub struct NightMode {
     #[typiql(key)]
     pub id: String,
     pub is_night: bool,
+    /// Option, not bool: every other sim_* field is also optional, and
+    /// keeping this one consistent means addNightMode/updateNightMode calls
+    /// that only touch the manual toggle (the common case) don't have to
+    /// also supply a value for every simulation field. Absent/null == false.
+    pub sim_enabled: Option<bool>,
+    /// ms since epoch: the in-game simulated time being matched, as of
+    /// `sim_base_real_time`. Server-internal bookkeeping only — clients never
+    /// read or write this field directly; they get the live simulated clock
+    /// via the `nightClock` subscription (see `graphql/mod.rs`) and adjust it
+    /// via the `adjustNightClockTime`/`setNightClockCycleHours` mutations
+    /// (`graphql/night_clock.rs`), which rebase this anchor server-side.
+    /// (Was an ISO-8601 string in an earlier client-only-extrapolation
+    /// design; plain ms avoids needing a date-parsing crate now that only
+    /// the backend ever reads/writes it.)
+    pub sim_base_sim_time_ms: Option<f64>,
+    /// ms since epoch, the SERVER's own clock: real time when
+    /// `sim_base_sim_time_ms` was captured. Always `SystemTime::now()` on the
+    /// backend, never a client-supplied time — this is what keeps the
+    /// simulated clock in agreement across every kiosk device (previously
+    /// each device extrapolated independently using its own local clock,
+    /// which drifted apart from other devices over hours).
+    pub sim_base_real_time: Option<f64>,
+    /// Simulated clock speed as a percentage of real-time (100 = real time,
+    /// 1200 = a 2-hour real cycle covers a 24-hour in-game day).
+    pub sim_speed_percent: Option<f64>,
+    /// "HH:MM" time-of-day (24h) within the simulated day.
+    pub sim_sunrise: Option<String>,
+    pub sim_sunset: Option<String>,
+    /// How many simulated minutes the dawn/dusk crossfade takes, centered on
+    /// sunrise/sunset (e.g. 40 = the transition runs from 20 simulated
+    /// minutes before to 20 after each boundary). Unlike the manual toggle's
+    /// fixed ~2s CSS crossfade, this drives a continuously-computed blend
+    /// value so a compressed in-game day still reads as a gradual dawn/dusk.
+    pub sim_transition_minutes: Option<f64>,
+    /// "YYYY-MM-DD", set whenever `setSunriseSunsetFromDate` runs (manually
+    /// or automatically) — remembered so that when the live telemetry track
+    /// later changes, the background tick (see `night_clock.rs`'s
+    /// `maybe_auto_recompute_sun_times`) can recompute sunrise/sunset for
+    /// the NEW track using the SAME date the user last picked, without
+    /// asking again. Server-internal bookkeeping, same spirit as
+    /// `sim_base_sim_time_ms`.
+    pub sim_sunrise_sunset_date: Option<String>,
+    /// Raw telemetry track id that `sim_sunrise`/`sim_sunset` were last
+    /// computed for — lets the background tick detect "the live track
+    /// changed" (compare against the CURRENT live track) without
+    /// recomputing on every single tick when nothing's changed.
+    pub sim_last_computed_track: Option<String>,
 }
 
 /// Global "preview car" — when set and the sim isn't actively running, kiosk
@@ -405,6 +473,25 @@ pub struct PreviewCar {
     #[typiql(key)]
     pub id: String,
     pub car_id: String,
+}
+
+/// A real-world circuit location, used to compute real sunrise/sunset times
+/// for the day/night simulation (see night_clock.rs's
+/// `set_sunrise_sunset_from_date`) from whichever track telemetry currently
+/// reports. `raw_track_ids` is a JSON array of strings rather than a single
+/// id, matched by exact membership — the same physical circuit is commonly
+/// reported under several different raw ids (different sim/game, different
+/// DLC/mod release of the same track, different layout variants), so one
+/// location can list every id that should resolve to it rather than forcing
+/// a separate row (and separately-entered lat/lon) per variant.
+#[typiql_type]
+pub struct TrackLocation {
+    #[typiql(key)]
+    pub id: String,
+    pub name: String,
+    pub latitude: f64,
+    pub longitude: f64,
+    pub raw_track_ids: String,
 }
 
 /// Per-car pan override for a specific 360° dashboard. `car_id` here is a Car
@@ -626,8 +713,8 @@ typiql_schema!(
     MonocoqueShiftLight, ShiftLightProfile,
     MonocoqueSimWindDevice, SimWindDeviceProfile,
     DashTemplate, ConnectedClient, DashGroup, KnownCar, DeviceDefault,
-    Car, File, NightMode, CarDashPan, PreviewCar, DashboardEntry, Recording, RecordingFrame;
-    AppConfigQuery, DashboardFileSyncQuery, BuiltinTemplatesQuery, CarPhotoSyncQuery, ShakerDspQuery, QueryRoot;
-    AppConfigMutation, DashboardFileUploadMutation, ClientsMutation, CarFileMutation, DashTemplateThumbnailMutation, DashboardMutation, GamepadMutation, ShakerDspMutation, RecordingControlMutation;
+    Car, File, NightMode, CarDashPan, PreviewCar, DashboardEntry, Recording, RecordingFrame, TrackLocation;
+    AppConfigQuery, DashboardFileSyncQuery, BuiltinTemplatesQuery, CarPhotoSyncQuery, ShakerDspQuery, TrackGeocodeQuery, QueryRoot;
+    AppConfigMutation, DashboardFileUploadMutation, ClientsMutation, CarFileMutation, DashTemplateThumbnailMutation, DashboardMutation, GamepadMutation, NightClockMutation, ShakerDspMutation, RecordingControlMutation;
     SubscriptionRoot
 );

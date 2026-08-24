@@ -7,6 +7,7 @@ import { RowButtonConfig } from '../../../lib/typical-admin-fabric/lib/ListContr
 import { DisplaySchema } from '../../../lib/typical-admin';
 import { GET_LEDS, CREATE_LEDS, UPDATE_LEDS, REMOVE_LEDS, LEDS_CHANGED, LedsDeviceRec } from './queries';
 import { DEFAULT_LEDS_DEVICE } from '../../../mock/ledsDeviceMock';
+import { useMonocoqueExport } from '../useMonocoqueExport';
 
 interface Props { profileId?: string | null; }
 
@@ -43,6 +44,8 @@ const LedsDevices: React.FC<Props> = ({ profileId = null }) => {
   const [update] = useMutation(UPDATE_LEDS, { refetchQueries: [{ query: GET_LEDS }] });
   const [remove] = useMutation(REMOVE_LEDS, { refetchQueries: [{ query: GET_LEDS }] });
 
+  const { status: exportStatus, handleExport, handleRestart } = useMonocoqueExport();
+
   const allRecords: LedsDeviceRec[] = (data as any)?.getMonocoqueLedsDevices ?? [];
   const records = allRecords.filter(r => (r.profileId ?? null) === profileId);
 
@@ -76,13 +79,28 @@ const LedsDevices: React.FC<Props> = ({ profileId = null }) => {
 
   return (
     <div style={{ padding: profileId ? 0 : 16, color: theme.palette.neutralPrimary }}>
-      {!profileId && <h3 style={{ margin: '0 0 10px' }}>LED Controllers</h3>}
+      {!profileId && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+          <h3 style={{ margin: '0 10px 0 0' }}>LED Controllers</h3>
+          {exportStatus && <span style={{ fontSize: '0.8em', opacity: 0.6 }}>{exportStatus}</span>}
+        </div>
+      )}
       {records.length === 0 && (
         <div style={{ opacity: 0.5, padding: '0 0 8px' }}>
           No LED controllers configured yet — click "Add" (top-right of the grid) to get started.
         </div>
       )}
-      <DetailsGrid name="LedsDevices" items={records} schema={schema} onAdd={handleAdd} rowButtons={rowButtons} />
+      <DetailsGrid
+        name="LedsDevices"
+        items={records}
+        schema={schema}
+        onAdd={handleAdd}
+        customButtons={[
+          { key: 'export', label: 'Export to Config', icon: 'CloudDownload', onClick: handleExport },
+          { key: 'restart', label: 'Restart Monocoque', icon: 'Refresh', onClick: handleRestart },
+        ]}
+        rowButtons={rowButtons}
+      />
     </div>
   );
 };

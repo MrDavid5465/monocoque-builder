@@ -11,28 +11,54 @@ export async function captureCanvasScreenshot(
 ): Promise<string | null> {
   if (!canvasRef.current) return null;
   const thumbW = options?.width ?? 400;
+  const el = canvasRef.current;
+
+  // html-to-image works by serializing the DOM into an SVG data URI, then
+  // loading THAT as an <img> to draw onto a canvas — a large dashboard's
+  // sprite sheets get inlined into that SVG as base64 (this app has sprite
+  // textures up to 10240×5120px, confirmed via a separate WebGL resize
+  // warning), which occasionally fails that <img> load outright (observed
+  // live: "Screenshot capture failed: Event" — a raw failed-image-load
+  // Event, not a real Error, consistent with an oversized/slow data URI
+  // rather than a deterministic bug). A one-shot retry after a short delay
+  // is cheap and safe for what's already a best-effort feature (a failed
+  // capture just skips the thumbnail upload, never blocks the actual save),
+  // and transient failures like this typically succeed on the next attempt.
+  const attempt = () => toPng(el, {
+    width: canvasWidth,
+    height: canvasHeight,
+    pixelRatio: thumbW / canvasWidth,
+    cacheBust: true,
+    style: {
+      // Capture the inner canvas element at its natural CSS size (e.g.
+      // 1280×800), ignoring the CSS `zoom` applied for fit-to-container
+      // display. pixelRatio scales the output down to thumbnail width.
+      // position:static removes the absolute offsetX/offsetY so content
+      // starts at (0,0).
+      zoom: '1',
+      position: 'static',
+      left: '0',
+      top: '0',
+      transform: 'none',
+      // The edit-mode-only canvas-edge outline (see Canvas.tsx's innerRef
+      // style) shouldn't show up in a saved thumbnail — a thumbnail
+      // represents how the dashboard looks in kiosk/live view, which
+      // never has it.
+      outline: 'none',
+    } as Partial<CSSStyleDeclaration>,
+  });
+
   try {
-    // Capture the inner canvas element at its natural CSS size (e.g. 1280×800),
-    // ignoring the CSS `zoom` applied for fit-to-container display.
-    // pixelRatio scales the output down to thumbnail width.
-    // position:static removes the absolute offsetX/offsetY so content starts at (0,0).
-    const dataUrl = await toPng(canvasRef.current, {
-      width: canvasWidth,
-      height: canvasHeight,
-      pixelRatio: thumbW / canvasWidth,
-      cacheBust: true,
-      style: {
-        zoom: '1',
-        position: 'static',
-        left: '0',
-        top: '0',
-        transform: 'none',
-      } as Partial<CSSStyleDeclaration>,
-    });
-    return dataUrl;
+    return await attempt();
   } catch (e) {
-    console.error('Screenshot capture failed:', e);
-    return null;
+    console.warn('Screenshot capture failed, retrying once:', e);
+    try {
+      await new Promise(r => setTimeout(r, 300));
+      return await attempt();
+    } catch (e2) {
+      console.error('Screenshot capture failed on retry:', e2);
+      return null;
+    }
   }
 }
 

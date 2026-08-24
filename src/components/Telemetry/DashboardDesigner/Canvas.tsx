@@ -1,11 +1,15 @@
 import React, { useRef, useState, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react';
+import { Callout, DirectionalHint } from '@fluentui/react';
 import { DashboardConfig, ComponentNode } from '../../../types/dashboard';
 import { GamepadMapping } from '../../../lib/denim/lib/queries';
 import { applyBinding, formatValue, fillFraction, colorFraction, computeRotation, computeTranslate, isHiddenByLimit, cropInsetPx, maxInsetPx, insetToClipPath, EdgeInset } from './canvasUtils';
 import GifGaugeNode from './GifGaugeNode';
 import ArcGaugeFaceNode from './ArcGaugeFaceNode';
+import ClockTextNode from './ClockTextNode';
+import ClockSpriteNode from './ClockSpriteNode';
 import TransformOverlay from './TransformOverlay';
 import CropOverlay from './CropOverlay';
+import DayNightSimPanel from '../DayNightSimPanel';
 import { useGamepadIO, useHeldGamepadButton } from './useGamepadIO';
 
 interface SpriteFile { file: string; thumbnail: string; }
@@ -35,6 +39,10 @@ interface Props {
   kioskMode: boolean;
   onKioskButton?: () => void;
   isNight?: boolean;
+  // 0=day, 1=night, continuous — see dayNightSim.ts. Drives every day/night
+  // crossfade/glow; `isNight` above stays around for purely-binary bits
+  // (the toolbar toggle icon, usingCarNightPhoto's photo selection).
+  nightAmount?: number;
   onToggleNightMode?: () => void;
   forceNightPreview?: boolean;
   skipTransition?: boolean;
@@ -481,6 +489,7 @@ interface NodeRendererProps {
   telemetryData: Record<string, number>;
   kioskSweepActive: boolean;
   isNight: boolean;
+  nightAmount: number;
   dayNight: boolean;
   skipTransition: boolean;
   registerCounterRotate: (id: string, el: HTMLDivElement | null, steerMaxDeg: number | undefined, rotationDeg: number | undefined) => void;
@@ -489,7 +498,7 @@ interface NodeRendererProps {
 }
 
 const NodeRenderer: React.FC<NodeRendererProps> = ({
-  node, absX, absY, selectedId, onSelect, startDrag, onUpdate, onDragCommit, activeTool, viewRef, containerRef, overlayActiveRef, spriteUrl, kioskMode, telemetryData, kioskSweepActive, isNight, dayNight, skipTransition,
+  node, absX, absY, selectedId, onSelect, startDrag, onUpdate, onDragCommit, activeTool, viewRef, containerRef, overlayActiveRef, spriteUrl, kioskMode, telemetryData, kioskSweepActive, isNight, nightAmount, dayNight, skipTransition,
   registerCounterRotate, gamepadMappings, simStatus,
 }) => {
   const nodeAbsX = absX + node.x;
@@ -499,7 +508,7 @@ const NodeRenderer: React.FC<NodeRendererProps> = ({
 
   if (isHiddenByLimit(node, telemetryData, excludeFromSweep)) return null;
 
-  const sharedChildProps = { selectedId, onSelect, startDrag, onUpdate, onDragCommit, activeTool, viewRef, containerRef, overlayActiveRef, spriteUrl, kioskMode, telemetryData, kioskSweepActive, isNight, dayNight, skipTransition, registerCounterRotate, gamepadMappings, simStatus };
+  const sharedChildProps = { selectedId, onSelect, startDrag, onUpdate, onDragCommit, activeTool, viewRef, containerRef, overlayActiveRef, spriteUrl, kioskMode, telemetryData, kioskSweepActive, isNight, nightAmount, dayNight, skipTransition, registerCounterRotate, gamepadMappings, simStatus };
 
   const overlay = (!isSelected || kioskMode) ? null
     : activeTool === 'transform'
@@ -650,8 +659,12 @@ const NodeRenderer: React.FC<NodeRendererProps> = ({
       );
     }
 
-    const backlitNight = node.backlit && dayNight && isNight;
-    const glowFilter = 'drop-shadow(0 0 6px rgba(255, 210, 80, 0.85))';
+    // Continuous through dawn/dusk (glow alpha scales with nightAmount) —
+    // z-index still snaps at the halfway point since stacking order isn't
+    // something that can fade.
+    const backlitAmount = (node.backlit && dayNight) ? nightAmount : 0;
+    const backlitOnTop = backlitAmount >= 0.5;
+    const glowFilter = backlitAmount > 0 ? `drop-shadow(0 0 6px rgba(255, 210, 80, ${(0.85 * backlitAmount).toFixed(3)}))` : undefined;
 
     return (
       <>
@@ -670,8 +683,8 @@ const NodeRenderer: React.FC<NodeRendererProps> = ({
             style={{
               position: 'absolute', left: imgLeft, top: imgTop, width: w, height: h,
               outline: isSelected ? '2px solid #4af' : 'none',
-              zIndex: backlitNight ? NIGHT_OVERLAY_Z + 5 : undefined,
-              filter: backlitNight ? glowFilter : undefined,
+              zIndex: backlitOnTop ? NIGHT_OVERLAY_Z + 5 : undefined,
+              filter: glowFilter,
             }}
           >
             <img
@@ -680,7 +693,7 @@ const NodeRenderer: React.FC<NodeRendererProps> = ({
               draggable={false}
               style={{
                 position: 'absolute', inset: 0, width: w, height: h,
-                opacity: isNight ? 0 : 1,
+                opacity: 1 - nightAmount,
                 transition: skipTransition ? undefined : 'opacity 2s ease',
                 transform,
                 transformOrigin: node.type === 'needle-gauge' ? `${pivX}px ${pivY}px` : transformOrigin,
@@ -693,7 +706,7 @@ const NodeRenderer: React.FC<NodeRendererProps> = ({
               draggable={false}
               style={{
                 position: 'absolute', inset: 0, width: w, height: h,
-                opacity: isNight ? 1 : 0,
+                opacity: nightAmount,
                 transition: skipTransition ? undefined : 'opacity 2s ease',
                 transform,
                 transformOrigin: node.type === 'needle-gauge' ? `${pivX}px ${pivY}px` : transformOrigin,
@@ -711,8 +724,8 @@ const NodeRenderer: React.FC<NodeRendererProps> = ({
               width: w, height: h,
               outline: isSelected ? '2px solid #4af' : 'none',
               userSelect: 'none',
-              zIndex: backlitNight ? NIGHT_OVERLAY_Z + 5 : undefined,
-              filter: backlitNight ? glowFilter : undefined,
+              zIndex: backlitOnTop ? NIGHT_OVERLAY_Z + 5 : undefined,
+              filter: glowFilter,
               transform,
               transformOrigin: node.type === 'needle-gauge' ? `${pivX}px ${pivY}px` : transformOrigin,
               clipPath,
@@ -739,8 +752,8 @@ const NodeRenderer: React.FC<NodeRendererProps> = ({
     const sweep = node.arcSweepAngle ?? 360;
     const revealDeg = sweep * frac;
     const mask = `conic-gradient(from ${start}deg at ${cx}px ${cy}px, black 0deg ${revealDeg}deg, transparent ${revealDeg}deg 360deg)`;
-    const backlitNight = node.backlit && dayNight && isNight;
-    const glowFilter = 'drop-shadow(0 0 6px rgba(255, 210, 80, 0.85))';
+    const backlitAmount = (node.backlit && dayNight) ? nightAmount : 0;
+    const glowFilter = backlitAmount > 0 ? `drop-shadow(0 0 6px rgba(255, 210, 80, ${(0.85 * backlitAmount).toFixed(3)}))` : undefined;
     return (
       <>
         <img
@@ -752,8 +765,8 @@ const NodeRenderer: React.FC<NodeRendererProps> = ({
             width: w, height: h,
             outline: isSelected ? '2px solid #4af' : 'none',
             userSelect: 'none',
-            zIndex: backlitNight ? NIGHT_OVERLAY_Z + 5 : undefined,
-            filter: backlitNight ? glowFilter : undefined,
+            zIndex: backlitAmount >= 0.5 ? NIGHT_OVERLAY_Z + 5 : undefined,
+            filter: glowFilter,
             maskImage: mask,
             WebkitMaskImage: mask,
             clipPath: insetToClipPath(cropInsetPx(node)),
@@ -1101,7 +1114,7 @@ const NodeRenderer: React.FC<NodeRendererProps> = ({
           telemetryData={telemetryData} kioskMode={kioskMode}
           registerCounterRotate={registerCounterRotate} childEls={childEls}
           spriteUrl={spriteUrl}
-          isNight={isNight} dayNight={dayNight}
+          isNight={isNight} nightAmount={nightAmount} dayNight={dayNight}
           nightOverlayZ={NIGHT_OVERLAY_Z}
         />
         {overlay}
@@ -1125,20 +1138,60 @@ const NodeRenderer: React.FC<NodeRendererProps> = ({
     );
   }
 
+  // ── clock-text / clock-sprite ── simTimeMs comes via ClockTimeContext,
+  // NOT a prop here — see clockTimeContext.ts's doc comment for why.
+  if (node.type === 'clock-text') {
+    return (
+      <>
+        <ClockTextNode
+          node={node} nodeAbsX={nodeAbsX} nodeAbsY={nodeAbsY}
+          isSelected={isSelected}
+          registerCounterRotate={registerCounterRotate} childEls={childEls}
+          kioskMode={kioskMode}
+        />
+        {overlay}
+      </>
+    );
+  }
+  if (node.type === 'clock-sprite') {
+    return (
+      <>
+        <ClockSpriteNode
+          node={node} nodeAbsX={nodeAbsX} nodeAbsY={nodeAbsY}
+          isSelected={isSelected} spriteUrl={spriteUrl}
+          registerCounterRotate={registerCounterRotate} childEls={childEls}
+          kioskMode={kioskMode}
+        />
+        {overlay}
+      </>
+    );
+  }
+
   return <>{childEls}{overlay}</>;
 };
 
 // ---------------------------------------------------------------------------
 // Canvas
 // ---------------------------------------------------------------------------
-const Canvas = forwardRef<CanvasHandle, Props>(({
-  dashboard, sprites, gamepadMappings = [], selectedId, onSelect, onUpdate, onUpdateDashboard, kioskMode, onKioskButton, isNight: isNightProp, onToggleNightMode, forceNightPreview, skipTransition, telemetryData,
+// Memoized so the ~60Hz simTimeMs tick (delivered via ClockTimeContext from
+// outside, see index.tsx's canvasEl) doesn't force this whole node tree to
+// re-render on every tick — only ClockTextNode/ClockSpriteNode, the actual
+// context consumers, react to it. Without this, React's default behavior
+// (a re-rendered parent re-invokes every unmemoized child regardless of
+// whether its own props changed) meant every node on the dashboard —
+// gauges, sprites, everything — was reconciled 60x/sec purely because
+// index.tsx itself re-rendered from the clock tick, even before any
+// clock-text/clock-sprite node existed to make the resulting jank visible.
+const Canvas = React.memo(forwardRef<CanvasHandle, Props>(({
+  dashboard, sprites, gamepadMappings = [], selectedId, onSelect, onUpdate, onUpdateDashboard, kioskMode, onKioskButton, isNight: isNightProp, nightAmount: nightAmountProp, onToggleNightMode, forceNightPreview, skipTransition, telemetryData,
   kioskSweepActive = false,
   globalSteerMaxDeg, panBgMode, liveBackground, liveBackgroundInteractive, liveBackgroundIsNightPhoto, simStatus = '',
   onDragCommit, activeTool,
 }, ref) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const innerRef     = useRef<HTMLDivElement>(null);
+  const nightGearRef = useRef<HTMLButtonElement>(null);
+  const [showDayNightSettings, setShowDayNightSettings] = useState(false);
   const [view, setView] = useState({ scale: 1, offsetX: 0, offsetY: 0 });
   const viewRef = useRef(view);
   viewRef.current = view;
@@ -1219,6 +1272,7 @@ const Canvas = forwardRef<CanvasHandle, Props>(({
     const sway = { x: 0, y: 0, rot: 0 };
     let rafId: number;
     const tick = () => {
+      if (document.hidden) { rafId = requestAnimationFrame(tick); return; }
       const data   = telemetryDataRef.current;
       const active = neckFxRef.current && !hasLiveBackgroundRef.current;
       const gLat = active ? Math.max(-3, Math.min(3, data['gLat'] ?? 0)) : 0;
@@ -1430,13 +1484,17 @@ const Canvas = forwardRef<CanvasHandle, Props>(({
   };
 
   const isNight = forceNightPreview ?? (isNightProp ?? false);
+  // forceNightPreview (thumbnail capture) always wants a definite day/night
+  // shot, never a mid-transition blend, so it overrides nightAmount to a
+  // hard 0/1 the same way it already overrides isNight.
+  const nightAmount = forceNightPreview !== undefined ? (forceNightPreview ? 1 : 0) : (nightAmountProp ?? 0);
   const eb = dashboard.kioskExitButton ?? { x: 1240, y: 20, opacity: 0.15 };
 
   const nodeProps = {
     selectedId, onSelect, startDrag, onUpdate, onDragCommit, activeTool, viewRef, containerRef, overlayActiveRef, spriteUrl, kioskMode,
     telemetryData: telemetryData ?? {},
     kioskSweepActive,
-    isNight, dayNight: dashboard.dayNight, skipTransition: skipTransition ?? false,
+    isNight, nightAmount, dayNight: dashboard.dayNight, skipTransition: skipTransition ?? false,
     registerCounterRotate,
     gamepadMappings,
     simStatus,
@@ -1457,6 +1515,20 @@ const Canvas = forwardRef<CanvasHandle, Props>(({
           left: view.offsetX, top: view.offsetY,
           width: dashboard.canvasWidth, height: dashboard.canvasHeight,
           zoom: view.scale,
+          // Edit-mode-only — the canvas itself has no background color of its
+          // own (only whatever `dashboard.background` sprite/photo is set),
+          // so with none set it was rendering fully transparent over this
+          // panel's dark container, making the dashboard's actual edges
+          // invisible while laying it out. `outline` (not `border`) so it
+          // doesn't add to the box's own size — every child is positioned in
+          // absolute coordinates against `canvasWidth`/`canvasHeight`
+          // exactly, and a border would throw that off by 1px. Stripped
+          // back out of the captured image explicitly in
+          // captureCanvasScreenshot regardless (thumbnails should show the
+          // dashboard as kiosk/live view renders it, not this editor
+          // affordance), not relied on implicitly just because it's edit-
+          // mode-only here too.
+          outline: kioskMode ? undefined : '1px solid rgba(255, 255, 255, 0.3)',
         }}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
@@ -1468,7 +1540,7 @@ const Canvas = forwardRef<CanvasHandle, Props>(({
               position: 'absolute', inset: 0,
               zIndex: NIGHT_OVERLAY_Z,
               background: 'rgba(0, 0, 0, 0.850)',
-              opacity: isNight ? 1 : 0,
+              opacity: nightAmount * 0.95,
               transition: skipTransition ? undefined : 'opacity 2s ease',
               pointerEvents: 'none',
             }}
@@ -1523,24 +1595,53 @@ const Canvas = forwardRef<CanvasHandle, Props>(({
           title={kioskMode ? 'Back to editor' : 'Enter kiosk mode'}
         >{kioskMode ? '←' : '⛶'}</button>
         {kioskMode && dashboard.dayNight && dashboard.nightModeButton && (
-          <button
-            onClick={e => {
-              e.stopPropagation();
-              onToggleNightMode?.();
-            }}
-            style={{
-              position: 'absolute', right: 8, bottom: 8,
-              zIndex: NIGHT_OVERLAY_Z + 10,
-              background: 'rgba(0,0,0,0.45)', border: '1px solid rgba(255,255,255,0.2)',
-              borderRadius: 6, width: 40, height: 40, cursor: 'pointer',
-              fontSize: 20, color: '#fff',
-            }}
-            title={isNight ? 'Switch to day' : 'Switch to night'}
-          >{isNight ? '☀️' : '🌙'}</button>
+          <>
+            <button
+              ref={nightGearRef}
+              onClick={e => {
+                e.stopPropagation();
+                setShowDayNightSettings(s => !s);
+              }}
+              style={{
+                position: 'absolute', right: 56, bottom: 8,
+                zIndex: NIGHT_OVERLAY_Z + 10,
+                background: 'rgba(0,0,0,0.45)', border: '1px solid rgba(255,255,255,0.2)',
+                borderRadius: 6, width: 40, height: 40, cursor: 'pointer',
+                fontSize: 20, color: '#fff',
+              }}
+              title="Day/night settings"
+            >⚙️</button>
+            <button
+              onClick={e => {
+                e.stopPropagation();
+                onToggleNightMode?.();
+              }}
+              style={{
+                position: 'absolute', right: 8, bottom: 8,
+                zIndex: NIGHT_OVERLAY_Z + 10,
+                background: 'rgba(0,0,0,0.45)', border: '1px solid rgba(255,255,255,0.2)',
+                borderRadius: 6, width: 40, height: 40, cursor: 'pointer',
+                fontSize: 20, color: '#fff',
+              }}
+              title={isNight ? 'Switch to day' : 'Switch to night'}
+            >{isNight ? '☀️' : '🌙'}</button>
+            {showDayNightSettings && (
+              <Callout
+                target={nightGearRef}
+                onDismiss={() => setShowDayNightSettings(false)}
+                directionalHint={DirectionalHint.topRightEdge}
+                setInitialFocus
+              >
+                <div style={{ padding: '1em' }}>
+                  <DayNightSimPanel />
+                </div>
+              </Callout>
+            )}
+          </>
         )}
       </div>
     </div>
   );
-});
+}));
 
 export default Canvas;

@@ -192,9 +192,15 @@ export const TEMPLATE_CHANGED_SUB = gql`
   }
 `;
 
+// NightMode/NightClock/PreviewCar/CarDashPan fragments mirror
+// nightModeQueries.ts's NIGHT_MODE_FIELDS, previewCarQueries.ts's
+// PREVIEW_CAR_CHANGED, and carDashPanQueries.ts's CAR_DASH_PAN_CHANGED
+// field-for-field — kept as separate literal selections (not shared gql
+// fragments) since this file doesn't otherwise import from those, and a
+// mismatch here would only mean an extra/missing field, not a real bug.
 export const DASHBOARD_UPDATES_SUB = gql`
-  subscription dashboardUpdates {
-    dashboardUpdates {
+  subscription dashboardUpdates($includeTelemetry: Boolean, $includeNightClock: Boolean) {
+    dashboardUpdates(includeTelemetry: $includeTelemetry, includeNightClock: $includeNightClock) {
       ... on DashboardEntryChanged {
         operationName
         value {
@@ -218,6 +224,47 @@ export const DASHBOARD_UPDATES_SUB = gql`
           airTemp trackTemp
           lap position numCars courseFlag lapIsValid inPit currentLapSeconds lastLapSeconds
         }
+      }
+      ... on NightModeChanged {
+        operationName
+        value {
+          id
+          isNight
+          simEnabled
+          simSpeedPercent
+          simSunrise
+          simSunset
+          simTransitionMinutes
+        }
+      }
+      ... on NightClockTick {
+        simTimeMs
+        realTimeMs
+      }
+      ... on PreviewCarChanged {
+        operationName
+        value {
+          id
+          carId
+        }
+      }
+      ... on CarDashPanChanged {
+        operationName
+        value {
+          id
+          carId
+          dashName
+          yaw
+          pitch
+          fov
+          roll
+        }
+      }
+      ... on RecordingStatus {
+        isRecording
+        isPlaying
+        recordingId
+        playingId
       }
     }
   }

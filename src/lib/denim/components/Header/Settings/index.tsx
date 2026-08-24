@@ -16,6 +16,7 @@ import {
   REMOVE_DEVICE_DEFAULT,
   DeviceDefault,
 } from '../../../../../components/Telemetry/deviceDefaultsQueries';
+import DayNightSimPanel from '../../../../../components/Telemetry/DayNightSimPanel';
 
 interface Props {
   isOpen: boolean;
@@ -380,6 +381,12 @@ const Index: React.FC<Props> = ({ isOpen, dismissModal, settings }) => {
                   <span style={{ fontSize: '0.78em', marginTop: 4, opacity: 0.75 }}>{udevMsg}</span>
                 )}
               </Stack>
+            </Stack>
+          </PivotItem>
+
+          <PivotItem headerText="Day/Night">
+            <Stack style={{ paddingTop: '0.77em' }}>
+              <DayNightSimPanel />
             </Stack>
           </PivotItem>
 

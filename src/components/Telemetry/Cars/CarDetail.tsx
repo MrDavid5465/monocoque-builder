@@ -7,6 +7,7 @@ import {
   SYNC_CAR_PHOTOS, CarRecord, CarPhotoRef, parseCarIds,
 } from '../carQueries';
 import { useGlobalPreviewCar } from '../useGlobalPreviewCar';
+import { LiveUpdatesContext, useLiveUpdatesHub } from '../liveUpdatesHub';
 import DashPanEditor from './DashPanEditor';
 import { confirmAsync } from '../../../lib/denim/components/ConfirmDialog';
 import { GET_PROFILES as GET_SHAKER_PROFILES, UPDATE_PROFILE as UPDATE_SHAKER_PROFILE } from '../../Shakers/Profiles/queries';
@@ -90,7 +91,14 @@ const CarDetail: React.FC<Props> = ({ carRecordId, onBack }) => {
   // live telemetry's own raw car_id in DashboardDesigner, never the Car
   // record's own id. Clears on navigating away.
   const primaryRawId = rawIds[0];
-  const { setPreviewCarId, ready: previewCarReady } = useGlobalPreviewCar();
+  // Opened once here and provided to the nested DashPanEditor (which calls
+  // useGlobalNightMode() with no explicit hub) via context, so this page
+  // needs only ONE dashboardUpdates connection instead of two separate
+  // ones — see liveUpdatesHub.tsx's own doc comment. includeNightClock:true
+  // for DashPanEditor's day/night preview toggle; includeTelemetry stays
+  // false, neither this page nor DashPanEditor renders live telemetry.
+  const [liveUpdatesHub, liveUpdatesHubSubscriber] = useLiveUpdatesHub({ includeTelemetry: false, includeNightClock: true });
+  const { setPreviewCarId, ready: previewCarReady } = useGlobalPreviewCar(liveUpdatesHub);
   useEffect(() => {
     if (primaryRawId && car?.dayPhoto && previewCarReady) {
       setPreviewCarId(primaryRawId);
@@ -221,6 +229,8 @@ const CarDetail: React.FC<Props> = ({ carRecordId, onBack }) => {
   const cardStyle: React.CSSProperties = { flex: '1 1 260px', minWidth: 260 };
 
   return (
+    <LiveUpdatesContext.Provider value={liveUpdatesHub}>
+    {liveUpdatesHubSubscriber}
     <div style={{ padding: '1.2em 1.5em' }}>
       <Stack horizontal verticalAlign="center" horizontalAlign="space-between" style={{ marginBottom: '1em' }}>
         <Stack horizontal verticalAlign="center" tokens={{ childrenGap: 8 }}>
@@ -286,6 +296,7 @@ const CarDetail: React.FC<Props> = ({ carRecordId, onBack }) => {
         </FormCard>
       </Stack>
     </div>
+    </LiveUpdatesContext.Provider>
   );
 };
 

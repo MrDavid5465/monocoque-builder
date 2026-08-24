@@ -1,11 +1,9 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { Stack, IconButton, getTheme, useQuery } from '../../../lib/denim/lib';
-import { useSubscription } from '@apollo/client/react';
 import dispatcher from '../../../lib/denim/lib/queries';
 import { useNavigate } from 'react-router';
 import Canvas, { CanvasTool } from './Canvas';
 import ObjectExplorer from './ObjectExplorer';
-import { DASHBOARD_UPDATES_SUB } from './queries';
 import { Photo360Handle } from './components/Photo360Viewer';
 import Photo360CrossfadeViewer from './components/Photo360CrossfadeViewer';
 import { useDashboard } from './useDashboard';
@@ -16,8 +14,10 @@ import { computeTelemetryValues } from '../useLiveTelemetry';
 import { useMappingWatcher } from '../useMappingWatcher';
 import { useGlobalNightMode } from '../useGlobalNightMode';
 import { useGlobalPreviewCar } from '../useGlobalPreviewCar';
+import { LiveUpdatesContext, useHubListener, useLiveUpdatesHub } from '../liveUpdatesHub';
+import { ClockTimeContext } from './clockTimeContext';
 import { GET_CARS, parseCarIds, CarRecord } from '../carQueries';
-import { GET_CAR_DASH_PANS, CAR_DASH_PAN_CHANGED } from '../carDashPanQueries';
+import { GET_CAR_DASH_PANS } from '../carDashPanQueries';
 import { DashboardConfig, ComponentNode } from '../../../types/dashboard';
 import {
   findNodeById,
@@ -72,15 +72,30 @@ const MIN_EXPLORER_HEIGHT = 120;
 const MAX_EXPLORER_HEIGHT = 600;
 const DEFAULT_EXPLORER_HEIGHT = 280;
 
+// Telemetry's `values` record is flat (string -> number), so a one-level
+// key comparison is enough — no need for a general deep-equal utility.
+function shallowEqualRecord(a: Record<string, number>, b: Record<string, number>): boolean {
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  if (aKeys.length !== bKeys.length) return false;
+  for (const key of aKeys) {
+    if (a[key] !== b[key]) return false;
+  }
+  return true;
+}
+
 const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
   const navigate = useNavigate();
   const theme = getTheme();
   const border = `1px solid ${theme.palette.neutralLight}`;
 
-  const handleKioskButton = () => {
+  // useCallback so this stays a stable prop reference into Canvas (now
+  // React.memo'd — see Canvas.tsx's own comment on why a fresh function
+  // identity on every ~60Hz simTimeMs tick would defeat that memo).
+  const handleKioskButton = useCallback(() => {
     if (kioskMode) navigate(-1);
     else navigate(`/telemetryadmin/dashboards/${encodeURIComponent(dashboardName)}/show`);
-  };
+  }, [kioskMode, navigate, dashboardName]);
 
   const { dashboard, setDashboard, saveDashboard, deleteDashboard, savePanCoordinates, savePhotoEditing, uploadSprite, deleteSprite, refetchSprites, copyBuiltinSprite, uploadSpriteData, uploadBackground, isDirty, sprites, loading, canvasRef, forceNightPreview, handleDashboardUpdate } = useDashboard(dashboardName);
 
@@ -178,8 +193,6 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [undo, redo, kioskMode]);
-  const { isNight, toggleNightMode } = useGlobalNightMode();
-  const { previewCarId } = useGlobalPreviewCar();
   const builtInSpriteFileSet = useMemo(() => new Set(builtInSprites.map(s => s.file)), []);
   const { data: myData } = useQuery(dispatcher.my, { fetchPolicy: 'cache-first' });
   const globalSteerMaxDeg: number = (myData as any)?.my?.settings?.steerMaxDeg ?? 400;
@@ -211,6 +224,31 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
   const [car, setCar] = useState('');
   const [simStatus, setSimStatus] = useState('');
 
+  // This is the ONE place on a DashboardDesigner page that opens the real
+  // dashboardUpdates subscription — every event type it carries (dashboard/
+  // template/device-default/telemetry/night-mode/night-clock/preview-car/
+  // car-dash-pan) is demultiplexed from this single connection by the hub,
+  // and re-provided via context below so anything nested under this tree
+  // (DayNightSimPanel, via Canvas.tsx's gear popup) shares it automatically
+  // instead of opening a second connection. See liveUpdatesHub.tsx's own
+  // doc comment for why this matters beyond just one page: several
+  // dashboard kiosk windows open at once (all sharing one browser's
+  // per-origin HTTP/1.1 connection budget) used to need 4 separate
+  // subscriptions *each*, exhausting that shared budget with just 2 windows
+  // open (confirmed live — one window's requests stalled until the other's
+  // connections were released).
+  const [hub, hubSubscriber] = useLiveUpdatesHub({
+    includeTelemetry: kioskMode,
+    includeNightClock: kioskMode,
+    // Skip until dashboard is loaded — avoids a useSyncExternalStore commit
+    // during the initial mount burst when Apollo is already processing
+    // multiple queries.
+    skip: !dashboard,
+  });
+
+  const { isNight, nightAmount, simTimeMs, toggleNightMode } = useGlobalNightMode(hub, { liveClock: kioskMode });
+  const { previewCarId } = useGlobalPreviewCar(hub);
+
   const { data: carsData } = useQuery(GET_CARS, {
     skip: dashboard?.baseDashType !== '360',
     fetchPolicy: 'cache-and-network',
@@ -229,10 +267,8 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
   // edits without needing to actually drive the car. The list is small, so a
   // full refetch on any change is simpler and safer than merging the payload
   // into local state by hand.
-  useSubscription(CAR_DASH_PAN_CHANGED, {
-    skip: dashboard?.baseDashType !== '360',
-    onData: () => { refetchCarDashPans(); },
-  });
+  const onCarDashPanChanged = useCallback(() => { refetchCarDashPans(); }, [refetchCarDashPans]);
+  useHubListener(hub, 'CarDashPanChanged', dashboard?.baseDashType === '360' ? onCarDashPanChanged : undefined);
 
   const { handleDeviceDefaultEvent } = useMappingWatcher(
     () => navigate('/telemetryadmin/default', { replace: true }),
@@ -241,28 +277,36 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
     simStatus,
   );
 
-  const handleSubscriptionData = useCallback(({ data }: any) => {
-    const event = (data.data as any)?.dashboardUpdates;
-    if (!event) return;
-    const typename = event.__typename;
-    if (typename === 'DashboardEntryChanged') handleDashboardUpdate(event);
-    else if (typename === 'DashTemplateChanged') refetchTemplates();
-    else if (typename === 'DeviceDefaultChanged' && kioskMode) handleDeviceDefaultEvent(event);
-    else if (typename === 'TelemetryEvent') {
-      const { values, car: c, simStatus: s } = computeTelemetryValues(event.frame);
-      setLiveValues(values);
-      setCar(c);
-      setSimStatus(s);
-    }
-  }, [handleDashboardUpdate, refetchTemplates, handleDeviceDefaultEvent, kioskMode]);
+  useHubListener(hub, 'DashboardEntryChanged', handleDashboardUpdate);
+  useHubListener(hub, 'DashTemplateChanged', refetchTemplates);
+  useHubListener(hub, 'DeviceDefaultChanged', kioskMode ? handleDeviceDefaultEvent : undefined);
 
-  // Skip until dashboard is loaded — avoids a useSyncExternalStore commit during
-  // the initial mount burst when Apollo is already processing multiple queries.
-  useSubscription(DASHBOARD_UPDATES_SUB, {
-    fetchPolicy: 'no-cache',
-    skip: !dashboard,
-    onData: handleSubscriptionData,
-  });
+  // computeTelemetryValues builds a brand-new `values` object on every call
+  // (even `{}` when there's no live frame at all), so calling setLiveValues
+  // unconditionally at the subscription's ~60Hz tick rate committed a new
+  // object reference every single tick regardless of whether any value
+  // actually changed — a permanent re-render source for the whole
+  // DashboardDesigner tree. setCar/setSimStatus don't have this problem
+  // (React already bails out of a state update when the new value is a
+  // primitive `Object.is`-equal to the old one), only the object-valued
+  // `values` does. liveValuesRef mirrors the last *committed* values so
+  // this can compare-before-set without depending on stale closure state.
+  const liveValuesRef = useRef<Record<string, number>>({});
+  const onTelemetryEvent = useCallback((event: any) => {
+    const { values, car: c, simStatus: s } = computeTelemetryValues(event.frame);
+    if (!shallowEqualRecord(liveValuesRef.current, values)) {
+      liveValuesRef.current = values;
+      setLiveValues(values);
+    }
+    setCar(c);
+    setSimStatus(s);
+  }, []);
+  // Not registered at all while editing — baseTelemetry (below) only reads
+  // liveValues when `kioskMode && kioskSweepDone`; the editor always shows
+  // playbackData (manual/sweep test data) instead, and the hub doesn't even
+  // request TelemetryEvent from the server when includeTelemetry is false,
+  // so this is purely a "would never fire anyway" guard, not a real gate.
+  useHubListener(hub, 'TelemetryEvent', kioskMode ? onTelemetryEvent : undefined);
 
   const resizingRef = useRef(false);
   const startYRef = useRef(0);
@@ -453,6 +497,16 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
     navigate('/telemetryadmin/dashboards');
   }, [deleteDashboard, navigate]);
 
+  // Manual memo cache (not useMemo) for kioskLive360 below — everything past
+  // the `loading`/`!dashboard` early return right below this is plain JS,
+  // no hooks, since this component's very first render (while loading) never
+  // reaches past that return: any hook placed after it would be called on
+  // some renders and not others, tripping React's "rendered more hooks than
+  // previous render" the moment loading actually completes. This ref itself
+  // is unconditional (safe) — the comparison logic that reads/writes it runs
+  // after the early return, as ordinary code, not a hook.
+  const kioskLive360CacheRef = useRef<{ deps: unknown[]; el: React.ReactNode } | null>(null);
+
   if (loading || !dashboard) return <div>Loading dashboard...</div>;
 
   const explorerProps = {
@@ -505,12 +559,18 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
   // Car-specific 360 photo takes priority; fall back to the dashboard's configured default.
   // When the car has a night variant (same camera position, different
   // lighting), both URLs are handed to Photo360CrossfadeViewer, which
-  // crossfades between them as isNight changes instead of cutting instantly.
+  // crossfades between them continuously as nightAmount changes instead of
+  // cutting instantly.
   const matchedCar = cars.find(c => parseCarIds(c).includes(effectiveCar));
   const carPhoto360 = matchedCar;
   const carDayPhoto = carPhoto360?.dayPhoto;
   const carNightPhoto = carPhoto360?.nightPhoto;
-  const usingCarNightPhoto = isNight && !!carNightPhoto;
+  // Whether the car has a distinct night photo at all — not gated by the
+  // current nightAmount, since Photo360CrossfadeViewer already blends the
+  // two photos correctly across the *entire* 0..1 range on its own; gating
+  // this by isNight would un-suppress Canvas's generic darkening overlay
+  // partway through a transition and double-darken the scene.
+  const hasCarNightPhoto = !!carNightPhoto;
   const defaultPhoto360Sprite = dashboard.baseDashType === '360' && dashboard.photo360File
     ? sprites.find(s => s.file === dashboard.photo360File)
     : undefined;
@@ -541,7 +601,7 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
       ref={viewer360Ref}
       dayPhotoUrl={dayPhoto360Url}
       nightPhotoUrl={nightPhoto360Url}
-      isNight={isNight}
+      nightAmount={nightAmount}
       yaw={dashboard.photo360Yaw ?? 0}
       pitch={dashboard.photo360Pitch ?? 0}
       fov={dashboard.photo360Fov ?? 90}
@@ -554,32 +614,68 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
 
   // Kiosk: show live viewer when actively editing (photo360Editing) OR when the
   // dashboard is configured to always use the live viewer (photo360LiveKiosk).
-  const kioskLive360 = kioskMode && dashboard.baseDashType === '360' &&
-    (dashboard.photo360Editing || dashboard.photo360LiveKiosk) && dayPhoto360Url ? (
-    <Photo360CrossfadeViewer
-      dayPhotoUrl={dayPhoto360Url}
-      nightPhotoUrl={nightPhoto360Url}
-      isNight={isNight}
-      yaw={kioskPan.yaw}
-      pitch={kioskPan.pitch}
-      fov={kioskPan.fov}
-      roll={kioskPan.roll}
-      displayWidth={dashboard.canvasWidth}
-      displayHeight={dashboard.canvasHeight}
-      onChange={() => {}}
-      telemetryData={telemetryData}
-      swayEnabled={dashboard.neckFx}
-      swayGainX={dashboard.neckFxGainX}
-      swayGainY={dashboard.neckFxGainY}
-      swayDisableX={dashboard.neckFxDisableX}
-      swayDisableY={dashboard.neckFxDisableY}
-      readOnly
-    />
-  ) : undefined;
+  //
+  // Manually memoized via kioskLive360CacheRef (declared above the
+  // loading/!dashboard early return — see its own comment for why this
+  // can't be a real useMemo here). This element gets passed all the way
+  // down as Canvas's `liveBackground` prop, and Canvas is React.memo'd
+  // specifically so the ~60Hz simTimeMs tick doesn't force a re-render (see
+  // Canvas.tsx's own comment). Without this, a fresh JSX element here on
+  // every tick (index.tsx itself re-renders that often in kiosk/live view)
+  // would defeat that memo via prop-reference inequality on every 360-type
+  // dashboard, regardless of whether the simTimeMs prop itself was removed
+  // from Canvas.
+  const kioskLive360Deps: unknown[] = [
+    kioskMode, dashboard.baseDashType, dashboard.photo360Editing, dashboard.photo360LiveKiosk,
+    dayPhoto360Url, nightPhoto360Url, nightAmount,
+    kioskPan.yaw, kioskPan.pitch, kioskPan.fov, kioskPan.roll,
+    dashboard.canvasWidth, dashboard.canvasHeight, telemetryData,
+    dashboard.neckFx, dashboard.neckFxGainX, dashboard.neckFxGainY, dashboard.neckFxDisableX, dashboard.neckFxDisableY,
+  ];
+  const kioskLive360CacheStale = !kioskLive360CacheRef.current ||
+    kioskLive360Deps.some((d, i) => d !== kioskLive360CacheRef.current!.deps[i]);
+  if (kioskLive360CacheStale) {
+    kioskLive360CacheRef.current = {
+      deps: kioskLive360Deps,
+      el: kioskMode && dashboard.baseDashType === '360' &&
+        (dashboard.photo360Editing || dashboard.photo360LiveKiosk) && dayPhoto360Url ? (
+        <Photo360CrossfadeViewer
+          dayPhotoUrl={dayPhoto360Url}
+          nightPhotoUrl={nightPhoto360Url}
+          nightAmount={nightAmount}
+          yaw={kioskPan.yaw}
+          pitch={kioskPan.pitch}
+          fov={kioskPan.fov}
+          roll={kioskPan.roll}
+          displayWidth={dashboard.canvasWidth}
+          displayHeight={dashboard.canvasHeight}
+          onChange={() => {}}
+          telemetryData={telemetryData}
+          swayEnabled={dashboard.neckFx}
+          swayGainX={dashboard.neckFxGainX}
+          swayGainY={dashboard.neckFxGainY}
+          swayDisableX={dashboard.neckFxDisableX}
+          swayDisableY={dashboard.neckFxDisableY}
+          readOnly
+        />
+      ) : undefined,
+    };
+  }
+  const kioskLive360 = kioskLive360CacheRef.current!.el;
 
   const showingLive360 = show360 || !!kioskLive360;
 
+  // simTimeMs is delivered via ClockTimeContext (wrapping Canvas from
+  // outside) rather than as a Canvas prop — it ticks at ~60Hz (see
+  // useGlobalNightMode's own doc comment) and Canvas is otherwise memoized
+  // (see Canvas.tsx), so passing it as a prop would force Canvas's entire
+  // node tree to re-render on every tick regardless. Only components that
+  // actually read the context (ClockTextNode/ClockSpriteNode) re-render on
+  // each tick this way — everything else in the tree is unaffected, same
+  // reasoning as the Canvas node prop fanout convention (values only some
+  // node types need go via context, not a prop threaded through every node).
   const canvasEl = (
+    <ClockTimeContext.Provider value={simTimeMs ?? null}>
     <Canvas
       dashboard={showingLive360 ? { ...dashboard, background: undefined } : dashboard}
       sprites={sprites}
@@ -588,6 +684,7 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
       onUpdate={updateNode}
       onUpdateDashboard={updateDashboard}
       isNight={isNight}
+      nightAmount={nightAmount}
       onToggleNightMode={toggleNightMode}
       kioskMode={kioskMode}
       onKioskButton={handleKioskButton}
@@ -599,7 +696,7 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
       globalSteerMaxDeg={globalSteerMaxDeg}
       panBgMode={panBgMode && !show360}
       liveBackground={liveBackground360 ?? kioskLive360}
-      liveBackgroundIsNightPhoto={showingLive360 && usingCarNightPhoto}
+      liveBackgroundIsNightPhoto={showingLive360 && hasCarNightPhoto}
       liveBackgroundInteractive={viewing360 && !kioskMode}
       gamepadMappings={gamepadMappings}
       simStatus={simStatus}
@@ -607,6 +704,7 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
       activeTool={activeTool}
       key={dashboardName}
     />
+    </ClockTimeContext.Provider>
   );
 
   const editAreaEl = (
@@ -721,16 +819,29 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
   );
 
   if (kioskMode) {
+    // Must wrap with both feed providers same as the mobile/desktop branches
+    // below — the gear-icon popup (DayNightSimPanel, via Canvas.tsx) only
+    // ever renders in kiosk mode, so skipping this here previously meant it
+    // always fell back to opening its own standalone nightModeUpdates
+    // subscription: a second persistent connection competing with
+    // dashboardUpdates for the browser's ~6-connection HTTP/1.1 pool, which
+    // queued the adjust-time mutation behind it until the popup closed and
+    // released the connection (see useGlobalNightMode.ts's doc comment).
     return (
+      <LiveUpdatesContext.Provider value={hub}>
+      {hubSubscriber}
       <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 1001, background: '#000' }}>
         {canvasEl}
       </div>
+      </LiveUpdatesContext.Provider>
     );
   }
 
   // ── Mobile layout: canvas top, explorer bottom, picker as overlay ──────────
   if (isMobile) {
     return (
+      <LiveUpdatesContext.Provider value={hub}>
+      {hubSubscriber}
       <Stack style={{ height: 'calc(100dvh - 3.85em)', width: '100%', overflow: 'hidden' }}>
         <Stack.Item grow style={{ position: 'relative', minHeight: 0, overflow: 'hidden' }}>
           {editAreaEl}
@@ -769,11 +880,14 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
           <ObjectExplorer {...explorerProps} />
         </div>
       </Stack>
+      </LiveUpdatesContext.Provider>
     );
   }
 
   // ── Desktop layout: horizontal panels ──────────────────────────────────────
   return (
+    <LiveUpdatesContext.Provider value={hub}>
+    {hubSubscriber}
     <Stack horizontal style={{ height: 'calc(100vh - 3.85em)', width: '100%', overflow: 'hidden' }}>
       {panelSide === 'left' && <ObjectExplorer {...explorerProps} />}
       <Stack.Item grow style={{ position: 'relative', overflow: 'hidden' }}>
@@ -781,6 +895,7 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
       </Stack.Item>
       {panelSide === 'right' && <ObjectExplorer {...explorerProps} />}
     </Stack>
+    </LiveUpdatesContext.Provider>
   );
 };
 

@@ -21,6 +21,8 @@ interface Props {
   thumbnailField?: string;
   cardWidth?: number;
   thumbnailHeight?: number;
+  // Passed straight through to ThumbnailCard — see its own doc comment.
+  thumbnailFit?: 'cover' | 'contain';
   // Overrides the query's result field — defaults to `get${name.plural}`.
   // Needed when the display-plural label doesn't match the actual resolver name.
   queryResultKey?: string;
@@ -72,6 +74,7 @@ const CardList: React.FC<Props> = ({
   thumbnailField,
   cardWidth,
   thumbnailHeight,
+  thumbnailFit,
   queryResultKey,
   hideHeader,
   idField,
@@ -131,6 +134,7 @@ const CardList: React.FC<Props> = ({
               key={item.id}
               width={cardWidth}
               thumbnailHeight={thumbnailHeight}
+              fit={thumbnailFit}
               title={String(title ?? '')}
               thumbnailUrl={thumbnailUrl}
               onThumbnailClick={() => navigate(`${pathname}/${routeId}/show`)}

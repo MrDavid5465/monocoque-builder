@@ -8,6 +8,7 @@ import Show from './Show';
 import GroupsAdmin from './GroupsAdmin';
 import TemplatesAdmin from './TemplatesAdmin';
 import RecordingsAdmin from './RecordingsAdmin';
+import TracksAdmin from './TracksAdmin';
 
 const TelemetryAdmin: React.FC = () => (
   <Routes>
@@ -17,6 +18,7 @@ const TelemetryAdmin: React.FC = () => (
     <Route path="/groups/*" element={<GroupsAdmin />} />
     <Route path="/templates/*" element={<TemplatesAdmin />} />
     <Route path="/recordings/*" element={<RecordingsAdmin />} />
+    <Route path="/tracks/*" element={<TracksAdmin />} />
     <Route path="/default" element={<Default />} />
     <Route path="/test" element={<Show />} />
   </Routes>
