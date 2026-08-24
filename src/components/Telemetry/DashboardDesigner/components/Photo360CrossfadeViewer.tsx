@@ -11,6 +11,10 @@ interface Props {
   // into a smooth transition (see its onBeforeCompile/render-loop comments),
   // the simulated clock produces a real ramp through dawn/dusk already.
   nightAmount: number;
+  // See Photo360Viewer's own doc comment on these two.
+  ambientColor?: { r: number; g: number; b: number } | null;
+  ambientTintIntensity?: number;
+  ambientSaturationBoost?: number;
   yaw: number;
   pitch: number;
   fov: number;

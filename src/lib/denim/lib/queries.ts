@@ -46,6 +46,13 @@ const MY = gql`
         shakerDspEnabled
         shakerLfeSourceDevice
         shakerLfeLpfHz
+        huenicornEnabled
+        ambientTintIntensity
+        ambientPrimaryChannel
+        ambientSaturationBoost
+        simdCommand
+        monocoqueCommand
+        huenicornCommand
         ...GamepadMappingsFields
       }
     }
@@ -66,6 +73,13 @@ const UPDATE_SETTINGS = gql`
         shakerDspEnabled
         shakerLfeSourceDevice
         shakerLfeLpfHz
+        huenicornEnabled
+        ambientTintIntensity
+        ambientPrimaryChannel
+        ambientSaturationBoost
+        simdCommand
+        monocoqueCommand
+        huenicornCommand
         ...GamepadMappingsFields
       }
     }
@@ -93,6 +107,13 @@ export interface IUserSettingInput {
   shakerDspEnabled?: boolean;
   shakerLfeSourceDevice?: string;
   shakerLfeLpfHz?: number;
+  huenicornEnabled?: boolean;
+  ambientTintIntensity?: number;
+  ambientPrimaryChannel?: number;
+  ambientSaturationBoost?: number;
+  simdCommand?: string;
+  monocoqueCommand?: string;
+  huenicornCommand?: string;
 }
 export interface ISettings {
   launchPage: string;
@@ -106,6 +127,13 @@ export interface ISettings {
   shakerDspEnabled?: boolean;
   shakerLfeSourceDevice?: string;
   shakerLfeLpfHz?: number;
+  huenicornEnabled?: boolean;
+  ambientTintIntensity?: number;
+  ambientPrimaryChannel?: number;
+  ambientSaturationBoost?: number;
+  simdCommand?: string;
+  monocoqueCommand?: string;
+  huenicornCommand?: string;
 }
 export interface IAppNav {
   text: string;

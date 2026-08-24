@@ -5,6 +5,7 @@ pub mod clients;
 pub mod dashboard_entry;
 pub mod dashboard_files;
 pub mod gamepad;
+pub mod huenicorn;
 pub mod night_clock;
 pub mod recording;
 pub mod shaker_dsp;
@@ -13,12 +14,18 @@ pub mod track_geocode;
 pub use car::{CarFileMutation, CarPhotoSyncQuery};
 pub use dashboard_entry::DashboardMutation;
 pub use gamepad::GamepadMutation;
+pub use huenicorn::HuenicornMutation;
 pub use night_clock::NightClockMutation;
 pub use recording::RecordingControlMutation;
 pub use shaker_dsp::{ShakerDspMutation, ShakerDspQuery};
 pub use templates::DashTemplateThumbnailMutation;
 pub use track_geocode::TrackGeocodeQuery;
 
+use crate::huenicorn::{
+    current_channel_colors, huenicorn_status, list_channels, AmbientColorChanged, ChannelColor,
+    ChannelInfo, HuenicornSettingsChanged, HuenicornStatus,
+};
+use crate::service_watchdogs::{self, MonocoqueStatus, SimdStatus};
 use crate::telemetry::recording as telemetry_recording;
 use crate::telemetry::{build_frame, read_simdata, types::TelemetryFrame};
 use crate::typiql_types::{
@@ -77,6 +84,14 @@ enum DashboardUpdateEvent {
     // publish_recording_status' own doc comment for where this gets
     // published from.
     Recording(RecordingStatus),
+    // Per-channel Huenicorn colors, published from huenicorn.rs's color
+    // poller loop (not a mutation-triggered event like the others above —
+    // see AmbientColorChanged's own doc comment).
+    AmbientColor(AmbientColorChanged),
+    // Huenicorn-relevant settings (enabled/intensity/primary channel),
+    // published from update_settings — see HuenicornSettingsChanged's own
+    // doc comment.
+    HuenicornSettings(HuenicornSettingsChanged),
 }
 
 /// One tick of the server-authoritative simulated in-game clock (see
@@ -186,6 +201,32 @@ impl QueryRoot {
         RecordingStatus::current()
     }
 
+    async fn huenicorn_status(&self) -> HuenicornStatus {
+        huenicorn_status().await
+    }
+
+    async fn simd_status(&self) -> SimdStatus {
+        service_watchdogs::simd_status()
+    }
+
+    async fn monocoque_status(&self) -> MonocoqueStatus {
+        service_watchdogs::monocoque_status()
+    }
+
+    /// Channel list for the "which channel drives the 360° tint" picker in
+    /// AmbientLights/index.tsx.
+    async fn huenicorn_channels(&self) -> Vec<ChannelInfo> {
+        list_channels().await
+    }
+
+    /// One-shot current colors, for the live swatch next to that picker —
+    /// distinct from the ~30Hz `AmbientColor` subscription event, which only
+    /// a kiosk 360 dashboard subscribes to (see `dashboard_updates`'s own
+    /// `include_ambient_color` gating).
+    async fn huenicorn_current_colors(&self) -> Vec<ChannelColor> {
+        current_channel_colors().await
+    }
+
     /// One-shot read of the current simulated-clock tick — same rationale
     /// as `telemetry_snapshot` above (a plain query mirroring what the
     /// subscription pushes) so a freshly-mounted consumer (the day/night
@@ -291,6 +332,7 @@ impl SubscriptionRoot {
         ctx: &Context<'_>,
         #[graphql(default = true)] include_telemetry: bool,
         #[graphql(default = true)] include_night_clock: bool,
+        #[graphql(default = true)] include_ambient_color: bool,
     ) -> async_graphql::Result<impl Stream<Item = DashboardUpdateEvent>> {
         let adapter = default_adapter(ctx)?;
 
@@ -344,9 +386,20 @@ impl SubscriptionRoot {
         let s9 = TypiQLBroker::<RecordingStatus>::subscribe()
             .map(DashboardUpdateEvent::Recording)
             .boxed();
+        let s10: std::pin::Pin<Box<dyn Stream<Item = DashboardUpdateEvent> + Send>> =
+            if include_ambient_color {
+                TypiQLBroker::<AmbientColorChanged>::subscribe()
+                    .map(DashboardUpdateEvent::AmbientColor)
+                    .boxed()
+            } else {
+                futures_util::stream::empty().boxed()
+            };
+        let s11 = TypiQLBroker::<HuenicornSettingsChanged>::subscribe()
+            .map(DashboardUpdateEvent::HuenicornSettings)
+            .boxed();
 
         Ok(futures_util::stream::select_all([
-            s1, s2, s3, s4, s5, s6, s7, s8, s9,
+            s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11,
         ]))
     }
 }

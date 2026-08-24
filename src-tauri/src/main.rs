@@ -9,7 +9,9 @@ mod config_manager;
 mod device_enumeration;
 mod gamepad;
 mod graphql;
+mod huenicorn;
 mod pipewire_dsp;
+mod service_watchdogs;
 mod sun_position;
 mod telemetry;
 mod typiql_types;
@@ -33,6 +35,10 @@ fn main() {
                 let rt = Runtime::new().unwrap();
                 rt.block_on(async {
                     tokio::spawn(gamepad::run_watchdog());
+                    tokio::spawn(huenicorn::run_sim_watcher());
+                    tokio::spawn(huenicorn::run_color_poller());
+                    tokio::spawn(service_watchdogs::run_simd_watchdog());
+                    tokio::spawn(service_watchdogs::run_monocoque_watchdog());
 
                     let app = api::build_router().await;
 

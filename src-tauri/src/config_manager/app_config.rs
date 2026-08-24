@@ -20,6 +20,13 @@ impl Default for AppConfig {
                 shaker_dsp_enabled: false,
                 shaker_lfe_source_device: None,
                 shaker_lfe_lpf_hz: None,
+                huenicorn_enabled: false,
+                ambient_tint_intensity: 0.3,
+                ambient_primary_channel: None,
+                ambient_saturation_boost: 1.0,
+                simd_command: "simd".into(),
+                monocoque_command: "monocoque play".into(),
+                huenicorn_command: "huenicorn".into(),
             },
         }
     }
@@ -98,6 +105,16 @@ pub fn applications() -> Vec<AppEntry> {
                 path: "profiles".into(),
                 text: "Profiles".into(),
             }],
+        },
+        // No "Profiles" link — there's no list of records to manage here,
+        // Huenicorn's own web UI owns the channel/screen-region list (see
+        // AmbientLights/index.tsx's own doc comment).
+        AppEntry {
+            name: "Ambient Lights".into(),
+            path: "ambient-lights".into(),
+            front_end: "AmbientLights".into(),
+            default_route: "".into(),
+            links: vec![],
         },
     ]
 }

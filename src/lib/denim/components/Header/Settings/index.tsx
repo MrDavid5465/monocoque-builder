@@ -48,6 +48,9 @@ const Index: React.FC<Props> = ({ isOpen, dismissModal, settings }) => {
   const [saveError, setSaveError] = useState<string | null>(null);
 
   const [steerMaxDeg, setSteerMaxDeg] = useState<number>(settings.steerMaxDeg ?? 400);
+  const [simdCommand, setSimdCommand] = useState<string>(settings.simdCommand ?? 'simd');
+  const [monocoqueCommand, setMonocoqueCommand] = useState<string>(settings.monocoqueCommand ?? 'monocoque play');
+  const [huenicornCommand, setHuenicornCommand] = useState<string>(settings.huenicornCommand ?? 'huenicorn');
   const [udevStatus, setUdevStatus] = useState<'unknown' | 'installed' | 'missing'>('unknown');
   const [udevWorking, setUdevWorking] = useState(false);
   const [udevMsg, setUdevMsg] = useState<string | null>(null);
@@ -70,6 +73,18 @@ const Index: React.FC<Props> = ({ isOpen, dismissModal, settings }) => {
   useEffect(() => {
     if (settings.steerMaxDeg != null) setSteerMaxDeg(settings.steerMaxDeg);
   }, [settings.steerMaxDeg]);
+
+  useEffect(() => {
+    if (settings.simdCommand != null) setSimdCommand(settings.simdCommand);
+  }, [settings.simdCommand]);
+
+  useEffect(() => {
+    if (settings.monocoqueCommand != null) setMonocoqueCommand(settings.monocoqueCommand);
+  }, [settings.monocoqueCommand]);
+
+  useEffect(() => {
+    if (settings.huenicornCommand != null) setHuenicornCommand(settings.huenicornCommand);
+  }, [settings.huenicornCommand]);
 
   const checkUdevStatus = useCallback(async () => {
     try {
@@ -186,7 +201,18 @@ const Index: React.FC<Props> = ({ isOpen, dismissModal, settings }) => {
     setSaveError(null);
 
     try {
-      await updateSettings({ variables: { settings: { ...generalValues, steerMaxDeg, gamepadMappings } } });
+      await updateSettings({
+        variables: {
+          settings: {
+            ...generalValues,
+            steerMaxDeg,
+            gamepadMappings,
+            simdCommand,
+            monocoqueCommand,
+            huenicornCommand,
+          },
+        },
+      });
 
       // Collect all device names that need a record: global default + all devices in the name map
       const allNames = new Set(['default', ...Object.values(deviceMap)]);
@@ -381,6 +407,32 @@ const Index: React.FC<Props> = ({ isOpen, dismissModal, settings }) => {
                   <span style={{ fontSize: '0.78em', marginTop: 4, opacity: 0.75 }}>{udevMsg}</span>
                 )}
               </Stack>
+            </Stack>
+          </PivotItem>
+
+          <PivotItem headerText="Services">
+            <Stack tokens={{ childrenGap: '1em' }} style={{ paddingTop: '0.77em' }}>
+              <span style={{ fontSize: '0.78em', opacity: 0.65 }}>
+                Commands the simd/monocoque/Huenicorn watchdogs use to launch each service
+                when it's found not running. Defaults are bare, PATH-resolved binary names —
+                override these if your install only exposes a service under a different name
+                or a wrapper script (e.g. a distrobox-based install).
+              </span>
+              <Form
+                key={`services-${simdCommand}-${monocoqueCommand}-${huenicornCommand}`}
+                form={{
+                  simdCommand: { type: 'text', label: 'simd command', placeholder: 'simd' },
+                  monocoqueCommand: { type: 'text', label: 'monocoque command', placeholder: 'monocoque play' },
+                  huenicornCommand: { type: 'text', label: 'huenicorn command', placeholder: 'huenicorn' },
+                }}
+                name="servicesSettings"
+                initialValues={{ simdCommand, monocoqueCommand, huenicornCommand }}
+                onChange={(_n: string, { clean }: any) => {
+                  setSimdCommand(clean.simdCommand);
+                  setMonocoqueCommand(clean.monocoqueCommand);
+                  setHuenicornCommand(clean.huenicornCommand);
+                }}
+              />
             </Stack>
           </PivotItem>
 

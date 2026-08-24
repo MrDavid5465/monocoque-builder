@@ -3,7 +3,9 @@ use crate::config_manager::{
     to_gql_config, to_gql_entry,
     types::{AppConfig, AppSettings, AppSettingsInput, GamepadMapping, GqlAppConfig},
 };
+use crate::huenicorn::HuenicornSettingsChanged;
 use async_graphql::{Context, MaybeUndefined, Object, Result as GqlResult};
+use typiql::TypiQLBroker;
 
 /// For fields backed by an `Option<T>` on `AppSettings` — Undefined keeps
 /// the existing value, Null clears it to None, Value sets it.
@@ -90,6 +92,31 @@ impl AppConfigMutation {
                     s.shaker_lfe_lpf_hz,
                     existing.settings.shaker_lfe_lpf_hz,
                 ),
+                huenicorn_enabled: merge_required(
+                    s.huenicorn_enabled,
+                    existing.settings.huenicorn_enabled,
+                ),
+                ambient_tint_intensity: merge_required(
+                    s.ambient_tint_intensity,
+                    existing.settings.ambient_tint_intensity,
+                ),
+                ambient_primary_channel: merge_optional(
+                    s.ambient_primary_channel,
+                    existing.settings.ambient_primary_channel,
+                ),
+                ambient_saturation_boost: merge_required(
+                    s.ambient_saturation_boost,
+                    existing.settings.ambient_saturation_boost,
+                ),
+                simd_command: merge_required(s.simd_command, existing.settings.simd_command),
+                monocoque_command: merge_required(
+                    s.monocoque_command,
+                    existing.settings.monocoque_command,
+                ),
+                huenicorn_command: merge_required(
+                    s.huenicorn_command,
+                    existing.settings.huenicorn_command,
+                ),
             }
         } else {
             existing.settings
@@ -99,6 +126,13 @@ impl AppConfigMutation {
             settings: new_settings,
         };
         write_app_config(&app_config).map_err(async_graphql::Error::new)?;
+
+        TypiQLBroker::publish(HuenicornSettingsChanged {
+            huenicorn_enabled: app_config.settings.huenicorn_enabled,
+            ambient_tint_intensity: app_config.settings.ambient_tint_intensity,
+            ambient_primary_channel: app_config.settings.ambient_primary_channel,
+            ambient_saturation_boost: app_config.settings.ambient_saturation_boost,
+        });
 
         let mut gql = to_gql_config(app_config);
         gql.applications = applications().into_iter().map(to_gql_entry).collect();

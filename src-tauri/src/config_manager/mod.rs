@@ -63,6 +63,13 @@ pub fn to_gql_settings(s: AppSettings) -> GqlAppSettings {
         shaker_dsp_enabled: s.shaker_dsp_enabled,
         shaker_lfe_source_device: s.shaker_lfe_source_device,
         shaker_lfe_lpf_hz: s.shaker_lfe_lpf_hz,
+        huenicorn_enabled: s.huenicorn_enabled,
+        ambient_tint_intensity: s.ambient_tint_intensity,
+        ambient_primary_channel: s.ambient_primary_channel,
+        ambient_saturation_boost: s.ambient_saturation_boost,
+        simd_command: s.simd_command,
+        monocoque_command: s.monocoque_command,
+        huenicorn_command: s.huenicorn_command,
     }
 }
 pub fn to_gql_entry(a: AppEntry) -> GqlAppEntry {

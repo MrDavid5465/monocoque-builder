@@ -73,6 +73,33 @@ pub struct GqlAppSettings {
     /// None = bypassed. Global (not per-corner) since there's only one
     /// downmixed signal before it fans out to each corner's own fader.
     pub shaker_lfe_lpf_hz: Option<f32>,
+    /// Whether Huenicorn should auto-launch when the sim reports `Active`
+    /// (see huenicorn.rs's `run_sim_watcher`). Global, like
+    /// `shaker_dsp_enabled` — the ambient-lighting rig isn't per-car/profile.
+    pub huenicorn_enabled: bool,
+    /// How strongly the 360° viewer's ambient tint blends in, 0.0-1.0. See
+    /// Photo360Viewer.tsx's `ambientTint` uniform.
+    pub ambient_tint_intensity: f32,
+    /// Which Huenicorn channel ID drives the 360° tint (v1 picks one — see
+    /// AmbientColorChanged's own doc comment). None = first active channel.
+    pub ambient_primary_channel: Option<u8>,
+    /// How much to exaggerate the 360° tint color's own saturation (see
+    /// Photo360Viewer.tsx's `boostedR`/`boostedG`/`boostedB`) — 1.0 = as
+    /// captured (default), higher pushes a pale/washed-out reading toward a
+    /// genuinely vivid color (a pale red becomes a vibrant red) rather than
+    /// just a brighter version of the same pale color.
+    pub ambient_saturation_boost: f32,
+    /// Command used to launch `simd` when `service_watchdogs::run_simd_watchdog`
+    /// finds it not running. Defaults to the bare `simd` (PATH-resolved) —
+    /// override this if your install only exposes it under a different name
+    /// (e.g. a distrobox wrapper script).
+    pub simd_command: String,
+    /// Command used to launch monocoque when `run_monocoque_watchdog` finds
+    /// it not running while the sim is `Active`. Defaults to `monocoque play`.
+    pub monocoque_command: String,
+    /// Command used to launch Huenicorn (see `huenicorn::start_huenicorn`).
+    /// Defaults to the bare `huenicorn` (PATH-resolved).
+    pub huenicorn_command: String,
 }
 
 #[derive(SimpleObject, Clone)]
@@ -108,6 +135,13 @@ pub struct AppSettingsInput {
     pub shaker_dsp_enabled: MaybeUndefined<bool>,
     pub shaker_lfe_source_device: MaybeUndefined<String>,
     pub shaker_lfe_lpf_hz: MaybeUndefined<f32>,
+    pub huenicorn_enabled: MaybeUndefined<bool>,
+    pub ambient_tint_intensity: MaybeUndefined<f32>,
+    pub ambient_primary_channel: MaybeUndefined<u8>,
+    pub ambient_saturation_boost: MaybeUndefined<f32>,
+    pub simd_command: MaybeUndefined<String>,
+    pub monocoque_command: MaybeUndefined<String>,
+    pub huenicorn_command: MaybeUndefined<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -145,6 +179,36 @@ pub struct AppSettings {
     pub shaker_lfe_source_device: Option<String>,
     #[serde(default)]
     pub shaker_lfe_lpf_hz: Option<f32>,
+    #[serde(default)]
+    pub huenicorn_enabled: bool,
+    #[serde(default)]
+    pub ambient_tint_intensity: f32,
+    #[serde(default)]
+    pub ambient_primary_channel: Option<u8>,
+    #[serde(default = "default_ambient_saturation_boost")]
+    pub ambient_saturation_boost: f32,
+    #[serde(default = "default_simd_command")]
+    pub simd_command: String,
+    #[serde(default = "default_monocoque_command")]
+    pub monocoque_command: String,
+    #[serde(default = "default_huenicorn_command")]
+    pub huenicorn_command: String,
+}
+
+fn default_ambient_saturation_boost() -> f32 {
+    1.0
+}
+
+fn default_simd_command() -> String {
+    "simd".into()
+}
+
+fn default_monocoque_command() -> String {
+    "monocoque play".into()
+}
+
+fn default_huenicorn_command() -> String {
+    "huenicorn".into()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

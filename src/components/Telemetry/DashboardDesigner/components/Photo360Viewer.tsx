@@ -16,6 +16,22 @@ interface Props {
   // ease in the render loop, matching the CSS crossfade this replaced.
   nightPhotoUrl?: string;
   nightAmount?: number;
+  // Ambient-light tint from Huenicorn (see graphql/mod.rs's AmbientColor
+  // event / huenicorn.rs) — blended in after the day/night mix so the
+  // virtual cockpit visually agrees with the physical room's Hue lighting.
+  // v1 drives this from one picked channel (the wire format carries all of
+  // them — see AmbientColorChanged's own doc comment — so a later
+  // per-region effect is additive, not a rework). `ambientTintIntensity`
+  // (0-1) is the "how strong" dial from Settings; 0 or a missing
+  // `ambientColor` both resolve to a no-op tint.
+  ambientColor?: { r: number; g: number; b: number } | null;
+  ambientTintIntensity?: number;
+  // How much to exaggerate the tint color's own saturation (see the render
+  // loop's own comment near `boostedR`/`boostedG`/`boostedB`) — 1 = as
+  // captured (default), higher pushes a pale/washed-out reading toward a
+  // genuinely vivid color instead of just a brighter version of the same
+  // pale color (a pale red becomes a vibrant red, not a bright pale red).
+  ambientSaturationBoost?: number;
   yaw: number;
   pitch: number;
   fov: number;
@@ -48,7 +64,9 @@ const SWAY_YAW_DEG_PER_G   = 1.5;
 const SWAY_PITCH_DEG_PER_G = 0.75;
 
 const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
-  photoUrl, nightPhotoUrl, nightAmount = 0, yaw, pitch, fov, roll, displayWidth, displayHeight, onChange, readOnly = false,
+  photoUrl, nightPhotoUrl, nightAmount = 0, ambientColor = null, ambientTintIntensity = 0,
+  ambientSaturationBoost = 1,
+  yaw, pitch, fov, roll, displayWidth, displayHeight, onChange, readOnly = false,
   telemetryData, swayEnabled = false, swayGainX = 1, swayGainY = 1, swayDisableX = false, swayDisableY = false,
   onLoaded,
 }, ref) => {
@@ -70,8 +88,18 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
   // after that). The render loop reconciles both every frame instead of
   // either side waiting on the other.
   const nightTextureRef = useRef<THREE.Texture | null>(null);
-  const stateRef    = useRef({ yaw, pitch, fov, roll, displayWidth, displayHeight, nightAmount });
-  stateRef.current  = { yaw, pitch, fov, roll, displayWidth, displayHeight, nightAmount };
+  // Current lerped ambientTint/ambientStrength values, mirroring
+  // mixAmountRef's role for the day/night blend — smoothed here (not just
+  // in the shader) so JS always knows the in-flight value for the next
+  // frame's lerp target.
+  const ambientTintVecRef = useRef(new THREE.Vector3(0, 0, 0));
+  const ambientStrengthRef = useRef(0);
+  // Slow-moving "what does normal currently look like" baseline for
+  // ambient saturation — see the render loop's own comment for why this
+  // replaced a fixed saturation threshold.
+  const baselineSaturationRef = useRef(0);
+  const stateRef    = useRef({ yaw, pitch, fov, roll, displayWidth, displayHeight, nightAmount, ambientColor, ambientTintIntensity, ambientSaturationBoost });
+  stateRef.current  = { yaw, pitch, fov, roll, displayWidth, displayHeight, nightAmount, ambientColor, ambientTintIntensity, ambientSaturationBoost };
   const dragRef     = useRef<{ startX: number; startY: number; startYaw: number; startPitch: number } | null>(null);
 
   const telemetryRef = useRef(telemetryData);
@@ -127,10 +155,23 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
     material.onBeforeCompile = (shader) => {
       shader.uniforms.nightMap = { value: null };
       shader.uniforms.mixAmount = { value: 0 };
+      // ambientTint is a vivid glow color ADDED on top of the photo, not
+      // mixed/replaced — see the render loop's own comment for the history
+      // here: a plain multiplier left dark/shadowed pixels dark no matter
+      // how extreme it got (black * anything = black); a mix()-toward-color
+      // fixed that but replaced the photo's own local detail/contrast with
+      // a flat wash at any real strength (confirmed live: "washes out the
+      // image" whenever the tint showed). Additive avoids both — every
+      // pixel gets brighter/tinted by the same absolute amount, so the
+      // photo's own variation survives instead of being replaced.
+      // ambientStrength (0 = no-op) is how much glow to add, smoothed
+      // separately in JS the same way mixAmount is.
+      shader.uniforms.ambientTint = { value: new THREE.Vector3(0, 0, 0) };
+      shader.uniforms.ambientStrength = { value: 0 };
       shader.fragmentShader = shader.fragmentShader
         .replace(
           '#include <common>',
-          '#include <common>\nuniform sampler2D nightMap;\nuniform float mixAmount;',
+          '#include <common>\nuniform sampler2D nightMap;\nuniform float mixAmount;\nuniform vec3 ambientTint;\nuniform float ambientStrength;',
         )
         .replace(
           '#include <map_fragment>',
@@ -138,6 +179,7 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
             vec4 dayTexel = texture2D( map, vMapUv );
             vec4 nightTexel = texture2D( nightMap, vMapUv );
             vec4 sampledDiffuseColor = mix( dayTexel, nightTexel, mixAmount );
+            sampledDiffuseColor.rgb = min( sampledDiffuseColor.rgb + ambientTint * ambientStrength, vec3( 1.0 ) );
             diffuseColor *= sampledDiffuseColor;
           #endif`,
         );
@@ -220,6 +262,97 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
         mixAmountRef.current = lerp(mixAmountRef.current, target, smoothing);
         shaderRef.current.uniforms.mixAmount.value = mixAmountRef.current;
         shaderRef.current.uniforms.nightMap.value = nightTextureRef.current;
+
+        // Ambient tint: blends toward a target color (see the shader's own
+        // comment for why this replaced a multiply-based tint) — confirmed
+        // live that a multiply-tint was barely perceptible even at max
+        // intensity against a fully-saturated test color, since multiplying
+        // a dark/shadowed pixel by any factor leaves it dark. Blending
+        // (mix) instead affects every pixel by the same fraction regardless
+        // of its own brightness.
+        const { ambientColor: ac, ambientTintIntensity: intensity } = stateRef.current;
+        const tintTarget = { x: 0, y: 0, z: 0 };
+        let strengthTarget = 0;
+        if (ac && intensity > 0) {
+          // A physical ambient light's color cast reads far stronger
+          // against a dark room than a bright one. mixAmountRef is already
+          // this frame's smoothed day/night blend; boosts blend strength up
+          // to 3x at full night. Capped at 0.5 — lower than the 0.85 this
+          // used before switching from mix() to additive (see the shader's
+          // own comment): additive is much more visually potent per unit
+          // of strength (it brightens/tints every pixel by the same
+          // absolute amount rather than partially replacing it), so the
+          // old cap badly overexposed the scene toward the tint color at
+          // high intensity+night.
+          const nightBoost = 1 + mixAmountRef.current * 2;
+          // Only dramatic colors should move the tint — but "dramatic" is
+          // relative to a rolling baseline, not a fixed saturation number.
+          // Confirmed live sitting directly under in-game fireworks: with
+          // this app's current (large) Huenicorn capture regions, raw
+          // saturation only reached ~0.32 — a small bright burst averaged
+          // over a huge mostly-dark/neutral region barely moves the mean,
+          // so a fixed threshold tuned high enough to reject ordinary
+          // driving (~0.15-0.17 baseline) would reject real fireworks too.
+          // Tracking "what does normal currently look like" and reacting to
+          // deviation from THAT survives a diluted signal: fireworks are a
+          // ~0.15 spike above baseline even though the absolute number
+          // stays low. baselineTauMs is deliberately much slower than the
+          // ~830ms main smoothing so a sudden spike registers as a
+          // deviation before the baseline itself catches up and
+          // re-normalizes toward it.
+          const maxChannel = Math.max(ac.r, ac.g, ac.b, 0.0001);
+          const minChannel = Math.min(ac.r, ac.g, ac.b);
+          const saturation = (maxChannel - minChannel) / maxChannel;
+          const luma = (ac.r + ac.g + ac.b) / 3;
+          const baselineTauMs = 4000;
+          const baselineSmoothing = 1 - Math.exp(-dtMs / baselineTauMs);
+          baselineSaturationRef.current = lerp(
+            baselineSaturationRef.current,
+            saturation,
+            baselineSmoothing,
+          );
+          const deviation = Math.max(0, saturation - baselineSaturationRef.current);
+          // Calibrated against the fireworks reading above: ~0.32 raw
+          // saturation against a ~0.17 baseline is roughly a 0.15
+          // deviation, tuned here to read as fully "dramatic." Fixed (not
+          // user-tunable) — a moderate ease-in curve, distinct from
+          // ambientSaturationBoost below (that dial controls how vivid the
+          // tint COLOR looks once it's showing, not whether it shows).
+          const DEVIATION_FOR_FULL_STRENGTH = 0.15;
+          const linearFactor = Math.min(1, deviation / DEVIATION_FOR_FULL_STRENGTH);
+          const SPIKE_SELECTIVITY_EXPONENT = 2;
+          const saturationFactor = Math.pow(linearFactor, SPIKE_SELECTIVITY_EXPONENT);
+          strengthTarget = Math.min(0.5, intensity * nightBoost * 0.5) * saturationFactor;
+          // ambientSaturationBoost pushes each channel's deviation from the
+          // reading's own average outward before picking the tint color —
+          // 1 (default) leaves hue/saturation untouched, higher values turn
+          // a pale/washed-out reading (e.g. a dim, barely-red capture) into
+          // a genuinely vivid one (a saturated red) rather than just a
+          // brighter version of the same pale color. Then re-normalized to
+          // a bright, vivid brightness (max channel lifted to 0.9, not the
+          // raw dim reading) — blending toward the raw color would just
+          // darken everything toward that color's own brightness, the same
+          // "the room went dark" problem the old multiply-tint had.
+          // Blending toward a bright version reads as "the room is lit
+          // pink/orange" instead.
+          const boost = stateRef.current.ambientSaturationBoost;
+          const boostedR = Math.max(0, luma + (ac.r - luma) * boost);
+          const boostedG = Math.max(0, luma + (ac.g - luma) * boost);
+          const boostedB = Math.max(0, luma + (ac.b - luma) * boost);
+          const maxBoosted = Math.max(boostedR, boostedG, boostedB, 0.0001);
+          const vividScale = 0.9 / maxBoosted;
+          tintTarget.x = boostedR * vividScale;
+          tintTarget.y = boostedG * vividScale;
+          tintTarget.z = boostedB * vividScale;
+        }
+        ambientTintVecRef.current.set(
+          lerp(ambientTintVecRef.current.x, tintTarget.x, smoothing),
+          lerp(ambientTintVecRef.current.y, tintTarget.y, smoothing),
+          lerp(ambientTintVecRef.current.z, tintTarget.z, smoothing),
+        );
+        ambientStrengthRef.current = lerp(ambientStrengthRef.current, strengthTarget, smoothing);
+        shaderRef.current.uniforms.ambientTint.value.copy(ambientTintVecRef.current);
+        shaderRef.current.uniforms.ambientStrength.value = ambientStrengthRef.current;
       }
 
       renderer.render(scene, cameraRef.current!);

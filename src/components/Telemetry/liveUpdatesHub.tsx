@@ -16,7 +16,9 @@ export type LiveUpdateTypename =
   | 'NightClockTick'
   | 'PreviewCarChanged'
   | 'CarDashPanChanged'
-  | 'RecordingStatus';
+  | 'RecordingStatus'
+  | 'AmbientColorChanged'
+  | 'HuenicornSettingsChanged';
 
 type Listener = (event: any) => void;
 
@@ -78,14 +80,15 @@ export const LiveUpdatesContext = createContext<LiveUpdatesHub | null>(null);
 const LiveUpdatesSubscriber: React.FC<{
   includeTelemetry: boolean;
   includeNightClock: boolean;
+  includeAmbientColor: boolean;
   skip: boolean;
   listenersRef: React.MutableRefObject<Map<LiveUpdateTypename, Set<Listener>>>;
   onDown: () => void;
-}> = ({ includeTelemetry, includeNightClock, skip, listenersRef, onDown }) => {
+}> = ({ includeTelemetry, includeNightClock, includeAmbientColor, skip, listenersRef, onDown }) => {
   useSubscription(DASHBOARD_UPDATES_SUB, {
     skip,
     fetchPolicy: 'no-cache',
-    variables: { includeTelemetry, includeNightClock },
+    variables: { includeTelemetry, includeNightClock, includeAmbientColor },
     onData: ({ data }: any) => {
       const event = data.data?.dashboardUpdates;
       if (!event) return;
@@ -111,9 +114,15 @@ const LiveUpdatesSubscriber: React.FC<{
 export function useLiveUpdatesHub(opts: {
   includeTelemetry?: boolean;
   includeNightClock?: boolean;
+  includeAmbientColor?: boolean;
   skip?: boolean;
 } = {}): [LiveUpdatesHub, React.ReactNode] {
-  const { includeTelemetry = false, includeNightClock = true, skip = false } = opts;
+  const {
+    includeTelemetry = false,
+    includeNightClock = true,
+    includeAmbientColor = false,
+    skip = false,
+  } = opts;
   const listenersRef = useRef(new Map<LiveUpdateTypename, Set<Listener>>());
 
   const subscribe = useCallback((typename: LiveUpdateTypename, listener: Listener) => {
@@ -147,6 +156,7 @@ export function useLiveUpdatesHub(opts: {
     <LiveUpdatesSubscriber
       includeTelemetry={includeTelemetry}
       includeNightClock={includeNightClock}
+      includeAmbientColor={includeAmbientColor}
       skip={skip || subscriptionDown}
       listenersRef={listenersRef}
       onDown={onDown}
@@ -194,9 +204,14 @@ export function useHubListener<T = any>(
 export const LiveUpdatesProvider: React.FC<{
   includeTelemetry?: boolean;
   includeNightClock?: boolean;
+  includeAmbientColor?: boolean;
   children: React.ReactNode;
-}> = ({ includeTelemetry, includeNightClock, children }) => {
-  const [hub, hubSubscriber] = useLiveUpdatesHub({ includeTelemetry, includeNightClock });
+}> = ({ includeTelemetry, includeNightClock, includeAmbientColor, children }) => {
+  const [hub, hubSubscriber] = useLiveUpdatesHub({
+    includeTelemetry,
+    includeNightClock,
+    includeAmbientColor,
+  });
   return (
     <LiveUpdatesContext.Provider value={hub}>
       {hubSubscriber}
