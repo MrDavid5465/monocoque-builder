@@ -21,9 +21,11 @@ interface Props {
   // virtual cockpit visually agrees with the physical room's Hue lighting.
   // v1 drives this from one picked channel (the wire format carries all of
   // them — see AmbientColorChanged's own doc comment — so a later
-  // per-region effect is additive, not a rework). `ambientTintIntensity`
-  // (0-1) is the "how strong" dial from Settings; 0 or a missing
-  // `ambientColor` both resolve to a no-op tint.
+  // per-region effect is a pure addition, not a rework).
+  // `ambientTintIntensity` (0-1) is the Settings dial behind the
+  // soft-light blend's opacity (scaled by night/spike conditions in the
+  // render loop, see there); 0 or a missing `ambientColor` both resolve to
+  // a no-op tint.
   ambientColor?: { r: number; g: number; b: number } | null;
   ambientTintIntensity?: number;
   // How much to exaggerate the tint color's own saturation (see the render
@@ -88,12 +90,12 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
   // after that). The render loop reconciles both every frame instead of
   // either side waiting on the other.
   const nightTextureRef = useRef<THREE.Texture | null>(null);
-  // Current lerped ambientTint/ambientStrength values, mirroring
+  // Current lerped ambientTint/ambientOpacity values, mirroring
   // mixAmountRef's role for the day/night blend — smoothed here (not just
   // in the shader) so JS always knows the in-flight value for the next
   // frame's lerp target.
   const ambientTintVecRef = useRef(new THREE.Vector3(0, 0, 0));
-  const ambientStrengthRef = useRef(0);
+  const ambientOpacityRef = useRef(0);
   // Slow-moving "what does normal currently look like" baseline for
   // ambient saturation — see the render loop's own comment for why this
   // replaced a fixed saturation threshold.
@@ -155,23 +157,53 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
     material.onBeforeCompile = (shader) => {
       shader.uniforms.nightMap = { value: null };
       shader.uniforms.mixAmount = { value: 0 };
-      // ambientTint is a vivid glow color ADDED on top of the photo, not
-      // mixed/replaced — see the render loop's own comment for the history
-      // here: a plain multiplier left dark/shadowed pixels dark no matter
-      // how extreme it got (black * anything = black); a mix()-toward-color
-      // fixed that but replaced the photo's own local detail/contrast with
-      // a flat wash at any real strength (confirmed live: "washes out the
-      // image" whenever the tint showed). Additive avoids both — every
-      // pixel gets brighter/tinted by the same absolute amount, so the
-      // photo's own variation survives instead of being replaced.
-      // ambientStrength (0 = no-op) is how much glow to add, smoothed
-      // separately in JS the same way mixAmount is.
+      // ambientTint is SOFT-LIGHT blended over the photo (see softLight()
+      // below), at `ambientOpacity`. History, since three blend modes have
+      // been tried here and each failed differently: a plain multiplier left
+      // dark/shadowed pixels dark no matter how extreme it got (black *
+      // anything = black); a mix()-toward-color fixed that but replaced the
+      // photo's own local detail/contrast with a flat wash at any real
+      // strength (confirmed live: "washes out the image"); additive fixed
+      // the flatness but applied the same absolute lift to every pixel, so
+      // it read as uniformly strong across the whole frame and blew out
+      // highlights. Soft light is luminance-dependent instead — it pushes
+      // midtones hardest and falls off toward both ends, so deep shadows
+      // stay dark and bright highlights stay bright, which is how real
+      // in-game light (fireworks, neon) actually washes over a cockpit.
+      // ambientOpacity (0 = no-op) is how far to blend toward the
+      // soft-lit result, smoothed separately in JS the same way mixAmount is.
       shader.uniforms.ambientTint = { value: new THREE.Vector3(0, 0, 0) };
-      shader.uniforms.ambientStrength = { value: 0 };
+      shader.uniforms.ambientOpacity = { value: 0 };
       shader.fragmentShader = shader.fragmentShader
         .replace(
           '#include <common>',
-          '#include <common>\nuniform sampler2D nightMap;\nuniform float mixAmount;\nuniform vec3 ambientTint;\nuniform float ambientStrength;',
+          `#include <common>
+          uniform sampler2D nightMap;
+          uniform float mixAmount;
+          uniform vec3 ambientTint;
+          uniform float ambientOpacity;
+          // Standard (W3C/Photoshop) soft light. blend == 0.5 is the neutral
+          // point and returns base untouched; above pushes toward white,
+          // below toward black, both with a falloff that shrinks as base
+          // approaches the corresponding end — that falloff is the whole
+          // point, it's what keeps crushed blacks and blown highlights from
+          // moving while midtones take the full effect.
+          float softLightChannel( float base, float blend ) {
+            if ( blend <= 0.5 ) {
+              return base - ( 1.0 - 2.0 * blend ) * base * ( 1.0 - base );
+            }
+            float d = ( base <= 0.25 )
+              ? ( ( 16.0 * base - 12.0 ) * base + 4.0 ) * base
+              : sqrt( base );
+            return base + ( 2.0 * blend - 1.0 ) * ( d - base );
+          }
+          vec3 softLight( vec3 base, vec3 blend ) {
+            return vec3(
+              softLightChannel( base.r, blend.r ),
+              softLightChannel( base.g, blend.g ),
+              softLightChannel( base.b, blend.b )
+            );
+          }`,
         )
         .replace(
           '#include <map_fragment>',
@@ -179,7 +211,8 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
             vec4 dayTexel = texture2D( map, vMapUv );
             vec4 nightTexel = texture2D( nightMap, vMapUv );
             vec4 sampledDiffuseColor = mix( dayTexel, nightTexel, mixAmount );
-            sampledDiffuseColor.rgb = min( sampledDiffuseColor.rgb + ambientTint * ambientStrength, vec3( 1.0 ) );
+            vec3 softLit = softLight( sampledDiffuseColor.rgb, ambientTint );
+            sampledDiffuseColor.rgb = mix( sampledDiffuseColor.rgb, softLit, ambientOpacity );
             diffuseColor *= sampledDiffuseColor;
           #endif`,
         );
@@ -263,27 +296,28 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
         shaderRef.current.uniforms.mixAmount.value = mixAmountRef.current;
         shaderRef.current.uniforms.nightMap.value = nightTextureRef.current;
 
-        // Ambient tint: blends toward a target color (see the shader's own
-        // comment for why this replaced a multiply-based tint) — confirmed
-        // live that a multiply-tint was barely perceptible even at max
-        // intensity against a fully-saturated test color, since multiplying
-        // a dark/shadowed pixel by any factor leaves it dark. Blending
-        // (mix) instead affects every pixel by the same fraction regardless
-        // of its own brightness.
+        // Ambient tint: soft-light blended over the photo at
+        // `ambientOpacity` (see the shader's own comment for the full
+        // multiply → mix → additive → soft-light history and why each
+        // earlier mode was abandoned). `ambientTintIntensity` — the "Tint
+        // intensity" slider on the Ambient Lights page — is the user-facing
+        // dial for that opacity; everything below scales it by conditions
+        // (night, spike selectivity) rather than replacing it.
         const { ambientColor: ac, ambientTintIntensity: intensity } = stateRef.current;
         const tintTarget = { x: 0, y: 0, z: 0 };
-        let strengthTarget = 0;
+        let opacityTarget = 0;
         if (ac && intensity > 0) {
           // A physical ambient light's color cast reads far stronger
           // against a dark room than a bright one. mixAmountRef is already
-          // this frame's smoothed day/night blend; boosts blend strength up
-          // to 3x at full night. Capped at 0.5 — lower than the 0.85 this
-          // used before switching from mix() to additive (see the shader's
-          // own comment): additive is much more visually potent per unit
-          // of strength (it brightens/tints every pixel by the same
-          // absolute amount rather than partially replacing it), so the
-          // old cap badly overexposed the scene toward the tint color at
-          // high intensity+night.
+          // this frame's smoothed day/night blend; boosts opacity up to 3x
+          // at full night. The `* 0.5` keeps the slider's *default* (0.3)
+          // landing at ~0.15 opacity in daylight — the 15-20% range this
+          // was tuned to by eye — while leaving the slider's top half as
+          // headroom, so full intensity at full night can still reach a
+          // complete (1.0) soft-light blend. No hard sub-1.0 cap here
+          // anymore: the old 0.5 ceiling existed because additive blending
+          // overexposed the scene toward the tint color, which soft light's
+          // highlight falloff makes a non-issue.
           const nightBoost = 1 + mixAmountRef.current * 2;
           // Only dramatic colors should move the tint — but "dramatic" is
           // relative to a rolling baseline, not a fixed saturation number.
@@ -322,19 +356,25 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
           const linearFactor = Math.min(1, deviation / DEVIATION_FOR_FULL_STRENGTH);
           const SPIKE_SELECTIVITY_EXPONENT = 2;
           const saturationFactor = Math.pow(linearFactor, SPIKE_SELECTIVITY_EXPONENT);
-          strengthTarget = Math.min(0.5, intensity * nightBoost * 0.5) * saturationFactor;
+          opacityTarget = Math.min(1, intensity * nightBoost * 0.5) * saturationFactor;
           // ambientSaturationBoost pushes each channel's deviation from the
           // reading's own average outward before picking the tint color —
           // 1 (default) leaves hue/saturation untouched, higher values turn
           // a pale/washed-out reading (e.g. a dim, barely-red capture) into
           // a genuinely vivid one (a saturated red) rather than just a
-          // brighter version of the same pale color. Then re-normalized to
-          // a bright, vivid brightness (max channel lifted to 0.9, not the
-          // raw dim reading) — blending toward the raw color would just
-          // darken everything toward that color's own brightness, the same
-          // "the room went dark" problem the old multiply-tint had.
-          // Blending toward a bright version reads as "the room is lit
-          // pink/orange" instead.
+          // brighter version of the same pale color. Then re-normalized so
+          // the max channel sits at 0.9.
+          //
+          // NOTE: that 0.9 was calibrated for additive blending, where it
+          // simply meant "a bright version of the color". Under soft light
+          // it means something different — 0.5 is soft light's neutral
+          // point, so channels above it lift toward white and channels
+          // below it fall toward black. For a saturated tint that's a
+          // strong, deliberate hue push (red lifts, green/blue sink); for a
+          // near-neutral reading it's mostly a brightening. Kept as-is
+          // rather than re-centered on 0.5, since it interacts with the
+          // by-eye ambientSaturationBoost tuning — but this is the first
+          // number to revisit if the cast reads too strong or too washed.
           const boost = stateRef.current.ambientSaturationBoost;
           const boostedR = Math.max(0, luma + (ac.r - luma) * boost);
           const boostedG = Math.max(0, luma + (ac.g - luma) * boost);
@@ -350,9 +390,9 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
           lerp(ambientTintVecRef.current.y, tintTarget.y, smoothing),
           lerp(ambientTintVecRef.current.z, tintTarget.z, smoothing),
         );
-        ambientStrengthRef.current = lerp(ambientStrengthRef.current, strengthTarget, smoothing);
+        ambientOpacityRef.current = lerp(ambientOpacityRef.current, opacityTarget, smoothing);
         shaderRef.current.uniforms.ambientTint.value.copy(ambientTintVecRef.current);
-        shaderRef.current.uniforms.ambientStrength.value = ambientStrengthRef.current;
+        shaderRef.current.uniforms.ambientOpacity.value = ambientOpacityRef.current;
       }
 
       renderer.render(scene, cameraRef.current!);

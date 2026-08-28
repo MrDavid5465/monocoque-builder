@@ -2,26 +2,23 @@ import React, { useEffect, useState } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { useMutation, useQuery } from '@apollo/client/react';
 import { PrimaryButton, DefaultButton } from '@fluentui/react';
-import { getTheme, Form, FormCard } from '../../lib/denim/lib';
-import dispatcher, { IMy } from '../../lib/denim/lib/queries';
+import { getTheme, Form, FormCard, Stack } from '../../lib/denim/lib';
+import dispatcher, { IMy, IChannelGamma } from '../../lib/denim/lib/queries';
 import { useLiveUpdatesHub, useHubListener } from '../Telemetry/liveUpdatesHub';
 import { DevColorTest } from './DevColorTest';
+import { ChannelMapper } from './ChannelMapper';
+import { AdvancedHuenicornSettings } from './AdvancedHuenicornSettings';
+import { ChannelColor, colorToCss } from './colorPreview';
 import {
   GET_HUENICORN_STATUS,
   GET_HUENICORN_CHANNELS,
   START_HUENICORN,
   STOP_HUENICORN,
+  RESET_HUENICORN_SCREEN_SELECTION,
   HUENICORN_WEB_UI_URL,
   IHuenicornStatus,
   IHuenicornChannels,
 } from './queries';
-
-interface ChannelColor {
-  channelId: number;
-  r: number;
-  g: number;
-  b: number;
-}
 
 // Bespoke page, not ReactiveAdmin-wrapped — mirrors SimWindDevices/index.tsx's
 // own SimWindMain (a plain Form/status component on its default route),
@@ -33,6 +30,16 @@ interface ChannelColor {
 // Also mounts a hidden /dev-color-test sub-route (DevColorTest.tsx) — a
 // calibration tool, not linked from this page's own UI, see its own doc
 // comment for why it lives here instead of as a separate Denim app.
+/** One row of the gamma `list` field. `channelId` is the row identity and
+ *  `name` only drives the row label — neither is a rendered field, so both
+ *  ride along on the row untouched (ListField preserves non-schema keys). */
+interface GammaRow {
+  channelId: number;
+  name: string;
+  day: number;
+  night: number;
+}
+
 const AmbientLightsMain: React.FC = () => {
   const theme = getTheme();
   const { data: myData } = useQuery<IMy>(dispatcher.my);
@@ -41,24 +48,6 @@ const AmbientLightsMain: React.FC = () => {
   // 0.30000001192092896) — round for display/editing, same precision the
   // slider's own `step` already implies.
   const round2 = (n: number) => Math.round(n * 100) / 100;
-
-  // Deliberately NOT hue-boosted, only brightness-lifted — this is the
-  // literal {r,g,b} Huenicorn is streaming to the bridge, the same signal
-  // that drives the 360° tint (see Photo360Viewer.tsx's ambientTint
-  // uniform). Confirmed live that it can disagree noticeably with what the
-  // bulb actually renders (a visibly purple-blue light streaming r/g/b
-  // within ~0.03 of each other, red the highest of the three) — exaggerating
-  // hue here would risk showing a confidently wrong color (e.g. orange for
-  // a blue-dominant reading) rather than an honest "here's what's actually
-  // being sent." Only lifting brightness so a dim-but-real reading isn't
-  // just an indistinguishable near-black square against this page's dark
-  // background.
-  const liftForPreview = (c: { r: number; g: number; b: number }) => {
-    const luma = (c.r + c.g + c.b) / 3 || 0.0001;
-    const lift = Math.max(1, 0.5 / luma);
-    const clamp = (v: number) => Math.max(0, Math.min(1, v));
-    return { r: clamp(c.r * lift), g: clamp(c.g * lift), b: clamp(c.b * lift) };
-  };
 
   const [huenicornEnabled, setHuenicornEnabled] = useState(false);
   const [ambientTintIntensity, setAmbientTintIntensity] = useState(0.3);
@@ -135,6 +124,105 @@ const AmbientLightsMain: React.FC = () => {
   });
   const channels = channelsData?.huenicornChannels ?? [];
 
+  // Per-channel gamma for the BULBS — unlike everything above, which only
+  // shapes the 360° viewer's tint, this changes what Huenicorn actually
+  // sends to the lights (its own per-channel `gammaFactor`). Each channel
+  // gets a day value and a night value; the backend interpolates between
+  // them by the live day/night blend, so with the simulated in-game clock
+  // running the lights ramp through dawn/dusk instead of snapping. See
+  // huenicorn::run_gamma_pusher.
+  const savedGamma: IChannelGamma[] = settings.ambientChannelGamma ?? [];
+  // Only the user's *edits* live in state; the displayed rows are derived
+  // during render (below). Storing the rows themselves in state and syncing
+  // them from an effect is what produced a subtle ordering bug: the Form's
+  // remount key is computed during render, so when the channel list arrived
+  // the key changed one render BEFORE the effect updated the rows — the
+  // form remounted against stale values and then never remounted again.
+  const [gammaEdits, setGammaEdits] = useState<Record<number, { day: number; night: number }>>({});
+  const [savingGamma, setSavingGamma] = useState(false);
+  const [gammaStatus, setGammaStatus] = useState<string | null>(null);
+
+  // Rows come from the live channel list while Huenicorn is up, falling back
+  // to whatever was saved when it isn't — otherwise this whole section would
+  // disappear (and look unconfigurable) any time the process is down, which
+  // is exactly when someone might come here to set it up.
+  const gammaSources = channels.length
+    ? channels.map(c => ({ channelId: c.channelId, name: c.name, live: c.gammaFactor as number | undefined }))
+    : savedGamma.map(g => ({
+        channelId: g.channelId,
+        name: `Channel ${g.channelId}`,
+        live: undefined as number | undefined,
+      }));
+  const gammaRowKey = gammaSources.map(r => `${r.channelId}:${r.live ?? ''}`).join(',');
+  // Keyed on saved *content*, not just `savedGamma.length` — the count is
+  // unchanged when only the values differ, so a length-only key silently
+  // dropped every reload of already-configured channels (saved values were
+  // persisted correctly but the page redisplayed 0).
+  const savedGammaKey = savedGamma.map(g => `${g.channelId}:${g.day}:${g.night}`).join(',');
+
+  // Derived during render, never stored — so the rows and the Form's
+  // remount key below always change in the SAME render. Precedence:
+  // a live user edit, else the persisted value, else the channel's own
+  // live gamma (so opening this page and hitting Save without touching a
+  // slider leaves the lights exactly where Huenicorn's profile had them).
+  const gammaRows: GammaRow[] = gammaSources.map(src => {
+    const base = { channelId: src.channelId, name: src.name };
+    const edit = gammaEdits[src.channelId];
+    if (edit) return { ...base, day: edit.day, night: edit.night };
+    const saved = savedGamma.find(g => g.channelId === src.channelId);
+    if (saved) return { ...base, day: round2(saved.day), night: round2(saved.night) };
+    return { ...base, day: round2(src.live ?? 0), night: round2(src.live ?? 0) };
+  });
+
+  // One `list` field — see the form-schema skill's `list` section. Replaces
+  // the previous `gammaDay_${id}`/`gammaNight_${id}` name synthesis and the
+  // `/^gamma(Day|Night)_(\d+)$/` parse that read it back. `fixed` because
+  // the rows are the Hue channels themselves; there is nothing to add or
+  // remove here. `channelId` rides along on each row without being a
+  // rendered field — ListField preserves non-schema row keys.
+  const gammaSchema = {
+    channelGamma: {
+      type: 'list' as const,
+      label: '',
+      fixed: true,
+      rowKey: (r: GammaRow) => String(r.channelId),
+      rowLabel: (r: GammaRow) => r.name,
+      itemSchema: {
+        day: { type: 'slider', label: 'Day', min: -1, max: 1, step: 0.05 },
+        night: { type: 'slider', label: 'Night', min: -1, max: 1, step: 0.05 },
+      },
+    },
+  };
+
+  // Saves only `ambientChannelGamma`: every other field is omitted, which
+  // AppSettingsInput's MaybeUndefined convention reads as "leave unchanged"
+  // — so this button and the settings Save above can't clobber each other.
+  const handleSaveGamma = async () => {
+    setSavingGamma(true);
+    setGammaStatus(null);
+    try {
+      await updateSettings({
+        variables: {
+          settings: {
+            ambientChannelGamma: gammaRows.map(row => ({
+              channelId: row.channelId,
+              day: row.day ?? 0,
+              night: row.night ?? 0,
+            })),
+          },
+        },
+      });
+      // Drop the local edit overlay: the refetched `settings` is now the
+      // source of truth, and keeping stale edits on top would mask it.
+      setGammaEdits({});
+      setGammaStatus('Saved');
+    } catch (e: any) {
+      setGammaStatus(e?.message ?? 'Failed to save');
+    } finally {
+      setSavingGamma(false);
+    }
+  };
+
   // Live swatch for whichever channel actually drives the 360° tint — reads
   // the exact same AmbientColorChanged subscription event the dashboard
   // itself consumes (see DashboardDesigner/index.tsx's onAmbientColor
@@ -151,7 +239,10 @@ const AmbientLightsMain: React.FC = () => {
 
   const settingsSchema = {
     huenicornEnabled: { type: 'checkbox', label: 'Auto-launch when driving' },
-    ambientTintIntensity: { type: 'slider', label: 'Tint intensity', min: 0, max: 1, step: 0.05 },
+    // Drives the 360° viewer's soft-light blend opacity — not a raw 1:1
+    // opacity, it's scaled by night/spike conditions in Photo360Viewer's
+    // render loop (0.3 here lands at ~15% opacity in daylight).
+    ambientTintIntensity: { type: 'slider', label: 'Tint intensity (soft light)', min: 0, max: 1, step: 0.05 },
     ambientPrimaryChannel: {
       type: 'select',
       label: 'Primary channel (drives 360° tint)',
@@ -175,6 +266,10 @@ const AmbientLightsMain: React.FC = () => {
   const [stopHuenicorn, { loading: stopping }] = useMutation(STOP_HUENICORN, {
     refetchQueries: [{ query: GET_HUENICORN_STATUS }],
   });
+  const [resetScreenSelection, { loading: resettingSelection }] = useMutation(
+    RESET_HUENICORN_SCREEN_SELECTION,
+    { refetchQueries: [{ query: GET_HUENICORN_STATUS }] },
+  );
 
   const statusLabel = huenicornStatus?.apiReachable
     ? '✓ Running'
@@ -190,6 +285,12 @@ const AmbientLightsMain: React.FC = () => {
   return (
     <div style={{ padding: 16, color: theme.palette.neutralPrimary }}>
       {hubSubscriber}
+      {/* Cards flow left-to-right and wrap rather than stacking in one
+          tall column — this page is several independent panels, and on a
+          wide screen the vertical stack wasted most of the width.
+          `alignItems: start` keeps a short card from stretching to match
+          a tall neighbour in the same row. */}
+      <Stack horizontal wrap tokens={{ childrenGap: 16 }} styles={{ inner: { alignItems: 'flex-start' } }}>
       <FormCard style={{ maxWidth: 420 }}>
         <Form
           key={`${settings.huenicornEnabled}-${settings.ambientTintIntensity}-${settings.ambientPrimaryChannel}-${settings.ambientSaturationBoost}-${channels.length}`}
@@ -221,26 +322,74 @@ const AmbientLightsMain: React.FC = () => {
         {saveStatus && <div style={{ fontSize: '0.8em', opacity: 0.6, marginTop: 6 }}>{saveStatus}</div>}
       </FormCard>
 
-      <FormCard style={{ maxWidth: 420, marginTop: 16 }}>
+      <FormCard style={{ maxWidth: 420 }}>
+        <div style={{ fontWeight: 600, marginBottom: 4 }}>Light gamma (day / night)</div>
+        <div style={{ fontSize: '0.8em', opacity: 0.7, marginBottom: 8 }}>
+          Applied to the bulbs themselves, per channel. Higher is brighter (0 = send
+          Huenicorn's color untouched). The day and night values are blended by the
+          global day/night state, so a simulated in-game dusk ramps the lights down
+          gradually rather than switching.
+        </div>
+        {gammaRows.length === 0 ? (
+          <div style={{ fontSize: '0.85em', opacity: 0.6 }}>
+            No channels yet — start Huenicorn to load its channel list.
+          </div>
+        ) : (
+          <>
+            <Form
+              // The list field handles remounting individual rows itself
+              // (see its echo detection), but this OUTER form is still an
+              // ordinary uncontrolled per-form Form: its useForm seeds
+              // `channelGamma` once at mount, so reloaded values only reach
+              // it via a key change. Content-keyed, not length-keyed — a
+              // length-only key was the original "save, refresh, back to
+              // zero" bug.
+              key={`gamma-${gammaRowKey}-${savedGammaKey}`}
+              form={gammaSchema}
+              name="ambientLightsGamma"
+              initialValues={{ channelGamma: gammaRows }}
+              onChange={(_n: string, { raw }: any) => {
+                setGammaEdits(prev => {
+                  const next = { ...prev };
+                  (raw.channelGamma ?? []).forEach((r: GammaRow) => {
+                    next[r.channelId] = { day: Number(r.day) || 0, night: Number(r.night) || 0 };
+                  });
+                  return next;
+                });
+              }}
+            />
+            <PrimaryButton
+              text={savingGamma ? 'Saving…' : 'Save gamma'}
+              onClick={handleSaveGamma}
+              disabled={savingGamma}
+            />
+            {gammaStatus && (
+              <div style={{ fontSize: '0.8em', opacity: 0.6, marginTop: 6 }}>{gammaStatus}</div>
+            )}
+            {!huenicornStatus?.apiReachable && (
+              <div style={{ fontSize: '0.8em', opacity: 0.6, marginTop: 6 }}>
+                Huenicorn isn't running — saved values apply the next time it starts.
+              </div>
+            )}
+          </>
+        )}
+      </FormCard>
+
+      <FormCard style={{ maxWidth: 420 }}>
         <div style={{ fontWeight: 600, marginBottom: 8 }}>Huenicorn status</div>
         <div style={{ color: statusColor }}>{statusLabel}</div>
         {selectedColor && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
-            {(() => {
-              const lifted = liftForPreview(selectedColor);
-              return (
-                <div
-                  style={{
-                    width: 24,
-                    height: 24,
-                    borderRadius: 4,
-                    flexShrink: 0,
-                    background: `rgb(${Math.round(lifted.r * 255)}, ${Math.round(lifted.g * 255)}, ${Math.round(lifted.b * 255)})`,
-                    border: `1px solid ${theme.palette.neutralTertiary}`,
-                  }}
-                />
-              );
-            })()}
+            <div
+              style={{
+                width: 24,
+                height: 24,
+                borderRadius: 4,
+                flexShrink: 0,
+                background: colorToCss(selectedColor),
+                border: `1px solid ${theme.palette.neutralTertiary}`,
+              }}
+            />
             <span style={{ fontSize: '0.8em', opacity: 0.7 }}>
               Channel {selectedColor.channelId} — raw streamed value (may not match the bulb — see below)
             </span>
@@ -257,16 +406,40 @@ const AmbientLightsMain: React.FC = () => {
             onClick={() => stopHuenicorn()}
             disabled={stopping || !huenicornStatus?.running}
           />
+          <DefaultButton
+            text={resettingSelection ? 'Reselecting…' : 'Reselect Screen'}
+            onClick={() => resetScreenSelection()}
+            disabled={resettingSelection || starting || stopping}
+          />
         </div>
-        <a
-          href={HUENICORN_WEB_UI_URL}
-          target="_blank"
-          rel="noreferrer"
-          style={{ display: 'inline-block', marginTop: 12, fontSize: '0.85em', color: theme.palette.themePrimary }}
-        >
-          Open Huenicorn's own config UI (channel-to-screen mapping) →
-        </a>
+        <div style={{ fontSize: '0.78em', opacity: 0.6, marginTop: 6 }}>
+          Huenicorn remembers your screen/region choice and skips the picker
+          on future launches. Use this to make it ask again — a new picker
+          dialog will pop up on your desktop after Huenicorn restarts.
+        </div>
       </FormCard>
+
+      <FormCard style={{ maxWidth: 420 }}>
+        <div style={{ fontWeight: 600, marginBottom: 4 }}>Screen mapping</div>
+        <div style={{ fontSize: '0.8em', opacity: 0.7, marginBottom: 8 }}>
+          Which rectangle of the screen each light channel samples color
+          from. Drag a corner to resize; each channel's box is filled with
+          its own currently-streamed color for reference.
+        </div>
+        <ChannelMapper channels={channels} colors={currentColors} apiReachable={!!huenicornStatus?.apiReachable} />
+      </FormCard>
+
+      <AdvancedHuenicornSettings apiReachable={!!huenicornStatus?.apiReachable} />
+      </Stack>
+
+      <a
+        href={HUENICORN_WEB_UI_URL}
+        target="_blank"
+        rel="noreferrer"
+        style={{ display: 'inline-block', marginTop: 16, fontSize: '0.8em', opacity: 0.6, color: theme.palette.themePrimary }}
+      >
+        Having trouble? Open Huenicorn's own config UI →
+      </a>
     </div>
   );
 };
