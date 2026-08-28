@@ -46,6 +46,10 @@ const TelemetryAdminHome: React.FC = () => (
       titleField="name"
       thumbnailField="thumbnailDay"
       idField="name"
+      // Without this the cards link to /telemetryadmin/:id/show — this
+      // page is the admin root, not the dashboards list route, so
+      // CardList's pathname default is wrong here.
+      basePath="/telemetryadmin/dashboards"
       hideHeader
     />
 
@@ -56,6 +60,7 @@ const TelemetryAdminHome: React.FC = () => (
       schemaDefinition={carsSchema}
       titleField="name"
       thumbnailField="thumbnail"
+      basePath="/telemetryadmin/cars"
       hideHeader
     />
   </Stack>

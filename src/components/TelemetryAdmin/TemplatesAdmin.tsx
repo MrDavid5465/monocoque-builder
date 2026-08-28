@@ -30,7 +30,16 @@ const TemplatesAdmin: React.FC = () => (
     schemaDefinition={schemaDefinition}
     components={{
       list: (props: any) => (
-        <SwitchableList {...props} titleField="name" thumbnailField="thumbnail" defaultView="card" />
+        <SwitchableList
+          {...props}
+          titleField="name"
+          thumbnailField="thumbnail"
+          // Same mismatch GroupsAdmin hit: List defaults to
+          // `get${name.plural}` ("getTemplates") but the resolver is
+          // `getDashTemplates`, so every template was silently dropped.
+          queryResultKey="getDashTemplates"
+          defaultView="card"
+        />
       ),
       show: TemplateEdit,
       edit: TemplateEdit,

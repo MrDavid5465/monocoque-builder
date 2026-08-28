@@ -31,7 +31,12 @@ const GroupsAdmin: React.FC = () => (
           {...props}
           titleField="name"
           idField="id"
-          defaultView="table"
+          // List defaults the result key to `get${name.plural}` — "getGroups"
+          // here — but the resolver is `getDashGroups`, so every row was
+          // silently dropped and the table rendered headers with no rows.
+          // Invisible until this repo actually had a group to list.
+          queryResultKey="getDashGroups"
+          defaultView="list"
           columnSelectable
           storageKey="groups-columns"
         />

@@ -26,6 +26,14 @@ interface Props {
   // Overrides the query's result field — defaults to `get${name.plural}`.
   // Needed when the display-plural label doesn't match the actual resolver name.
   queryResultKey?: string;
+  // Route prefix for a card's show/edit links. Defaults to the current
+  // pathname, which is correct when CardList IS the list screen for that
+  // route (`/telemetryadmin/cars` -> `/telemetryadmin/cars/:id/show`). It is
+  // NOT correct when CardList is embedded on some other page — the admin
+  // home embeds two of them, where the default produced
+  // `/telemetryadmin/:id/show` and every card 404'd. Such callers pass the
+  // real collection route explicitly.
+  basePath?: string;
   // Suppresses the built-in "Listing X" heading + Links row, for callers
   // embedding CardList inline with their own section heading instead of
   // through full ReactiveAdmin routing.
@@ -78,10 +86,12 @@ const CardList: React.FC<Props> = ({
   queryResultKey,
   hideHeader,
   idField,
+  basePath,
 }) => {
   const theme = getTheme();
   const { pathname } = useLocation();
   const navigate = useNavigate();
+  const routeBase = basePath ?? pathname;
   const [page, setPage] = useState(0);
   const queryName = queryResultKey ?? `get${name.plural}`;
   const { data, error, loading, refetch }: { data?: any; error?: any; loading?: boolean; refetch?: () => void } =
@@ -92,6 +102,18 @@ const CardList: React.FC<Props> = ({
   }
   if (loading) {
     return <span>{`loading...`}</span>;
+  }
+
+  // See List.tsx's identical guard — the `get${name.plural}` default renders
+  // a convincing empty list when it doesn't match the real resolver name.
+  if (import.meta.env?.DEV && data && data[queryName] === undefined) {
+    const available = Object.keys(data).filter(k => !k.startsWith('__'));
+    // eslint-disable-next-line no-console
+    console.error(
+      `[typical-admin] CardList for "${name.plural}" read no field "${queryName}" off the query result. ` +
+      `Available: ${available.join(', ') || '(none)'}. ` +
+      `Pass queryResultKey="${available[0] ?? '...'}" — the list is rendering empty, not failing.`,
+    );
   }
 
   const items: any[] = data?.[queryName] ?? [];
@@ -137,7 +159,7 @@ const CardList: React.FC<Props> = ({
               fit={thumbnailFit}
               title={String(title ?? '')}
               thumbnailUrl={thumbnailUrl}
-              onThumbnailClick={() => navigate(`${pathname}/${routeId}/show`)}
+              onThumbnailClick={() => navigate(`${routeBase}/${routeId}/show`)}
               actions={
                 (dispatcher.edit || dispatcher.delete) ? (
                   <>
@@ -145,7 +167,7 @@ const CardList: React.FC<Props> = ({
                       <IconButton
                         iconProps={{ iconName: 'Settings' }}
                         title={`Edit ${name.singular}`}
-                        onClick={(e) => { e.stopPropagation(); navigate(`${pathname}/${routeId}/edit`); }}
+                        onClick={(e) => { e.stopPropagation(); navigate(`${routeBase}/${routeId}/edit`); }}
                       />
                     )}
                     {dispatcher.delete && <CardDeleteButton dispatcher={dispatcher} name={name} item={item} />}

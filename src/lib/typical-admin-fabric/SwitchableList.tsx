@@ -94,9 +94,22 @@ const SwitchableList: React.FC<Props> = ({
             style={{ color: view === 'card' ? theme.palette.themePrimary : undefined }}
           />
           {components?.links ? (
-            React.createElement(components.links, { name, dispatcher })
+            // hideAdd goes to custom links wrappers too (e.g. Recordings'
+            // RecordingsLinks, which spreads straight into Links) —
+            // otherwise they reintroduce the duplicate Add.
+            React.createElement(components.links, {
+              name,
+              dispatcher,
+              hideAdd: view === 'list' && !!schemaDefinition.buttons?.add,
+            })
           ) : (
-            <Links name={name} dispatcher={dispatcher} />
+            <Links
+              name={name}
+              dispatcher={dispatcher}
+              // Table view renders its own Add in the grid toolbar;
+              // card view has no toolbar, so it keeps this one.
+              hideAdd={view === 'list' && !!schemaDefinition.buttons?.add}
+            />
           )}
         </Stack>
       </Stack>

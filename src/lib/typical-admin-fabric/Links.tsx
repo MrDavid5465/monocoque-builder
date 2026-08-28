@@ -6,9 +6,16 @@ import { IDispatcher } from '../typical-admin';
 interface Props {
   name: Name;
   dispatcher: IDispatcher;
+  /** Suppresses this row's Add button when the grid below already
+   *  renders one of its own (List's ListControls toolbar, driven by
+   *  schemaDefinition.list.buttons.add). Both were showing at once on
+   *  every table-view admin. The toolbar one wins — it sits with the
+   *  other grid controls, and card view (which has no toolbar) still
+   *  relies on the button here. */
+  hideAdd?: boolean;
 }
 
-const Links: React.FC<Props> = ({ name: _name, dispatcher }) => {
+const Links: React.FC<Props> = ({ name: _name, dispatcher, hideAdd }) => {
   const { pathname } =  useLocation();
   const { id } = useParams();
   const navigate = useNavigate();
@@ -60,7 +67,7 @@ const Links: React.FC<Props> = ({ name: _name, dispatcher }) => {
         <IconButton onClick={() => navigate("../")}>
           <Icon iconName={'back'} />
         </IconButton>
-        {dispatcher.new && (
+        {dispatcher.new && !hideAdd && (
           <>
             <Separator vertical />
             <IconButton onClick={() => navigate(`${pathname}/new`)}>
