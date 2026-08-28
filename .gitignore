@@ -39,3 +39,13 @@ src-tauri/.claude/settings.local.json
 *.njsproj
 *.sln
 *.sw?
+
+# design-sync: generated build output, staged converter scripts, and machine
+# state. The durable inputs under .design-sync/ (config.json, NOTES.md,
+# conventions.md, ds-entry.tsx, previews/) ARE committed — they're what makes
+# a re-sync reproducible and cheap.
+/ds-bundle/
+/.ds-sync/
+/.design-sync/.cache/
+/.design-sync/learnings/
+/.design-sync/node_modules
