@@ -100,9 +100,33 @@ fn ensure_device(
 const UDEV_RULE_PATH: &str = "/etc/udev/rules.d/99-dashboard-gamepad.rules";
 const UDEV_RULE: &str = "KERNEL==\"uinput\", GROUP=\"input\", MODE=\"0660\", TAG+=\"uaccess\"\n";
 
-/// Returns true if the udev rule is already installed.
-#[tauri::command]
+/// Whether this process can actually create a virtual gamepad.
+///
+/// Tests the capability, not the artifact. Checking only for our own rule
+/// file reports "missing" on a machine where `/dev/uinput` is already
+/// writable through some other grant — most commonly a `uaccess` ACL from
+/// systemd-logind, which shows up as the `+` in `crw-rw----+` and grants the
+/// logged-in user `rw` directly. Confirmed live on this machine: no rule
+/// file at all, yet `getfacl /dev/uinput` lists `user:david:rw-` and opening
+/// it for writing succeeds. Reporting "rule not found" there sends the user
+/// to install something they demonstrably don't need.
+///
+/// Falls back to the file check so the answer stays sensible when the device
+/// node is absent entirely (no uinput module loaded) but the rule is staged
+/// for the next boot.
+///
+/// Exposed as the `gamepadUdevStatus` GraphQL query (graphql/mod.rs), not a
+/// Tauri command — everything else in this app goes through typiql, and a
+/// Tauri command is unanswerable from the browser build.
 pub fn gamepad_udev_status() -> bool {
+    if std::fs::OpenOptions::new()
+        .write(true)
+        .open("/dev/uinput")
+        .is_ok()
+    {
+        return true;
+    }
+
     std::fs::read_to_string(UDEV_RULE_PATH)
         .map(|c| c.contains("uinput"))
         .unwrap_or(false)
@@ -110,7 +134,7 @@ pub fn gamepad_udev_status() -> bool {
 
 /// Writes the udev rule via pkexec (prompts for auth) and reloads udev.
 /// Returns "already-installed", "installed", or an error string.
-#[tauri::command]
+/// Exposed as the `setupGamepadUdev` GraphQL mutation (graphql/gamepad.rs).
 pub fn setup_gamepad_udev() -> Result<String, String> {
     if gamepad_udev_status() {
         return Ok("already-installed".to_string());

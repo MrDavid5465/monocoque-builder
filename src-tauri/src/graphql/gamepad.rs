@@ -24,4 +24,16 @@ impl GamepadMutation {
         gamepad::set_axis(axis_index, value).map_err(async_graphql::Error::new)?;
         Ok(true)
     }
+
+    /// Installs the `/dev/uinput` udev rule, returning "already-installed"
+    /// or "installed". Not CRUD on stored data — it shells out to `pkexec`
+    /// and reloads udev, the same class of exception as
+    /// `applyShakerDspChannelLive` poking a live PipeWire process.
+    ///
+    /// Note the auth prompt is raised by whatever machine runs this backend,
+    /// not by the browser that called it — a remote client can trigger the
+    /// install but the person at the host has to approve it.
+    async fn setup_gamepad_udev(&self) -> GqlResult<String> {
+        gamepad::setup_gamepad_udev().map_err(async_graphql::Error::new)
+    }
 }
