@@ -727,41 +727,49 @@ const ComponentPropertiesPanel: React.FC<{
         onChange={handleFormChange}
       />
 
-      {/* Encoder: per-position button mapping */}
+      {/* Encoder: per-position button mapping. One `list` field rather than
+          N separate <Form>s — see the form-schema skill's `list` section.
+          Rows are `fixed` because their count comes from encoderPositions
+          (its own field above), not from add/remove UI. */}
       {node.type === 'encoder-control' && (() => {
         const count = node.encoderPositions ?? 5;
         const ids = node.encoderMappingIds ?? [];
         const btnMappings = gamepadMappings.filter(m => m.mappingType === 'button');
+        const current = Array.from({ length: count }, (_, i) => ids[i] ?? '');
         return (
-          <Stack tokens={{ childrenGap: 4 }} style={{ borderTop: `1px solid ${theme.palette.neutralLight}`, paddingTop: 6 }}>
-            <span style={{ fontSize: '0.85em', fontWeight: 600 }}>Position → gamepad action</span>
-            {Array.from({ length: count }, (_, i) => (
-              <Stack key={i} horizontal verticalAlign="center" tokens={{ childrenGap: 6 }}>
-                <span style={{ fontSize: '0.8em', minWidth: 56 }}>Position {i + 1}</span>
-                <Stack style={{ flex: 1 }}>
-                  <Form
-                    key={`${node.id}-encoder-${i}`}
-                    form={{
-                      mapping: {
-                        type: 'select' as const,
-                        label: '',
-                        options: [
-                          { text: '— unassigned —', value: '' },
-                          ...btnMappings.map(m => ({ text: `${m.name} (btn ${m.index})`, value: m.id })),
-                        ],
-                      },
-                    }}
-                    name={`encoderPos-${i}`}
-                    initialValues={{ mapping: ids[i] ?? '' }}
-                    onChange={(_n: string, { raw }: any) => {
-                      const next = [...ids];
-                      next[i] = String(raw.mapping ?? '');
-                      onUpdate({ encoderMappingIds: next });
-                    }}
-                  />
-                </Stack>
-              </Stack>
-            ))}
+          <Stack style={{ borderTop: `1px solid ${theme.palette.neutralLight}`, paddingTop: 6 }}>
+            <Form
+              key={`${node.id}-encoder-${count}`}
+              form={{
+                encoderMappings: {
+                  type: 'list' as const,
+                  label: 'Position → gamepad action',
+                  fixed: true,
+                  rowLabel: (_r: any, i: number) => `Position ${i + 1}`,
+                  itemSchema: {
+                    mapping: {
+                      type: 'select' as const,
+                      label: '',
+                      options: [
+                        { text: '— unassigned —', value: '' },
+                        ...btnMappings.map(m => ({ text: `${m.name} (btn ${m.index})`, value: m.id })),
+                      ],
+                    },
+                  },
+                },
+              }}
+              name={`encoder-${node.id}`}
+              initialValues={{ encoderMappings: current.map(mapping => ({ mapping })) }}
+              onChange={(_n: string, { raw }: any) => {
+                const next = (raw.encoderMappings ?? []).map((r: any) => String(r?.mapping ?? ''));
+                // Form's own onChange effect has no mount guard, so it fires
+                // once with the seeded values. Previously that wrote them
+                // straight back through onUpdate (harmless, but it dirtied
+                // the dashboard on mere selection); comparing first drops it.
+                if (next.length === current.length && next.every((v: string, i: number) => v === current[i])) return;
+                onUpdate({ encoderMappingIds: next });
+              }}
+            />
           </Stack>
         );
       })()}
@@ -1001,25 +1009,42 @@ const DashboardPropertiesPanel: React.FC<{
 
       {groups.length > 0 && (
         <Section title="Groups">
-          {groups.map((group) => {
-            const checked = (dashboard.groupIds ?? []).includes(group.id);
-            return (
-              <Form
-                key={`${formKey}-group-${group.id}`}
-                form={{ checked: { type: 'checkbox' as const, label: group.name } }}
-                name={`dashGroup-${group.id}`}
-                initialValues={{ checked }}
-                onChange={(_n: string, { raw }: any) => {
-                  const current = dashboard.groupIds ?? [];
-                  onUpdate({
-                    groupIds: raw.checked
-                      ? [...current, group.id]
-                      : current.filter((g: string) => g !== group.id),
-                  });
-                }}
-              />
-            );
-          })}
+          {/* One `multicheckbox` rather than a <Form> per group. Not a `list`
+              field: this is a fixed set of checkboxes over an existing
+              string[], which multicheckbox already does — a list would be
+              strictly more machinery for less. Its value is an
+              {id: boolean} map, so it's converted to/from groupIds here at
+              the boundary. */}
+          <Form
+            key={`${formKey}-groups`}
+            form={{
+              groups: {
+                type: 'multicheckbox' as const,
+                label: '',
+                fields: Object.fromEntries(
+                  groups.map(g => [g.id, { type: 'checkbox' as const, label: g.name }]),
+                ),
+              },
+            }}
+            name="dashGroups"
+            initialValues={{
+              groups: Object.fromEntries(
+                groups.map(g => [g.id, (dashboard.groupIds ?? []).includes(g.id)]),
+              ),
+            }}
+            onChange={(_n: string, { raw }: any) => {
+              const next = Object.entries(raw.groups ?? {})
+                .filter(([, on]) => !!on)
+                .map(([id]) => id);
+              const current: string[] = dashboard.groupIds ?? [];
+              // Form's onChange effect has no mount guard; comparing first
+              // stops the seeded values being written straight back.
+              const same =
+                next.length === current.length && next.every(g => current.includes(g));
+              if (same) return;
+              onUpdate({ groupIds: next });
+            }}
+          />
         </Section>
       )}
 

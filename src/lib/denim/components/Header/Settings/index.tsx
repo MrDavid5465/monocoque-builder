@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Modal, useMutation, useQuery, Stack, getStyle } from '../lib';
 import { Pivot, PivotItem, getTheme } from '../../../lib';
 import { userSettings } from './schema';
 import { parseThemeKey, themeKey } from '../../../../themes';
-import dispatcher, { ISettings, GamepadMapping } from '../../../lib/queries';
+import dispatcher, { ISettings, GamepadMapping, GAMEPAD_UDEV_STATUS, SETUP_GAMEPAD_UDEV } from '../../../lib/queries';
 import { Form, PrimaryButton } from '../../../lib';
 import { getAppId } from '../../../../../graphql/client';
 import { GET_DASHBOARDS } from '../../../../../components/Telemetry/DashboardDesigner/queries';
@@ -18,6 +18,8 @@ import {
 } from '../../../../../components/Telemetry/deviceDefaultsQueries';
 import DayNightSimPanel from '../../../../../components/Telemetry/DayNightSimPanel';
 
+const AXIS_LABELS = ['X', 'Y', 'Z', 'RX', 'RY', 'RZ'];
+
 interface Props {
   isOpen: boolean;
   dismissModal: () => any;
@@ -30,6 +32,16 @@ function relativeTime(lastSeen: string): string {
   if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
   if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`;
   return `${Math.floor(secs / 86400)}d ago`;
+}
+
+/** One row of the Dashboards tab's per-device override list. `deviceId` is
+ *  the row identity (stable across renames); `deviceName` is what the
+ *  server keys DeviceDefault records by. */
+interface DeviceRow {
+  deviceId: string;
+  deviceName: string;
+  dash: string;
+  group: string;
 }
 
 const Index: React.FC<Props> = ({ isOpen, dismissModal, settings }) => {
@@ -51,7 +63,14 @@ const Index: React.FC<Props> = ({ isOpen, dismissModal, settings }) => {
   const [simdCommand, setSimdCommand] = useState<string>(settings.simdCommand ?? 'simd');
   const [monocoqueCommand, setMonocoqueCommand] = useState<string>(settings.monocoqueCommand ?? 'monocoque play');
   const [huenicornCommand, setHuenicornCommand] = useState<string>(settings.huenicornCommand ?? 'huenicorn');
-  const [udevStatus, setUdevStatus] = useState<'unknown' | 'installed' | 'missing'>('unknown');
+  // Dev-build overrides. Empty is meaningful: in a debug build the watchdog
+  // refuses to start a service with no dev command rather than falling back
+  // to the installed one (see service_commands.rs), so these save as null
+  // rather than '' to keep "unset" distinct from "set to empty".
+  const [simdDebugCommand, setSimdDebugCommand] = useState<string>(settings.simdDebugCommand ?? '');
+  const [monocoqueDebugCommand, setMonocoqueDebugCommand] = useState<string>(settings.monocoqueDebugCommand ?? '');
+  const [huenicornDebugCommand, setHuenicornDebugCommand] = useState<string>(settings.huenicornDebugCommand ?? '');
+  const debugBuild: boolean = settings.debugBuild ?? false;
   const [udevWorking, setUdevWorking] = useState(false);
   const [udevMsg, setUdevMsg] = useState<string | null>(null);
 
@@ -64,7 +83,55 @@ const Index: React.FC<Props> = ({ isOpen, dismissModal, settings }) => {
   const [gamepadMappings, setGamepadMappings] = useState<GamepadMapping[]>(
     () => (settings.gamepadMappings ?? []).map(stripTypename),
   );
-  const [editMapping, setEditMapping] = useState<Partial<GamepadMapping> | null>(null);
+  // Replaces the old `editMapping` draft: with every row expanded there is
+  // no single "row being edited", so validity is whatever the list field's
+  // derived per-row validations report.
+  const [gamepadValid, setGamepadValid] = useState(true);
+
+  const gamepadSchema = {
+    mappings: {
+      type: 'list' as const,
+      label: '',
+      singular: 'mapping',
+      addLabel: '+ Add mapping',
+      removeLabel: 'Remove mapping',
+      emptyText: 'No mappings yet.',
+      horizontal: true,
+      rowKey: (m: GamepadMapping) => m.id,
+      // Fresh id per add — evaluated at click time, not schema-build time.
+      newRow: () => ({ id: `gp-${Date.now()}`, name: '', mappingType: 'button', index: 0 }),
+      // Same key set every call (name/mappingType/index) — only the config
+      // varies, which is the documented rule for a function itemSchema.
+      // `id` isn't a rendered field and rides along on the row untouched.
+      itemSchema: ({ row }: { row: GamepadMapping }) => ({
+        name: { type: 'text' as const, label: 'Name', placeholder: 'e.g. Headlights', required: true },
+        mappingType: {
+          type: 'select' as const,
+          label: 'Type',
+          options: [
+            { text: 'Button', value: 'button' },
+            { text: 'Axis', value: 'axis' },
+          ],
+        },
+        index: {
+          type: 'slider' as const,
+          // Carries the axis hint (X/Y/Z/RX/RY/RZ) that used to be a
+          // separate line under the editor.
+          label: row.mappingType === 'axis'
+            ? `Axis (${AXIS_LABELS[row.index] ?? row.index})`
+            : 'Button',
+          min: 0,
+          max: row.mappingType === 'axis' ? 5 : 31,
+          step: 1,
+        },
+      }),
+      // Switching button<->axis must reset the index: 31 is a valid button
+      // but not a valid axis. deriveRow is told which field moved, so this
+      // no longer needs the old compare-against-previous inference.
+      deriveRow: ({ field }: { field: string }) =>
+        field === 'mappingType' ? { index: 0 } : undefined,
+    },
+  };
 
   useEffect(() => {
     if (settings.gamepadMappings) setGamepadMappings(settings.gamepadMappings.map(stripTypename));
@@ -85,27 +152,54 @@ const Index: React.FC<Props> = ({ isOpen, dismissModal, settings }) => {
   useEffect(() => {
     if (settings.huenicornCommand != null) setHuenicornCommand(settings.huenicornCommand);
   }, [settings.huenicornCommand]);
+  useEffect(() => {
+    setSimdDebugCommand(settings.simdDebugCommand ?? '');
+  }, [settings.simdDebugCommand]);
+  useEffect(() => {
+    setMonocoqueDebugCommand(settings.monocoqueDebugCommand ?? '');
+  }, [settings.monocoqueDebugCommand]);
+  useEffect(() => {
+    setHuenicornDebugCommand(settings.huenicornDebugCommand ?? '');
+  }, [settings.huenicornDebugCommand]);
 
-  const checkUdevStatus = useCallback(async () => {
-    try {
-      const { invoke } = await import('@tauri-apps/api/core');
-      const ok = await invoke<boolean>('gamepad_udev_status');
-      setUdevStatus(ok ? 'installed' : 'missing');
-    } catch {
-      setUdevStatus('unknown'); // running in browser, not Tauri
-    }
-  }, []);
+  // Backend query, not a Tauri command — the backend is the process that
+  // would actually open /dev/uinput, and this way the browser build can ask
+  // too instead of being stuck on "unknown". `network-only` because the
+  // answer changes out from under the cache when the rule is installed.
+  //
+  // Derived from `data` rather than an onCompleted callback: Apollo Client
+  // v4 dropped onCompleted/onError from useQuery (they survive only on
+  // useMutation, which is why every other onCompleted in this repo is on a
+  // mutation). Passing them silently does nothing.
+  const {
+    data: udevData,
+    error: udevError,
+    refetch: refetchUdev,
+  } = useQuery(GAMEPAD_UDEV_STATUS, {
+    skip: !isOpen,
+    fetchPolicy: 'network-only',
+  });
 
-  useEffect(() => { if (isOpen) checkUdevStatus(); }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
+  const udevStatus: 'unknown' | 'installed' | 'missing' = udevError
+    ? 'unknown'
+    : (udevData as any)?.gamepadUdevStatus === undefined
+      ? 'unknown'
+      : (udevData as any).gamepadUdevStatus
+        ? 'installed'
+        : 'missing';
+
+  const [setupUdev] = useMutation(SETUP_GAMEPAD_UDEV);
 
   const handleInstallUdev = async () => {
     setUdevWorking(true);
     setUdevMsg(null);
     try {
-      const { invoke } = await import('@tauri-apps/api/core');
-      const result = await invoke<string>('setup_gamepad_udev');
-      setUdevMsg(result === 'already-installed' ? 'Already installed.' : 'Rule installed — replug or re-login if needed.');
-      setUdevStatus('installed');
+      const res: any = await setupUdev();
+      const result = res?.data?.setupGamepadUdev;
+      setUdevMsg(result === 'already-installed' ? 'Already usable.' : 'Rule installed — replug or re-login if needed.');
+      // Re-ask rather than assuming success — the install runs on the host,
+      // and the authoritative answer is whether /dev/uinput opens now.
+      await refetchUdev();
     } catch (e: any) {
       setUdevMsg(`Failed: ${e?.message ?? String(e)}`);
     } finally {
@@ -162,27 +256,82 @@ const Index: React.FC<Props> = ({ isOpen, dismissModal, settings }) => {
     ...dashboards.map(d => ({ value: d.name, text: d.name })),
   ];
 
+  // De-duplicated by NAME, not id: a DeviceDefault stores `group` as a name,
+  // so two groups sharing one name are indistinguishable to everything
+  // downstream — listing the name twice offers a choice that doesn't exist,
+  // and made Fluent's Dropdown emit a duplicate-React-key warning on every
+  // render (it keys options by value). The underlying duplicate group is a
+  // data problem worth fixing at the source; this just stops the picker
+  // pretending the two are separate.
   const groupOptions = [
     { value: '', text: '(none)' },
-    ...groups.map(g => ({ value: g.name, text: g.name })),
+    ...[...new Set(groups.map(g => g.name))].map(name => ({ value: name, text: name })),
   ];
 
-  // dash and group are mutually exclusive (either pick a specific dashboard,
-  // or a group whose members resolve their own) — whichever field the Form
-  // just reported as changed (vs. the last-known value for this device)
-  // wins, and clears the other.
-  function setDashGroup(deviceName: string, next: { dash: string; group: string }) {
-    setLocalDefaults(prev => {
-      const cur = prev[deviceName] ?? { dash: '', group: '' };
-      if (next.dash !== cur.dash) {
-        return { ...prev, [deviceName]: { dash: next.dash, group: next.dash ? '' : cur.group } };
-      }
-      if (next.group !== cur.group) {
-        return { ...prev, [deviceName]: { dash: next.group ? '' : cur.dash, group: next.group } };
-      }
-      return prev;
-    });
-  }
+  // Rows are DERIVED during render from deviceMap + localDefaults rather
+  // than held in their own state. Holding them separately is what broke the
+  // AmbientLights gamma editor: the Form's key changed one render before the
+  // state it was keyed on, so it remounted against stale values and then
+  // never remounted again.
+  //
+  // Devices with no name are excluded — defaults are keyed by device NAME
+  // server-side, so an unnamed device has nowhere to store one. They're
+  // surfaced as a count below the list instead of as dead rows.
+  const namedDevices = Object.entries(deviceMap).filter(([, name]) => !!name);
+  const unnamedDeviceCount = Object.keys(deviceMap).length - namedDevices.length;
+
+  const deviceRows: DeviceRow[] = useMemo(
+    () =>
+      namedDevices
+        .map(([deviceId, deviceName]) => ({
+          deviceId,
+          deviceName,
+          dash: localDefaults[deviceName]?.dash ?? '',
+          group: localDefaults[deviceName]?.group ?? '',
+        }))
+        // This device first — it replaces the separate "This device" editor,
+        // which edited the very same record as one of the rows below it.
+        .sort((a, b) =>
+          a.deviceId === appId ? -1
+            : b.deviceId === appId ? 1
+              : a.deviceName.localeCompare(b.deviceName)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [deviceMap, localDefaults, appId],
+  );
+
+  const deviceOverridesSchema = {
+    devices: {
+      type: 'list' as const,
+      label: '',
+      fixed: true,
+      horizontal: true,
+      emptyText: 'No named devices yet.',
+      rowKey: (r: DeviceRow) => r.deviceId,
+      rowLabel: (r: DeviceRow) => (
+        <span style={{ fontSize: '0.8em', fontWeight: r.deviceId === appId ? 700 : 500, opacity: r.deviceId === appId ? 1 : 0.75 }}>
+          {r.deviceName}
+          {r.deviceId === appId && <span style={{ fontWeight: 400, opacity: 0.5 }}> (this device)</span>}
+        </span>
+      ),
+      // Constant key set (dash/group); deviceId/deviceName aren't rendered
+      // fields and ride along on the row untouched.
+      // No per-field flex needed: `horizontal` shares the row evenly.
+      itemSchema: () => ({
+        dash: { type: 'select' as const, placeholder: 'Dashboard override', options: dashOptions },
+        group: { type: 'select' as const, placeholder: 'Group override', options: groupOptions },
+      }),
+      // dash and group are mutually exclusive: either pick a specific
+      // dashboard, or a group whose members resolve their own. Setting one
+      // clears the other; clearing one leaves the other alone. deriveRow is
+      // TOLD which field moved, so this drops the old inference that diffed
+      // the incoming pair against the last-known value for the device.
+      deriveRow: ({ field, value }: { field: string; value: any }) => {
+        if (field === 'dash') return value ? { group: '' } : undefined;
+        if (field === 'group') return value ? { dash: '' } : undefined;
+        return undefined;
+      },
+    },
+  };
 
   async function upsertDefault(deviceName: string, dash: string | null, group: string | null) {
     const existing = defaultsByName[deviceName];
@@ -198,6 +347,10 @@ const Index: React.FC<Props> = ({ isOpen, dismissModal, settings }) => {
       setSaveError('Please fix the highlighted fields on the General tab before saving.');
       return;
     }
+    if (!gamepadValid) {
+      setSaveError('Please fix the highlighted gamepad mappings before saving.');
+      return;
+    }
     setSaveError(null);
 
     try {
@@ -210,6 +363,12 @@ const Index: React.FC<Props> = ({ isOpen, dismissModal, settings }) => {
             simdCommand,
             monocoqueCommand,
             huenicornCommand,
+            // Explicit null (not '') clears back to unset — omitting the
+            // field would mean "leave unchanged" per AppSettingsInput's
+            // MaybeUndefined convention.
+            simdDebugCommand: simdDebugCommand.trim() || null,
+            monocoqueDebugCommand: monocoqueDebugCommand.trim() || null,
+            huenicornDebugCommand: huenicornDebugCommand.trim() || null,
           },
         },
       });
@@ -280,71 +439,53 @@ const Index: React.FC<Props> = ({ isOpen, dismissModal, settings }) => {
           <PivotItem headerText="Dashboards">
             <Stack tokens={{ childrenGap: '1em' }} style={{ paddingTop: '0.77em' }}>
               {/* ── Global default ────────────────────────────────────── */}
+              {/* Keyed on the SERVER value, not local state: the old
+                  `default-${localDefaults...}` hash remounted this Form on
+                  every keystroke of its own edit. It now reseeds only when
+                  the loaded record changes. */}
               <Form
-                key={`default-${localDefaults['default']?.dash ?? ''}`}
+                key={`default-${defaultsByName['default']?.dash ?? ''}`}
                 form={{ dash: { type: 'select', label: 'Default dashboard', options: dashOptions } }}
                 name="defaultDashboard"
                 initialValues={{ dash: localDefaults['default']?.dash ?? '' }}
-                onChange={(_n: string, { clean }: any) => setDashGroup('default', { dash: clean.dash, group: '' })}
+                onChange={(_n: string, { clean }: any) =>
+                  setLocalDefaults(prev => ({ ...prev, default: { dash: clean.dash ?? '', group: '' } }))
+                }
               />
 
-              {/* ── This device ───────────────────────────────────────── */}
+              {/* ── Per-device overrides ──────────────────────────────── */}
+              {/* One `list` field replaces the former "This device" +
+                  "All devices" pair. Those were two editors over the SAME
+                  DeviceDefault record whenever this device was named, each
+                  with its own content-hash key. This device now simply sorts
+                  to the top of the one list. */}
               <Stack tokens={{ childrenGap: '0.5em' }}>
-                <span style={{ fontSize: '0.9em', fontWeight: 600 }}>This device</span>
-                {!currentName ? (
+                <span style={{ fontSize: '0.9em', fontWeight: 600 }}>Devices</span>
+                {!currentName && (
                   <span style={{ fontSize: '0.78em', opacity: 0.5 }}>Set a device name in General to configure defaults for this device.</span>
-                ) : (
-                  <Stack horizontal tokens={{ childrenGap: 8 }}>
-                    <Form
-                      key={`device-${currentName}-${localDefaults[currentName]?.dash ?? ''}-${localDefaults[currentName]?.group ?? ''}`}
-                      form={{
-                        dash: { type: 'select', label: 'Dashboard override', options: dashOptions, styles: { root: { flex: 1 } } },
-                        group: { type: 'select', label: 'Group (vehicle-specific)', options: groupOptions, styles: { root: { flex: 1 } } },
-                      }}
-                      name="thisDeviceDefault"
-                      initialValues={{
-                        dash: localDefaults[currentName]?.dash ?? '',
-                        group: localDefaults[currentName]?.group ?? '',
-                      }}
-                      onChange={(_n: string, { clean }: any) => setDashGroup(currentName, clean)}
-                    />
-                  </Stack>
+                )}
+                <Form
+                  key={`devdefaults-${deviceDefaults.map(d => d.id).join(',')}`}
+                  form={deviceOverridesSchema}
+                  name="deviceOverrides"
+                  initialValues={{ devices: deviceRows }}
+                  onChange={(_n: string, { raw }: any) => {
+                    const rows: DeviceRow[] = raw.devices ?? [];
+                    setLocalDefaults(prev => {
+                      const next = { ...prev };
+                      rows.forEach(r => {
+                        next[r.deviceName] = { dash: r.dash ?? '', group: r.group ?? '' };
+                      });
+                      return next;
+                    });
+                  }}
+                />
+                {unnamedDeviceCount > 0 && (
+                  <span style={{ fontSize: '0.75em', opacity: 0.45 }}>
+                    {unnamedDeviceCount} device{unnamedDeviceCount === 1 ? '' : 's'} with no name set — overrides are stored per device name.
+                  </span>
                 )}
               </Stack>
-
-              {/* ── All devices ───────────────────────────────────────── */}
-              {Object.entries(deviceMap).length > 0 && (
-                <Stack tokens={{ childrenGap: '0.5em' }}>
-                  <span style={{ fontSize: '0.9em', fontWeight: 600 }}>All devices</span>
-                  {Object.entries(deviceMap).map(([devId, devName]) => (
-                    <Stack key={devId} tokens={{ childrenGap: 4 }} style={{ padding: '0.4em 0', borderBottom: '1px solid rgba(128,128,128,0.12)' }}>
-                      <span style={{ fontSize: '0.8em', fontWeight: devId === appId ? 700 : 500, opacity: devId === appId ? 1 : 0.75 }}>
-                        {devName || <span style={{ opacity: 0.5 }}>{devId.slice(0, 8)}</span>}
-                        {devId === appId && <span style={{ fontWeight: 400, opacity: 0.5 }}> (this device)</span>}
-                      </span>
-                      {!devName ? (
-                        <span style={{ fontSize: '0.75em', opacity: 0.45 }}>No name set</span>
-                      ) : (
-                        <Stack horizontal tokens={{ childrenGap: 8 }}>
-                          <Form
-                            key={`devrow-${devName}-${localDefaults[devName]?.dash ?? ''}-${localDefaults[devName]?.group ?? ''}`}
-                            form={{
-                              dash: { type: 'select', placeholder: 'Dashboard override', options: dashOptions, styles: { root: { flex: 1 } } },
-                              group: { type: 'select', placeholder: 'Group override', options: groupOptions, styles: { root: { flex: 1 } } },
-                            }}
-                            name={`deviceDefault-${devName}`}
-                            initialValues={{
-                              dash: localDefaults[devName]?.dash ?? '',
-                              group: localDefaults[devName]?.group ?? '',
-                            }}
-                            onChange={(_n: string, { clean }: any) => setDashGroup(devName, clean)}
-                          />
-                        </Stack>
-                      )}
-                    </Stack>
-                  ))}
-                </Stack>
-              )}
             </Stack>
           </PivotItem>
 
@@ -374,7 +515,9 @@ const Index: React.FC<Props> = ({ isOpen, dismissModal, settings }) => {
                 </label>
                 <span style={{ fontSize: '0.78em', opacity: 0.65, marginBottom: 8 }}>
                   Button and slider controls send input via a Linux uinput virtual gamepad.
-                  A udev rule is required so the app can open <code>/dev/uinput</code> without root.
+                  The app needs write access to <code>/dev/uinput</code>. Many systems already
+                  grant it to the logged-in user via a <code>uaccess</code> ACL; the button below
+                  installs a udev rule for those that don't.
                 </span>
                 <Stack horizontal verticalAlign="center" tokens={{ childrenGap: 10 }}>
                   <span style={{
@@ -385,8 +528,8 @@ const Index: React.FC<Props> = ({ isOpen, dismissModal, settings }) => {
                       ? getTheme().palette.redDark
                       : getTheme().palette.neutralSecondary,
                   }}>
-                    {udevStatus === 'installed' ? '✓ Rule installed'
-                      : udevStatus === 'missing' ? '✗ Rule not found'
+                    {udevStatus === 'installed' ? '✓ Virtual gamepad ready'
+                      : udevStatus === 'missing' ? '✗ No access to /dev/uinput'
                       : '— checking…'}
                   </span>
                   {udevStatus !== 'installed' && (
@@ -418,19 +561,60 @@ const Index: React.FC<Props> = ({ isOpen, dismissModal, settings }) => {
                 override these if your install only exposes a service under a different name
                 or a wrapper script (e.g. a distrobox-based install).
               </span>
+              {/* Which set is live is decided by the build type, not a
+                  toggle here (see service_commands.rs) — so the panel states
+                  it rather than leaving it to be inferred. */}
+              <span
+                style={{
+                  fontSize: '0.78em',
+                  padding: '6px 8px',
+                  borderRadius: 4,
+                  background: debugBuild ? 'rgba(201, 162, 39, 0.12)' : 'rgba(58, 167, 109, 0.12)',
+                  color: debugBuild ? '#c9a227' : '#3aa76d',
+                }}
+              >
+                {debugBuild
+                  ? 'Development build — the dev commands below are in use. A service with no dev command set will not be started.'
+                  : 'Release build — the production commands below are in use. Dev commands are ignored.'}
+              </span>
               <Form
-                key={`services-${simdCommand}-${monocoqueCommand}-${huenicornCommand}`}
+                key={`services-${simdCommand}-${monocoqueCommand}-${huenicornCommand}-${simdDebugCommand}-${monocoqueDebugCommand}-${huenicornDebugCommand}`}
                 form={{
                   simdCommand: { type: 'text', label: 'simd command', placeholder: 'simd' },
+                  simdDebugCommand: {
+                    type: 'text',
+                    label: 'simd command (dev build)',
+                    placeholder: '/path/to/simapi/build/simd/simd',
+                  },
                   monocoqueCommand: { type: 'text', label: 'monocoque command', placeholder: 'monocoque play' },
+                  monocoqueDebugCommand: {
+                    type: 'text',
+                    label: 'monocoque command (dev build)',
+                    placeholder: '/path/to/monocoque/build/monocoque play',
+                  },
                   huenicornCommand: { type: 'text', label: 'huenicorn command', placeholder: 'huenicorn' },
+                  huenicornDebugCommand: {
+                    type: 'text',
+                    label: 'huenicorn command (dev build)',
+                    placeholder: '/path/to/huenicorn/build/huenicorn',
+                  },
                 }}
                 name="servicesSettings"
-                initialValues={{ simdCommand, monocoqueCommand, huenicornCommand }}
+                initialValues={{
+                  simdCommand,
+                  simdDebugCommand,
+                  monocoqueCommand,
+                  monocoqueDebugCommand,
+                  huenicornCommand,
+                  huenicornDebugCommand,
+                }}
                 onChange={(_n: string, { clean }: any) => {
                   setSimdCommand(clean.simdCommand);
                   setMonocoqueCommand(clean.monocoqueCommand);
                   setHuenicornCommand(clean.huenicornCommand);
+                  setSimdDebugCommand(clean.simdDebugCommand ?? '');
+                  setMonocoqueDebugCommand(clean.monocoqueDebugCommand ?? '');
+                  setHuenicornDebugCommand(clean.huenicornDebugCommand ?? '');
                 }}
               />
             </Stack>
@@ -443,123 +627,27 @@ const Index: React.FC<Props> = ({ isOpen, dismissModal, settings }) => {
           </PivotItem>
 
           <PivotItem headerText="Gamepad">
-            {(() => {
-              const theme = getTheme();
-              const AXIS_LABELS = ['X', 'Y', 'Z', 'RX', 'RY', 'RZ'];
-              const isEditing = editMapping !== null;
-              const saveEdit = () => {
-                if (!editMapping?.name?.trim()) return;
-                const m: GamepadMapping = {
-                  id: editMapping.id ?? `gp-${Date.now()}`,
-                  name: editMapping.name.trim(),
-                  mappingType: editMapping.mappingType ?? 'button',
-                  index: editMapping.index ?? 0,
-                };
-                setGamepadMappings(prev =>
-                  prev.some(x => x.id === m.id)
-                    ? prev.map(x => x.id === m.id ? m : x)
-                    : [...prev, m],
-                );
-                setEditMapping(null);
-              };
-              const editorSchema = {
-                name: { type: 'text' as const, label: 'Name', placeholder: 'e.g. Headlights', required: true },
-                mappingType: {
-                  type: 'select' as const,
-                  label: 'Type',
-                  options: [
-                    { text: 'Button', value: 'button' },
-                    { text: 'Axis', value: 'axis' },
-                  ],
-                },
-                index: {
-                  type: 'slider' as const,
-                  label: editMapping?.mappingType === 'axis' ? 'Axis' : 'Button',
-                  min: 0,
-                  max: editMapping?.mappingType === 'axis' ? 5 : 31,
-                  step: 1,
-                },
-              };
-              const axisHint = editMapping?.mappingType === 'axis'
-                ? AXIS_LABELS[editMapping.index ?? 0] ?? String(editMapping?.index ?? 0)
-                : null;
-
-              return (
-                <Stack tokens={{ childrenGap: '0.8em' }} style={{ paddingTop: '0.77em' }}>
-                  <span style={{ fontSize: '0.8em', opacity: 0.6 }}>
-                    Define named actions here, then assign them to button/slider/encoder controls on the canvas.
-                  </span>
-
-                  {/* Mapping list */}
-                  {gamepadMappings.length === 0 && !isEditing && (
-                    <span style={{ fontSize: '0.82em', opacity: 0.5 }}>No mappings yet.</span>
-                  )}
-                  {gamepadMappings.map(m => (
-                    <Stack key={m.id} horizontal verticalAlign="center" tokens={{ childrenGap: 6 }}
-                      style={{ padding: '4px 0', borderBottom: `1px solid ${theme.palette.neutralLight}` }}
-                    >
-                      <span style={{ flex: 1, fontSize: '0.85em' }}>{m.name}</span>
-                      <span style={{ fontSize: '0.75em', opacity: 0.55, minWidth: 64 }}>
-                        {m.mappingType === 'button'
-                          ? `btn ${m.index}`
-                          : `axis ${AXIS_LABELS[m.index] ?? m.index}`}
-                      </span>
-                      <button onClick={() => setEditMapping({ ...m })}
-                        style={{ padding: '1px 7px', fontSize: '0.75em', cursor: 'pointer', border: 'none', borderRadius: 3, background: theme.palette.neutralLighter }}>
-                        Edit
-                      </button>
-                      <button onClick={() => setGamepadMappings(prev => prev.filter(x => x.id !== m.id))}
-                        style={{ padding: '1px 7px', fontSize: '0.75em', cursor: 'pointer', border: 'none', borderRadius: 3, background: theme.palette.redDark, color: '#fff' }}>
-                        ✕
-                      </button>
-                    </Stack>
-                  ))}
-
-                  {/* Inline editor */}
-                  {isEditing ? (
-                    <Stack tokens={{ childrenGap: 6 }} style={{ padding: '8px', background: theme.palette.neutralLighterAlt, borderRadius: 4 }}>
-                      <Form
-                        key={`${editMapping?.id ?? 'new'}-${editMapping?.mappingType ?? 'button'}`}
-                        form={editorSchema}
-                        name="gamepadMappingEditor"
-                        initialValues={{
-                          name: editMapping?.name ?? '',
-                          mappingType: editMapping?.mappingType ?? 'button',
-                          index: editMapping?.index ?? 0,
-                        }}
-                        onChange={(_n: string, { clean }: any) => {
-                          setEditMapping(prev => {
-                            const typeChanged = !!prev && clean.mappingType !== prev.mappingType;
-                            return { ...prev, ...clean, index: typeChanged ? 0 : clean.index };
-                          });
-                        }}
-                      />
-                      {axisHint && (
-                        <span style={{ fontSize: '0.75em', opacity: 0.6 }}>{axisHint}</span>
-                      )}
-                      <Stack horizontal tokens={{ childrenGap: 6 }}>
-                        <button onClick={saveEdit}
-                          disabled={!editMapping?.name?.trim()}
-                          style={{ padding: '3px 12px', cursor: 'pointer', border: 'none', borderRadius: 3, background: theme.palette.themePrimary, color: '#fff', fontSize: '0.82em' }}>
-                          Save
-                        </button>
-                        <button onClick={() => setEditMapping(null)}
-                          style={{ padding: '3px 10px', cursor: 'pointer', border: 'none', borderRadius: 3, background: theme.palette.neutralLighter, fontSize: '0.82em' }}>
-                          Cancel
-                        </button>
-                      </Stack>
-                    </Stack>
-                  ) : (
-                    <button
-                      onClick={() => setEditMapping({ mappingType: 'button', index: 0, name: '' })}
-                      style={{ alignSelf: 'flex-start', padding: '3px 10px', cursor: 'pointer', border: 'none', borderRadius: 3, background: theme.palette.neutralLight, fontSize: '0.82em' }}
-                    >
-                      + Add mapping
-                    </button>
-                  )}
-                </Stack>
-              );
-            })()}
+            <Stack tokens={{ childrenGap: '0.8em' }} style={{ paddingTop: '0.77em' }}>
+              <span style={{ fontSize: '0.8em', opacity: 0.6 }}>
+                Define named actions here, then assign them to button/slider/encoder controls on the canvas.
+              </span>
+              {/* One `list` field, replacing the previous row list + single
+                  inline editor + editMapping draft state. Every row is now
+                  expanded and editable in place rather than one at a time.
+                  Keyed on the SERVER-side mappings, not local state, so
+                  adding or removing a row doesn't remount mid-interaction —
+                  it only reseeds when settings load or a save round-trips. */}
+              <Form
+                key={`gamepad-${(settings.gamepadMappings ?? []).map(m => m.id).join(',')}`}
+                form={gamepadSchema}
+                name="gamepadMappings"
+                initialValues={{ mappings: gamepadMappings }}
+                onChange={(_n: string, { raw, isValid }: any) => {
+                  setGamepadMappings(raw.mappings ?? []);
+                  setGamepadValid(isValid);
+                }}
+              />
+            </Stack>
           </PivotItem>
 
           <PivotItem headerText="Clients">
