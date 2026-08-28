@@ -24,9 +24,13 @@ impl Default for AppConfig {
                 ambient_tint_intensity: 0.3,
                 ambient_primary_channel: None,
                 ambient_saturation_boost: 1.0,
+                ambient_channel_gamma: None,
                 simd_command: "simd".into(),
                 monocoque_command: "monocoque play".into(),
                 huenicorn_command: "huenicorn".into(),
+                simd_debug_command: None,
+                monocoque_debug_command: None,
+                huenicorn_debug_command: None,
             },
         }
     }

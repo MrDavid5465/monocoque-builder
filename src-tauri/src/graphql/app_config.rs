@@ -1,7 +1,7 @@
 use crate::config_manager::{
     app_config::{applications, read_app_config, write_app_config},
     to_gql_config, to_gql_entry,
-    types::{AppConfig, AppSettings, AppSettingsInput, GamepadMapping, GqlAppConfig},
+    types::{AppConfig, AppSettings, AppSettingsInput, ChannelGamma, GamepadMapping, GqlAppConfig},
 };
 use crate::huenicorn::HuenicornSettingsChanged;
 use async_graphql::{Context, MaybeUndefined, Object, Result as GqlResult};
@@ -108,6 +108,19 @@ impl AppConfigMutation {
                     s.ambient_saturation_boost,
                     existing.settings.ambient_saturation_boost,
                 ),
+                ambient_channel_gamma: match s.ambient_channel_gamma {
+                    MaybeUndefined::Undefined => existing.settings.ambient_channel_gamma,
+                    MaybeUndefined::Null => None,
+                    MaybeUndefined::Value(gs) => Some(
+                        gs.into_iter()
+                            .map(|g| ChannelGamma {
+                                channel_id: g.channel_id,
+                                day: g.day,
+                                night: g.night,
+                            })
+                            .collect(),
+                    ),
+                },
                 simd_command: merge_required(s.simd_command, existing.settings.simd_command),
                 monocoque_command: merge_required(
                     s.monocoque_command,
@@ -116,6 +129,18 @@ impl AppConfigMutation {
                 huenicorn_command: merge_required(
                     s.huenicorn_command,
                     existing.settings.huenicorn_command,
+                ),
+                simd_debug_command: merge_optional(
+                    s.simd_debug_command,
+                    existing.settings.simd_debug_command,
+                ),
+                monocoque_debug_command: merge_optional(
+                    s.monocoque_debug_command,
+                    existing.settings.monocoque_debug_command,
+                ),
+                huenicorn_debug_command: merge_optional(
+                    s.huenicorn_debug_command,
+                    existing.settings.huenicorn_debug_command,
                 ),
             }
         } else {

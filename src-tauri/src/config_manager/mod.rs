@@ -4,7 +4,7 @@ pub mod types;
 
 use types::{
     AppConfig, AppEntry, AppSettings, GqlAppConfig, GqlAppEntry, GqlAppLink, GqlAppSettings,
-    GqlGamepadMapping,
+    GqlChannelGamma, GqlGamepadMapping,
 };
 
 use std::fs;
@@ -67,9 +67,22 @@ pub fn to_gql_settings(s: AppSettings) -> GqlAppSettings {
         ambient_tint_intensity: s.ambient_tint_intensity,
         ambient_primary_channel: s.ambient_primary_channel,
         ambient_saturation_boost: s.ambient_saturation_boost,
+        ambient_channel_gamma: s.ambient_channel_gamma.map(|gs| {
+            gs.into_iter()
+                .map(|g| GqlChannelGamma {
+                    channel_id: g.channel_id,
+                    day: g.day,
+                    night: g.night,
+                })
+                .collect()
+        }),
         simd_command: s.simd_command,
         monocoque_command: s.monocoque_command,
         huenicorn_command: s.huenicorn_command,
+        simd_debug_command: s.simd_debug_command,
+        monocoque_debug_command: s.monocoque_debug_command,
+        huenicorn_debug_command: s.huenicorn_debug_command,
+        debug_build: crate::service_commands::is_debug_build(),
     }
 }
 pub fn to_gql_entry(a: AppEntry) -> GqlAppEntry {

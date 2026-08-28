@@ -10,7 +10,10 @@ mod device_enumeration;
 mod gamepad;
 mod graphql;
 mod huenicorn;
+mod night_state;
 mod pipewire_dsp;
+mod process_liveness;
+mod service_commands;
 mod service_watchdogs;
 mod sun_position;
 mod telemetry;
@@ -26,10 +29,6 @@ fn main() {
     }));
 
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![
-            gamepad::gamepad_udev_status,
-            gamepad::setup_gamepad_udev,
-        ])
         .setup(|_app| {
             std::thread::spawn(|| {
                 let rt = Runtime::new().unwrap();

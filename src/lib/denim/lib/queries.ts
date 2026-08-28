@@ -50,9 +50,18 @@ const MY = gql`
         ambientTintIntensity
         ambientPrimaryChannel
         ambientSaturationBoost
+        ambientChannelGamma {
+          channelId
+          day
+          night
+        }
         simdCommand
         monocoqueCommand
         huenicornCommand
+        simdDebugCommand
+        monocoqueDebugCommand
+        huenicornDebugCommand
+        debugBuild
         ...GamepadMappingsFields
       }
     }
@@ -77,9 +86,18 @@ const UPDATE_SETTINGS = gql`
         ambientTintIntensity
         ambientPrimaryChannel
         ambientSaturationBoost
+        ambientChannelGamma {
+          channelId
+          day
+          night
+        }
         simdCommand
         monocoqueCommand
         huenicornCommand
+        simdDebugCommand
+        monocoqueDebugCommand
+        huenicornDebugCommand
+        debugBuild
         ...GamepadMappingsFields
       }
     }
@@ -93,6 +111,14 @@ export interface GamepadMapping {
   mappingType: string;
   /** Button 0–31 or axis 0–5 */
   index: number;
+}
+
+/** One Huenicorn channel's day/night gamma pair — see ChannelGamma in
+ *  src-tauri/src/config_manager/types.rs for what the numbers mean. */
+export interface IChannelGamma {
+  channelId: number;
+  day: number;
+  night: number;
 }
 
 export interface IUserSettingInput {
@@ -111,9 +137,15 @@ export interface IUserSettingInput {
   ambientTintIntensity?: number;
   ambientPrimaryChannel?: number;
   ambientSaturationBoost?: number;
+  ambientChannelGamma?: IChannelGamma[];
   simdCommand?: string;
   monocoqueCommand?: string;
   huenicornCommand?: string;
+  /** Dev-build overrides, used instead of the commands above in a debug
+   *  build and ignored in a release build - see service_commands.rs. */
+  simdDebugCommand?: string;
+  monocoqueDebugCommand?: string;
+  huenicornDebugCommand?: string;
 }
 export interface ISettings {
   launchPage: string;
@@ -131,9 +163,18 @@ export interface ISettings {
   ambientTintIntensity?: number;
   ambientPrimaryChannel?: number;
   ambientSaturationBoost?: number;
+  ambientChannelGamma?: IChannelGamma[];
   simdCommand?: string;
   monocoqueCommand?: string;
   huenicornCommand?: string;
+  /** Dev-build overrides, used instead of the commands above in a debug
+   *  build and ignored in a release build - see service_commands.rs. */
+  simdDebugCommand?: string;
+  monocoqueDebugCommand?: string;
+  huenicornDebugCommand?: string;
+  /** Read-only: true when the backend serving this is a debug build, i.e.
+   *  the dev commands above are the ones actually in effect. */
+  debugBuild?: boolean;
 }
 export interface IAppNav {
   text: string;
@@ -175,6 +216,24 @@ const GET_FILE = gql`
       name
       file
     }
+  }
+`;
+
+// Whether the backend can create the virtual gamepad (i.e. open
+// /dev/uinput). Deliberately a GraphQL query rather than a Tauri command:
+// the backend is the process that would actually open the device, so it's
+// the only one that can answer honestly, and going through typiql means the
+// browser build gets the same answer as the desktop one. Same reasoning
+// already applied to gamepadButton/gamepadAxis — see gamepad.rs.
+export const GAMEPAD_UDEV_STATUS = gql`
+  query gamepadUdevStatus {
+    gamepadUdevStatus
+  }
+`;
+
+export const SETUP_GAMEPAD_UDEV = gql`
+  mutation setupGamepadUdev {
+    setupGamepadUdev
   }
 `;
 
