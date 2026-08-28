@@ -31,6 +31,7 @@ const REQUIRED_EXTRAS = {
   'gamepad-select': 'gamepadMappings',
   'image-upload': 'uploadFn',
   custom: 'onRender',
+  list: 'itemSchema',
 };
 
 // Every type Fabric.tsx's switch explicitly special-cases (whether or not it
@@ -39,7 +40,7 @@ const KNOWN_TYPES = new Set([
   'checkbox', 'multicheckbox', 'radio', 'select', 'multi-select',
   'gamepad-select', 'image-upload', 'picker', 'date', 'datetime',
   'combobox', 'timetoday', 'range', 'slider', 'button', 'signature',
-  'tyre-position', 'custom',
+  'tyre-position', 'custom', 'list',
 ]);
 
 // Common values that are *intentionally* not special-cased — they fall
@@ -189,6 +190,16 @@ function checkFile(filePath) {
                 message: `type: '${typeValue}' requires a '${requiredExtra}' property, none found on this field`,
               });
             }
+          }
+          if (typeValue === 'list' && names.has('required')) {
+            // `!!form[key]` is true for [], so the stock required check
+            // passes on an empty list and silently does nothing. useSchema
+            // normalizes this to min:1, but the schema should say so.
+            findings.push({
+              level: 'WARN',
+              line: lineOf(node),
+              message: `type: 'list' with 'required' — required is a no-op on an array (!![] === true). Use 'min: 1' instead; useSchema normalizes it for you, but write it explicitly.`,
+            });
           }
           if (!KNOWN_TYPES.has(typeValue) && !FREEFORM_SAFE_TYPES.has(typeValue)) {
             const suggestion = closestKnownType(typeValue);

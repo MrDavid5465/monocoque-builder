@@ -19,6 +19,7 @@ import {
 } from '@fluentui/react';
 import { format, parseISO } from 'date-fns';
 import { TyreGrid } from '../../../../components/shared/TyreGrid';
+import ListField from './ListField';
 interface IndexableObject {
   [key: string]: any;
 }
@@ -840,6 +841,35 @@ export default function Raw(props: any): ReactElement {
           <Stack className={rest.className}>
             {label && <Label>{label}</Label>}
             <TyreGrid current={value ?? null} onApply={pos => onChange(name, pos)} />
+            <Stack className={style.errors}>
+              <Feedback
+                and={[!isValid, isTouched]}
+                errors={errors}
+                dirty={isDirty}
+              />
+            </Stack>
+          </Stack>
+        );
+      // Value shape: an array of row objects. Every row mounts its own
+      // nested useForm over `itemSchema`, so row fields stay plain
+      // top-level keys and never meet useForm's path-stripping. All the
+      // machinery (add/remove, per-row validation, echo detection, drag
+      // gating) lives in ListField — this case is the same thin adapter
+      // tyre-position above is. `Template={Raw}` is passed down rather than
+      // imported by ListField, to avoid a circular import; multicheckbox
+      // already self-references the same way.
+      case 'list':
+        return (
+          <Stack className={rest.className}>
+            {label && <Label>{label}</Label>}
+            <ListField
+              {...rest}
+              name={name}
+              value={value}
+              onChange={onChange}
+              onFocus={onFocus}
+              Template={Raw}
+            />
             <Stack className={style.errors}>
               <Feedback
                 and={[!isValid, isTouched]}
