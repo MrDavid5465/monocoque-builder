@@ -96,10 +96,6 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
   // frame's lerp target.
   const ambientTintVecRef = useRef(new THREE.Vector3(0, 0, 0));
   const ambientOpacityRef = useRef(0);
-  // Slow-moving "what does normal currently look like" baseline for
-  // ambient saturation — see the render loop's own comment for why this
-  // replaced a fixed saturation threshold.
-  const baselineSaturationRef = useRef(0);
   const stateRef    = useRef({ yaw, pitch, fov, roll, displayWidth, displayHeight, nightAmount, ambientColor, ambientTintIntensity, ambientSaturationBoost });
   stateRef.current  = { yaw, pitch, fov, roll, displayWidth, displayHeight, nightAmount, ambientColor, ambientTintIntensity, ambientSaturationBoost };
   const dragRef     = useRef<{ startX: number; startY: number; startYaw: number; startPitch: number } | null>(null);
@@ -319,78 +315,84 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
           // overexposed the scene toward the tint color, which soft light's
           // highlight falloff makes a non-issue.
           const nightBoost = 1 + mixAmountRef.current * 2;
-          // Only dramatic colors should move the tint — but "dramatic" is
-          // relative to a rolling baseline, not a fixed saturation number.
-          // Confirmed live sitting directly under in-game fireworks: with
-          // this app's current (large) Huenicorn capture regions, raw
-          // saturation only reached ~0.32 — a small bright burst averaged
-          // over a huge mostly-dark/neutral region barely moves the mean,
-          // so a fixed threshold tuned high enough to reject ordinary
-          // driving (~0.15-0.17 baseline) would reject real fireworks too.
-          // Tracking "what does normal currently look like" and reacting to
-          // deviation from THAT survives a diluted signal: fireworks are a
-          // ~0.15 spike above baseline even though the absolute number
-          // stays low. baselineTauMs is deliberately much slower than the
-          // ~830ms main smoothing so a sudden spike registers as a
-          // deviation before the baseline itself catches up and
-          // re-normalizes toward it.
+          // Gate on ABSOLUTE colourfulness, not deviation from a rolling
+          // baseline.
+          //
+          // The previous version tracked a slow (tau 4s) baseline of recent
+          // saturation and drove opacity from `saturation - baseline`. That
+          // is self-cancelling by construction: hold any colour steady and
+          // the baseline converges onto it within a few seconds, deviation
+          // goes to zero, and the tint fades itself out — a sustained red
+          // sunset would light up briefly and then vanish. Squaring the
+          // result made it worse (half the deviation gave a quarter of the
+          // opacity), and it fed a second 830ms smoother, so the whole
+          // response was sluggish twice over. Net effect: only sharp
+          // transients ever showed, and only for a moment.
+          //
+          // A plain floor/ceiling ramp on absolute saturation keeps a
+          // colourful scene tinted for as long as it stays colourful, while
+          // still leaving genuinely neutral/grey captures untinted. SAT_FULL
+          // is deliberately reachable: Huenicorn's capture regions are large,
+          // so a vivid burst averaged over a mostly-dark region still only
+          // reads ~0.32 raw saturation — measured live under in-game
+          // fireworks — and a ceiling above that would never be hit.
           const maxChannel = Math.max(ac.r, ac.g, ac.b, 0.0001);
           const minChannel = Math.min(ac.r, ac.g, ac.b);
           const saturation = (maxChannel - minChannel) / maxChannel;
           const luma = (ac.r + ac.g + ac.b) / 3;
-          const baselineTauMs = 4000;
-          const baselineSmoothing = 1 - Math.exp(-dtMs / baselineTauMs);
-          baselineSaturationRef.current = lerp(
-            baselineSaturationRef.current,
-            saturation,
-            baselineSmoothing,
-          );
-          const deviation = Math.max(0, saturation - baselineSaturationRef.current);
-          // Calibrated against the fireworks reading above: ~0.32 raw
-          // saturation against a ~0.17 baseline is roughly a 0.15
-          // deviation, tuned here to read as fully "dramatic." Fixed (not
-          // user-tunable) — a moderate ease-in curve, distinct from
-          // ambientSaturationBoost below (that dial controls how vivid the
-          // tint COLOR looks once it's showing, not whether it shows).
-          const DEVIATION_FOR_FULL_STRENGTH = 0.15;
-          const linearFactor = Math.min(1, deviation / DEVIATION_FOR_FULL_STRENGTH);
-          const SPIKE_SELECTIVITY_EXPONENT = 2;
-          const saturationFactor = Math.pow(linearFactor, SPIKE_SELECTIVITY_EXPONENT);
-          opacityTarget = Math.min(1, intensity * nightBoost * 0.5) * saturationFactor;
+          const SAT_FLOOR = 0.10; // below this the reading is effectively grey
+          const SAT_FULL  = 0.35; // at/above this the gate is fully open
+          const t = Math.min(1, Math.max(0, (saturation - SAT_FLOOR) / (SAT_FULL - SAT_FLOOR)));
+          // smoothstep, so the gate eases in/out instead of cornering at the
+          // floor — no squaring, so mid-range colour keeps mid-range opacity.
+          const saturationGate = t * t * (3 - 2 * t);
+          opacityTarget = Math.min(1, intensity * nightBoost * 0.5) * saturationGate;
           // ambientSaturationBoost pushes each channel's deviation from the
           // reading's own average outward before picking the tint color —
           // 1 (default) leaves hue/saturation untouched, higher values turn
           // a pale/washed-out reading (e.g. a dim, barely-red capture) into
           // a genuinely vivid one (a saturated red) rather than just a
-          // brighter version of the same pale color. Then re-normalized so
-          // the max channel sits at 0.9.
+          // brighter version of the same pale color.
           //
-          // NOTE: that 0.9 was calibrated for additive blending, where it
-          // simply meant "a bright version of the color". Under soft light
-          // it means something different — 0.5 is soft light's neutral
-          // point, so channels above it lift toward white and channels
-          // below it fall toward black. For a saturated tint that's a
-          // strong, deliberate hue push (red lifts, green/blue sink); for a
-          // near-neutral reading it's mostly a brightening. Kept as-is
-          // rather than re-centered on 0.5, since it interacts with the
-          // by-eye ambientSaturationBoost tuning — but this is the first
-          // number to revisit if the cast reads too strong or too washed.
+          // The result is then scaled to a LEVEL derived from the reading's
+          // own luma, rather than pinning the max channel to a fixed 0.9.
+          // That fixed value was calibrated for additive blending, where it
+          // just meant "a bright version of the color", and it threw the
+          // reading's intensity away: a dim red and a blazing red produced
+          // the identical tint, so the effect had no dynamics.
+          //
+          // Soft light is neutral at 0.5 — channels above lift toward white,
+          // below fall toward black — so the range floor sits above that
+          // (a dim reading still lifts, just gently) and the ceiling is
+          // near the old 0.9 (a bright reading pushes as hard as before).
           const boost = stateRef.current.ambientSaturationBoost;
           const boostedR = Math.max(0, luma + (ac.r - luma) * boost);
           const boostedG = Math.max(0, luma + (ac.g - luma) * boost);
           const boostedB = Math.max(0, luma + (ac.b - luma) * boost);
           const maxBoosted = Math.max(boostedR, boostedG, boostedB, 0.0001);
-          const vividScale = 0.9 / maxBoosted;
+          const LEVEL_MIN = 0.60;
+          const LEVEL_MAX = 0.95;
+          const level = LEVEL_MIN + Math.min(1, Math.max(0, luma)) * (LEVEL_MAX - LEVEL_MIN);
+          const vividScale = level / maxBoosted;
           tintTarget.x = boostedR * vividScale;
           tintTarget.y = boostedG * vividScale;
           tintTarget.z = boostedB * vividScale;
         }
+        // Ambient gets its own, much shorter tau than the day/night blend's
+        // 830ms. They were sharing `smoothing` — but the day/night crossfade
+        // is deliberately slow (it stands in for a 2.5s CSS transition),
+        // whereas the ambient tint is tracking a light that is physically
+        // changing right now. At 830ms on top of the old 4s baseline the
+        // tint always arrived late; on its own at ~250ms it reads as
+        // responsive while still filtering out per-frame capture jitter.
+        const ambientTauMs = 250;
+        const ambientSmoothing = 1 - Math.exp(-dtMs / ambientTauMs);
         ambientTintVecRef.current.set(
-          lerp(ambientTintVecRef.current.x, tintTarget.x, smoothing),
-          lerp(ambientTintVecRef.current.y, tintTarget.y, smoothing),
-          lerp(ambientTintVecRef.current.z, tintTarget.z, smoothing),
+          lerp(ambientTintVecRef.current.x, tintTarget.x, ambientSmoothing),
+          lerp(ambientTintVecRef.current.y, tintTarget.y, ambientSmoothing),
+          lerp(ambientTintVecRef.current.z, tintTarget.z, ambientSmoothing),
         );
-        ambientOpacityRef.current = lerp(ambientOpacityRef.current, opacityTarget, smoothing);
+        ambientOpacityRef.current = lerp(ambientOpacityRef.current, opacityTarget, ambientSmoothing);
         shaderRef.current.uniforms.ambientTint.value.copy(ambientTintVecRef.current);
         shaderRef.current.uniforms.ambientOpacity.value = ambientOpacityRef.current;
       }
