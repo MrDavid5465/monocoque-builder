@@ -96,6 +96,10 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
   // frame's lerp target.
   const ambientTintVecRef = useRef(new THREE.Vector3(0, 0, 0));
   const ambientOpacityRef = useRef(0);
+  // Smoothed nightAmount that is NOT gated on having a night texture, unlike
+  // mixAmountRef. nightBoost previously read mixAmountRef, so on a car with
+  // no night photo it stayed pinned at 1 and the boost never engaged at all.
+  const nightLevelRef = useRef(0);
   const stateRef    = useRef({ yaw, pitch, fov, roll, displayWidth, displayHeight, nightAmount, ambientColor, ambientTintIntensity, ambientSaturationBoost });
   stateRef.current  = { yaw, pitch, fov, roll, displayWidth, displayHeight, nightAmount, ambientColor, ambientTintIntensity, ambientSaturationBoost };
   const dragRef     = useRef<{ startX: number; startY: number; startYaw: number; startPitch: number } | null>(null);
@@ -170,6 +174,10 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
       // soft-lit result, smoothed separately in JS the same way mixAmount is.
       shader.uniforms.ambientTint = { value: new THREE.Vector3(0, 0, 0) };
       shader.uniforms.ambientOpacity = { value: 0 };
+      // Only non-zero for cars with no night photo — see the fragment
+      // shader's own comment on why this darkening lives here and not in a
+      // DOM overlay above the canvas.
+      shader.uniforms.nightDarken = { value: 0 };
       shader.fragmentShader = shader.fragmentShader
         .replace(
           '#include <common>',
@@ -178,6 +186,7 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
           uniform float mixAmount;
           uniform vec3 ambientTint;
           uniform float ambientOpacity;
+          uniform float nightDarken;
           // Standard (W3C/Photoshop) soft light. blend == 0.5 is the neutral
           // point and returns base untouched; above pushes toward white,
           // below toward black, both with a falloff that shrinks as base
@@ -207,6 +216,17 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
             vec4 dayTexel = texture2D( map, vMapUv );
             vec4 nightTexel = texture2D( nightMap, vMapUv );
             vec4 sampledDiffuseColor = mix( dayTexel, nightTexel, mixAmount );
+            // Flat night darkening for cars with NO night photo. This used to
+            // be a DOM overlay (rgba(0,0,0,0.85) at NIGHT_OVERLAY_Z in
+            // Canvas.tsx) painted ABOVE this canvas — which meant it also
+            // covered the ambient tint below it, transmitting only ~19% of it
+            // at full night and making the tint 42% WEAKER at night than in
+            // daylight, while nightBoost was busy trying to make it 3x
+            // stronger. Doing it here instead puts the darkening BEFORE the
+            // tint, so the tint modulates the pixels actually on screen.
+            // 0.8 matches the old overlay's effective alpha (0.85 * 0.95), so
+            // night mode itself looks unchanged.
+            sampledDiffuseColor.rgb *= ( 1.0 - nightDarken * 0.8 );
             vec3 softLit = softLight( sampledDiffuseColor.rgb, ambientTint );
             sampledDiffuseColor.rgb = mix( sampledDiffuseColor.rgb, softLit, ambientOpacity );
             diffuseColor *= sampledDiffuseColor;
@@ -292,6 +312,16 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
         shaderRef.current.uniforms.mixAmount.value = mixAmountRef.current;
         shaderRef.current.uniforms.nightMap.value = nightTextureRef.current;
 
+        // Texture-independent night level. mixAmount is forced to 0 without a
+        // night texture (sampling an unbound nightMap yields black), so it
+        // cannot stand in for "how night is it" — which is what both the
+        // flat darkening and nightBoost actually want.
+        nightLevelRef.current = lerp(nightLevelRef.current, stateRef.current.nightAmount, smoothing);
+        // With a real night photo the texture is already dark, so no extra
+        // darkening; without one this replaces the old DOM overlay.
+        shaderRef.current.uniforms.nightDarken.value =
+          nightTextureRef.current ? 0 : nightLevelRef.current;
+
         // Ambient tint: soft-light blended over the photo at
         // `ambientOpacity` (see the shader's own comment for the full
         // multiply → mix → additive → soft-light history and why each
@@ -314,7 +344,10 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
           // anymore: the old 0.5 ceiling existed because additive blending
           // overexposed the scene toward the tint color, which soft light's
           // highlight falloff makes a non-issue.
-          const nightBoost = 1 + mixAmountRef.current * 2;
+          // nightLevelRef, not mixAmountRef: the latter is pinned to 0 on a
+          // car with no night photo, which is exactly the case that needs the
+          // boost most — it's now the darkened-in-shader one.
+          const nightBoost = 1 + nightLevelRef.current * 2;
           // Gate on ABSOLUTE colourfulness, not deviation from a rolling
           // baseline.
           //

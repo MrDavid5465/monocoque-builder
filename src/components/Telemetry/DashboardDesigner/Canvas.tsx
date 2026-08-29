@@ -57,11 +57,18 @@ interface Props {
   liveBackground?: React.ReactNode;
   liveBackgroundInteractive?: boolean;
   // True when liveBackground is already a genuine night-specific photo (a car's
-  // uploaded night 360°, not a day photo or generic default being reused for
-  // night). Suppresses the darkening overlay below, which otherwise assumes the
-  // background has no day/night distinction of its own and double-darkens an
-  // already-correct night photo.
-  liveBackgroundIsNightPhoto?: boolean;
+  // True when the live background handles its own day/night appearance —
+  // i.e. any live 360, since Photo360Viewer now darkens the photosphere
+  // in-shader whether or not the car has a real night photo. Suppresses the
+  // darkening overlay below.
+  //
+  // Previously this was only set when a real night photo existed, so a car
+  // without one got the flat DOM overlay instead. That overlay sits ABOVE the
+  // viewer (NIGHT_OVERLAY_Z vs the background's z-index: -1), so it also
+  // covered the ambient tint, transmitting ~19% of it at full night — leaving
+  // the tint weaker at night than in daylight despite nightBoost trying to
+  // triple it. The darkening moved into the shader, before the tint.
+  liveBackgroundHandlesNight?: boolean;
   simStatus?: string;
   // Fired once when a canvas-driven move or resize drag ends (pointer up), so
   // the properties panel — which shows a snapshot taken at mount/selection
@@ -1185,7 +1192,7 @@ const NodeRenderer: React.FC<NodeRendererProps> = ({
 const Canvas = React.memo(forwardRef<CanvasHandle, Props>(({
   dashboard, sprites, gamepadMappings = [], selectedId, onSelect, onUpdate, onUpdateDashboard, kioskMode, onKioskButton, isNight: isNightProp, nightAmount: nightAmountProp, onToggleNightMode, forceNightPreview, skipTransition, telemetryData,
   kioskSweepActive = false,
-  globalSteerMaxDeg, panBgMode, liveBackground, liveBackgroundInteractive, liveBackgroundIsNightPhoto, simStatus = '',
+  globalSteerMaxDeg, panBgMode, liveBackground, liveBackgroundInteractive, liveBackgroundHandlesNight, simStatus = '',
   onDragCommit, activeTool,
 }, ref) => {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -1534,7 +1541,7 @@ const Canvas = React.memo(forwardRef<CanvasHandle, Props>(({
         onPointerUp={onPointerUp}
         onPointerDown={panBgMode ? (e => { e.stopPropagation(); startBgPan(e); }) : undefined}
       >
-        {dashboard.dayNight && !liveBackgroundIsNightPhoto && (
+        {dashboard.dayNight && !liveBackgroundHandlesNight && (
           <div
             style={{
               position: 'absolute', inset: 0,

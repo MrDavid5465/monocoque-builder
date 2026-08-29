@@ -616,12 +616,6 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
   const carPhoto360 = matchedCar;
   const carDayPhoto = carPhoto360?.dayPhoto;
   const carNightPhoto = carPhoto360?.nightPhoto;
-  // Whether the car has a distinct night photo at all — not gated by the
-  // current nightAmount, since Photo360CrossfadeViewer already blends the
-  // two photos correctly across the *entire* 0..1 range on its own; gating
-  // this by isNight would un-suppress Canvas's generic darkening overlay
-  // partway through a transition and double-darken the scene.
-  const hasCarNightPhoto = !!carNightPhoto;
   const defaultPhoto360Sprite = dashboard.baseDashType === '360' && dashboard.photo360File
     ? sprites.find(s => s.file === dashboard.photo360File)
     : undefined;
@@ -752,7 +746,7 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
       globalSteerMaxDeg={globalSteerMaxDeg}
       panBgMode={panBgMode && !show360}
       liveBackground={liveBackground360 ?? kioskLive360}
-      liveBackgroundIsNightPhoto={showingLive360 && hasCarNightPhoto}
+      liveBackgroundHandlesNight={showingLive360}
       liveBackgroundInteractive={viewing360 && !kioskMode}
       gamepadMappings={gamepadMappings}
       simStatus={simStatus}
