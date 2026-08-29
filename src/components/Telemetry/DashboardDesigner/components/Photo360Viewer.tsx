@@ -65,6 +65,13 @@ interface Props {
 const SWAY_YAW_DEG_PER_G   = 1.5;
 const SWAY_PITCH_DEG_PER_G = 0.75;
 
+// Fraction of the full night darkening applied when the car HAS a night
+// photo. The photo already supplies the night *look*; this only takes the
+// overall level down so it reads as night rather than as a differently-lit
+// daytime shot. Turn this up if night still isn't dark enough, down if the
+// scene goes muddy. 0 restores the previous behaviour (photo only).
+const NIGHT_DARKEN_WITH_PHOTO = 0.45;
+
 const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
   photoUrl, nightPhotoUrl, nightAmount = 0, ambientColor = null, ambientTintIntensity = 0,
   ambientSaturationBoost = 1,
@@ -225,7 +232,9 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
             // stronger. Doing it here instead puts the darkening BEFORE the
             // tint, so the tint modulates the pixels actually on screen.
             // 0.8 matches the old overlay's effective alpha (0.85 * 0.95), so
-            // night mode itself looks unchanged.
+            // the no-night-photo case looks unchanged. The JS side scales
+            // nightDarken down (NIGHT_DARKEN_WITH_PHOTO) when a real night
+            // photo is supplying most of the look already.
             sampledDiffuseColor.rgb *= ( 1.0 - nightDarken * 0.8 );
             vec3 softLit = softLight( sampledDiffuseColor.rgb, ambientTint );
             sampledDiffuseColor.rgb = mix( sampledDiffuseColor.rgb, softLit, ambientOpacity );
@@ -317,10 +326,19 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
         // cannot stand in for "how night is it" — which is what both the
         // flat darkening and nightBoost actually want.
         nightLevelRef.current = lerp(nightLevelRef.current, stateRef.current.nightAmount, smoothing);
-        // With a real night photo the texture is already dark, so no extra
-        // darkening; without one this replaces the old DOM overlay.
+        // Two different jobs, so two different strengths.
+        //
+        // Without a night photo this is the ONLY thing making night look like
+        // night — it replaces the old DOM overlay, so it matches its
+        // effective alpha (see NIGHT_DARKEN_NO_PHOTO in the shader).
+        //
+        // With one, the photo supplies the look but nothing darkens it: the
+        // day/night mix just crossfades between two normally-exposed
+        // photographs, and a night photograph is exposed to look correct on
+        // its own, not to read as dark next to a daylight one. So it needs
+        // some darkening too, just far less.
         shaderRef.current.uniforms.nightDarken.value =
-          nightTextureRef.current ? 0 : nightLevelRef.current;
+          nightLevelRef.current * (nightTextureRef.current ? NIGHT_DARKEN_WITH_PHOTO : 1);
 
         // Ambient tint: soft-light blended over the photo at
         // `ambientOpacity` (see the shader's own comment for the full
