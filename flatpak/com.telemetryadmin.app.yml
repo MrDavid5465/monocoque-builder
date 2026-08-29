@@ -1,9 +1,11 @@
 # Best-effort Flatpak manifest — NOT submitted anywhere (Flathub or
 # otherwise), built in CI purely so a .flatpak bundle exists as a release
-# asset. This is the least-verified part of the whole CI/CD setup: nothing
-# here has been exercised against a real flatpak-builder run yet (no way to
-# do that in this environment). Treat the first several CI runs as
-# genuinely experimental.
+# asset. Locally verified (2026-08-29, via a real `flatpak-builder` run) past
+# the `dir` source's path and offline-npm-cache setup — see .github/workflows/
+# flatpak.yml's header for what that caught and fixed, and what's still
+# unverified (the github: npm dependency's sandboxed git-clone step, and this
+# repo's own git submodules under src/lib/). Treat the next real CI run as
+# the actual first end-to-end test.
 #
 # Builds via `cargo build --release` + a plain Vite build directly, not
 # through Tauri's own bundler — the bundler's .deb/AppImage/rpm targets
@@ -18,7 +20,7 @@
 # bare freedesktop one.
 app-id: com.telemetryadmin.app
 runtime: org.gnome.Platform
-runtime-version: '46'
+runtime-version: '49'
 sdk: org.gnome.Sdk
 sdk-extensions:
   - org.freedesktop.Sdk.Extension.rust-stable
@@ -37,6 +39,8 @@ build-options:
   append-path: /usr/lib/sdk/rust-stable/bin:/usr/lib/sdk/node20/bin
   env:
     CARGO_HOME: /run/build/typiql/cargo
+    XDG_CACHE_HOME: /run/build/typiql/flatpak-node/cache
+    npm_config_cache: /run/build/typiql/flatpak-node/npm-cache
 
 modules:
   - name: typiql
@@ -49,7 +53,7 @@ modules:
       # crates) resolve locally and need no generated source entries;
       # only registry/git deps do.
       - type: dir
-        path: ../..
+        path: ../../..
         dest: src
       - generated-node-sources.json
       - generated-cargo-sources.json

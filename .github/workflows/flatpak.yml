@@ -8,10 +8,29 @@ name: Flatpak (best effort)
 # cross-workflow `needs:`, which doesn't work across separate workflow
 # files.
 #
-# UNVERIFIED: nothing here has been exercised against a real
-# flatpak-builder run (no way to do that in this environment). Expect to
-# iterate on generator invocations, runtime/SDK extension versions, and
-# the offline build step once a real CI log exists.
+# PARTIALLY VERIFIED (2026-08-29): ran flatpak-builder for real for the first
+# time, in a local container with a matching GNOME 49 runtime/SDK + rust-stable/
+# node20 extensions at freedesktop 25.08 (bumped from the original GNOME 46/
+# freedesktop 24.08 pins, which were already EOL). That run caught and fixed
+# three real bugs nobody had hit before: the `dir` source's `path: ../..` was
+# one level too shallow to reach the sibling typiql-rs checkout (needed
+# `../../..`); `npm ci --offline` had no XDG_CACHE_HOME/npm_config_cache
+# pointed at flatpak-node-generator's cache, so it always fell through to
+# hitting the real registry; and flatpak-node-generator.py doesn't exist at
+# that path anymore (it's a pip package with a console-script entry point
+# now) and flatpak-cargo-generator.py needs tomlkit, not toml.
+#
+# STILL UNVERIFIED: the build got as far as flatpak-builder's own sandboxed
+# git-clone step for the @octant/per-form github: npm dependency, then hit
+# `bwrap: No permissions to create a new namespace` — this container doesn't
+# allow nested unprivileged user namespaces. GitHub-hosted ubuntu-22.04
+# runners generally do, so this specific failure isn't expected to reproduce
+# here, but that's untested. Also still unverified: whether flatpak-builder's
+# automatic git-submodule handling for the `dir` source correctly resolves
+# this repo's own submodules (src/lib/per-form, src/lib/typical-admin-fabric,
+# added in the feat/huenicorn-ambient-lights branch, not yet on master) — the
+# build never got that far locally. Treat the next real CI run as the actual
+# first test of both.
 on:
   push:
     tags: ['v*']
@@ -38,18 +57,24 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y flatpak flatpak-builder
           sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-          sudo flatpak install -y --noninteractive flathub org.gnome.Platform//46 org.gnome.Sdk//46
-          sudo flatpak install -y --noninteractive flathub org.freedesktop.Sdk.Extension.rust-stable//24.08 org.freedesktop.Sdk.Extension.node20//24.08
+          sudo flatpak install -y --noninteractive flathub org.gnome.Platform//49 org.gnome.Sdk//49
+          sudo flatpak install -y --noninteractive flathub org.freedesktop.Sdk.Extension.rust-stable//25.08 org.freedesktop.Sdk.Extension.node20//25.08
 
       - name: Install flatpak-builder-tools generators
         run: |
-          pip install --user aiohttp toml
+          # flatpak-node-generator is a proper pip package now (with a console-script
+          # entry point), not a standalone script at node/flatpak-node-generator.py --
+          # that path stopped existing upstream. The cargo generator needs tomlkit,
+          # not toml (aiohttp+toml here silently left flatpak-cargo-generator.py unable
+          # to import tomlkit at all). Both only surfaced by actually running this for
+          # the first time (see flatpak/com.telemetryadmin.app.yml's header comment).
+          pip install --user aiohttp tomlkit
           git clone --depth 1 https://github.com/flatpak/flatpak-builder-tools /tmp/flatpak-builder-tools
+          pip install --user /tmp/flatpak-builder-tools/node
 
       - name: Generate offline npm sources
         run: |
-          python3 /tmp/flatpak-builder-tools/node/flatpak-node-generator.py \
-            npm typiql-tauri/typiql/package-lock.json \
+          ~/.local/bin/flatpak-node-generator npm typiql-tauri/typiql/package-lock.json \
             -o typiql-tauri/typiql/flatpak/generated-node-sources.json
 
       - name: Generate offline cargo sources
