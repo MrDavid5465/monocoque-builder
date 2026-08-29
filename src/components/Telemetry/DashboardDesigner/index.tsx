@@ -282,6 +282,11 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
   // (AmbientLights/index.tsx's select field); falls back to whichever
   // channel Huenicorn reports first if unset or not found.
   const [ambientColor, setAmbientColor] = useState<{ r: number; g: number; b: number } | null>(null);
+  // The element Canvas paints the ambient tint into when its night overlay is
+  // up (that overlay would otherwise swallow an in-shader tint). Stable
+  // identity, written imperatively by Photo360Viewer's render loop — so it is
+  // deliberately NOT in kioskLive360Deps below.
+  const ambientOverlayRef = useRef<HTMLDivElement>(null);
   useHubListener(hub, 'AmbientColorChanged', kioskMode ? (event: any) => {
     const colors = event?.colors ?? [];
     const picked = (ambientPrimaryChannel != null
@@ -652,6 +657,7 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
       ref={viewer360Ref}
       dayPhotoUrl={dayPhoto360Url}
       nightPhotoUrl={nightPhoto360Url}
+      tintOverlayRef={ambientOverlayRef}
       nightAmount={nightAmount}
       yaw={dashboard.photo360Yaw ?? 0}
       pitch={dashboard.photo360Pitch ?? 0}
@@ -695,6 +701,7 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
         <Photo360CrossfadeViewer
           dayPhotoUrl={dayPhoto360Url}
           nightPhotoUrl={nightPhoto360Url}
+          tintOverlayRef={ambientOverlayRef}
           nightAmount={nightAmount}
           ambientColor={ambientColor}
           ambientTintIntensity={ambientTintIntensity}
@@ -753,6 +760,7 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
       panBgMode={panBgMode && !show360}
       liveBackground={liveBackground360 ?? kioskLive360}
       liveBackgroundHandlesNight={showingLive360 && hasCarNightPhoto}
+      ambientOverlayRef={ambientOverlayRef}
       liveBackgroundInteractive={viewing360 && !kioskMode}
       gamepadMappings={gamepadMappings}
       simStatus={simStatus}

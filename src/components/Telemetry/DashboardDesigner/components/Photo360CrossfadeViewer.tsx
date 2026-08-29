@@ -30,6 +30,8 @@ interface Props {
   swayDisableX?: boolean;
   swayDisableY?: boolean;
   onLoaded?: () => void;
+  // Straight pass-through — see Photo360Viewer's own doc comment.
+  tintOverlayRef?: React.RefObject<HTMLDivElement>;
 }
 
 // Thin pass-through onto Photo360Viewer, which does the actual day/night

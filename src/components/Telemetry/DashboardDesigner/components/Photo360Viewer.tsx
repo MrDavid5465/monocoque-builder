@@ -56,6 +56,14 @@ interface Props {
   // texture loads asynchronously, so capturing before this fires yields a
   // blank/untextured sphere).
   onLoaded?: () => void;
+  // When present, the ambient tint is painted into THIS element (a
+  // soft-light overlay Canvas.tsx renders above its night overlay) instead of
+  // being blended in the shader — because the night overlay sits above this
+  // canvas and would otherwise transmit only ~19% of the tint. Written
+  // imperatively from the render loop, never through React state: the tint
+  // moves at ~60Hz. The in-shader tint is zeroed while this is in use so the
+  // two never stack.
+  tintOverlayRef?: React.RefObject<HTMLDivElement>;
 }
 
 // Calibrated so typical cornering g (~1g) gives ~1-2° of sway, and the clamped
@@ -77,7 +85,7 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
   ambientSaturationBoost = 1,
   yaw, pitch, fov, roll, displayWidth, displayHeight, onChange, readOnly = false,
   telemetryData, swayEnabled = false, swayGainX = 1, swayGainY = 1, swayDisableX = false, swayDisableY = false,
-  onLoaded,
+  onLoaded, tintOverlayRef,
 }, ref) => {
   const mountRef    = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -117,6 +125,8 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
   swayConfigRef.current = { swayEnabled, swayGainX, swayGainY, swayDisableX, swayDisableY };
   const onLoadedRef = useRef(onLoaded);
   onLoadedRef.current = onLoaded;
+  const tintOverlayRefRef = useRef(tintOverlayRef);
+  tintOverlayRefRef.current = tintOverlayRef;
   // Bumped once the GL-setup effect below acquires a context. The
   // texture-loading effect depends on this (not just photoUrl) so it can
   // pick up the material once it exists.
@@ -443,8 +453,19 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
           lerp(ambientTintVecRef.current.z, tintTarget.z, ambientSmoothing),
         );
         ambientOpacityRef.current = lerp(ambientOpacityRef.current, opacityTarget, ambientSmoothing);
-        shaderRef.current.uniforms.ambientTint.value.copy(ambientTintVecRef.current);
-        shaderRef.current.uniforms.ambientOpacity.value = ambientOpacityRef.current;
+        // Route the tint either into the shader or into the DOM overlay,
+        // never both. The overlay only exists when Canvas is drawing its
+        // night overlay, which is exactly the case where an in-shader tint
+        // would be mostly swallowed by it.
+        const overlayEl = tintOverlayRefRef.current?.current ?? null;
+        const t = ambientTintVecRef.current;
+        shaderRef.current.uniforms.ambientTint.value.copy(t);
+        shaderRef.current.uniforms.ambientOpacity.value = overlayEl ? 0 : ambientOpacityRef.current;
+        if (overlayEl) {
+          const to255 = (v: number) => Math.round(Math.min(1, Math.max(0, v)) * 255);
+          overlayEl.style.backgroundColor = `rgb(${to255(t.x)}, ${to255(t.y)}, ${to255(t.z)})`;
+          overlayEl.style.opacity = String(ambientOpacityRef.current);
+        }
       }
 
       renderer.render(scene, cameraRef.current!);
