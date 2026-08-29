@@ -338,6 +338,19 @@ pub struct KnownCar {
     pub name: Option<String>,
 }
 
+/// Tracks raw track-id strings seen in telemetry, the same way `KnownCar`
+/// tracks car names — `id` is the raw track id itself; `name` mirrors it.
+/// Populated by `register_track` (graphql/clients.rs) so the Tracks admin
+/// page's `rawTrackIds` multi-select (TrackLocation) can offer real,
+/// currently-driveable ids instead of requiring the raw string to be typed
+/// by hand.
+#[typiql_type]
+pub struct KnownTrack {
+    #[typiql(key)]
+    pub id: String,
+    pub name: Option<String>,
+}
+
 /// A stored file. Keyed by its real, stable filesystem `path` — `id` is a
 /// content hash, recomputed by sync_car_photos whenever the real file's
 /// bytes change, so `url` (built from the current id) naturally cache-busts
@@ -712,7 +725,7 @@ typiql_schema!(
     MonocoqueLedsDevice, LedsDeviceProfile,
     MonocoqueShiftLight, ShiftLightProfile,
     MonocoqueSimWindDevice, SimWindDeviceProfile,
-    DashTemplate, ConnectedClient, DashGroup, KnownCar, DeviceDefault,
+    DashTemplate, ConnectedClient, DashGroup, KnownCar, KnownTrack, DeviceDefault,
     Car, File, NightMode, CarDashPan, PreviewCar, DashboardEntry, Recording, RecordingFrame, TrackLocation;
     AppConfigQuery, DashboardFileSyncQuery, BuiltinTemplatesQuery, CarPhotoSyncQuery, ShakerDspQuery, TrackGeocodeQuery, QueryRoot;
     AppConfigMutation, DashboardFileUploadMutation, ClientsMutation, CarFileMutation, DashTemplateThumbnailMutation, DashboardMutation, GamepadMutation, NightClockMutation, ShakerDspMutation, RecordingControlMutation, HuenicornMutation;

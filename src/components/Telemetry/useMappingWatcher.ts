@@ -4,13 +4,14 @@ import dispatcher from '../../lib/denim/lib/queries';
 import { getAppId } from '../../graphql/client';
 import { GET_DEVICE_DEFAULTS } from './deviceDefaultsQueries';
 import { GET_DASH_GROUPS } from './Groups/queries';
-import { REGISTER_CAR } from './clientsQueries';
+import { REGISTER_CAR, REGISTER_TRACK } from './clientsQueries';
 
 export function useMappingWatcher(
   onChanged: () => void,
   skip = false,
   car = '',
   simStatus = '',
+  track = '',
 ): { handleDeviceDefaultEvent: (event: any) => void } {
   const appId = getAppId();
   const onChangedRef = useRef(onChanged);
@@ -19,6 +20,10 @@ export function useMappingWatcher(
   const [registerCar] = useMutation(REGISTER_CAR);
   const registerCarRef = useRef(registerCar);
   registerCarRef.current = registerCar;
+
+  const [registerTrack] = useMutation(REGISTER_TRACK);
+  const registerTrackRef = useRef(registerTrack);
+  registerTrackRef.current = registerTrack;
 
   // ── device name for this app instance ──────────────────────────────────────
   const { data: myData } = useQuery(dispatcher.my, { skip });
@@ -63,6 +68,16 @@ export function useMappingWatcher(
       registerCarRef.current({ variables: { name: car } });
     }
   }, [car, simStatus, skip]);
+
+  // ── track registration — fires whenever the active track or sim status changes ─
+  const lastTrackRef = useRef('');
+  useEffect(() => {
+    if (skip || !track) return;
+    if (simStatus === 'Active' && track !== lastTrackRef.current) {
+      lastTrackRef.current = track;
+      registerTrackRef.current({ variables: { name: track } });
+    }
+  }, [track, simStatus, skip]);
 
   // ── car-specific dash routing — navigates when car changes mid-session ─────
   const currentCarRef = useRef<string | undefined>(undefined);

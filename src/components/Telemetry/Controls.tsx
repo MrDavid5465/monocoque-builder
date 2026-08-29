@@ -3,8 +3,9 @@ import { useMatch } from 'react-router-dom';
 import { useMutation, useQuery } from '@apollo/client/react';
 import { mergeStyles, keyframes } from '@fluentui/react';
 import { useLiveTelemetry } from './useLiveTelemetry';
-import { REGISTER_CAR } from './clientsQueries';
+import { REGISTER_CAR, REGISTER_TRACK } from './clientsQueries';
 import { GET_KNOWN_CARS } from './Groups/queries';
+import { GET_KNOWN_TRACKS } from './trackLocationQueries';
 import { RECORDING_STATUS } from './Recordings/queries';
 import { LiveUpdatesContext, useHubListener, useLiveUpdatesHub } from './liveUpdatesHub';
 
@@ -63,7 +64,7 @@ const StatusDot: React.FC<{ mode: DotMode }> = ({ mode }) => (
 
 const TelemetryControls: React.FC = () => {
   const onDashRoute = !!useMatch('/telemetryadmin/dashboards/:name/show');
-  const { car, simStatus } = useLiveTelemetry(onDashRoute);
+  const { car, track, simStatus } = useLiveTelemetry(onDashRoute);
   const isActive = simStatus === 'Active';
 
   // Global (not per-recording) status — this control lives in the nav bar
@@ -110,6 +111,18 @@ const TelemetryControls: React.FC = () => {
       registerCar({ variables: { name: car } });
     }
   }, [car, simStatus, onDashRoute, registerCar]);
+
+  const [registerTrack] = useMutation(REGISTER_TRACK, {
+    refetchQueries: [{ query: GET_KNOWN_TRACKS }],
+  });
+  const lastTrackRef = useRef('');
+  useEffect(() => {
+    if (onDashRoute || !track || simStatus !== 'Active') return;
+    if (track !== lastTrackRef.current) {
+      lastTrackRef.current = track;
+      registerTrack({ variables: { name: track } });
+    }
+  }, [track, simStatus, onDashRoute, registerTrack]);
 
   return <>{ownHubSubscriber}<StatusDot mode={mode} /></>;
 };

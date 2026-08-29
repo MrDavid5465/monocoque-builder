@@ -3,23 +3,20 @@ import { useParams, useNavigate, useLocation } from 'react-router';
 import { useLazyQuery } from '@apollo/client/react';
 import { Stack, IconButton, PrimaryButton, DefaultButton, TextField, Separator, Form, useQuery, useMutation } from '../../lib/denim/lib';
 import {
-  GET_TRACK_LOCATIONS, ADD_TRACK_LOCATION, UPDATE_TRACK_LOCATION, SEARCH_TRACK_LOCATIONS,
+  GET_TRACK_LOCATIONS, ADD_TRACK_LOCATION, UPDATE_TRACK_LOCATION, SEARCH_TRACK_LOCATIONS, GET_KNOWN_TRACKS,
   GeocodeResult,
 } from '../Telemetry/trackLocationQueries';
 
-// One raw telemetry track-id per line in the UI, stored server-side as a
-// JSON array (TrackLocation.rawTrackIds) — see typiql_types.rs's doc comment
-// on why one location can list several ids (different sim/game, DLC/mod
-// variant, or layout, all resolving to the same real-world circuit).
-function parseRawIds(text: string): string[] {
-  return text.split('\n').map(s => s.trim()).filter(Boolean);
-}
-function formatRawIds(json: string | undefined): string {
+// Stored server-side as a JSON array (TrackLocation.rawTrackIds) — see
+// typiql_types.rs's doc comment on why one location can list several ids
+// (different sim/game, DLC/mod variant, or layout, all resolving to the same
+// real-world circuit).
+function parseRawIds(json: string | undefined): string[] {
   try {
     const arr = JSON.parse(json ?? '[]');
-    return Array.isArray(arr) ? arr.join('\n') : '';
+    return Array.isArray(arr) ? arr : [];
   } catch {
-    return '';
+    return [];
   }
 }
 
@@ -27,27 +24,9 @@ interface TrackFormState {
   name: string;
   latitude: string;
   longitude: string;
-  rawTrackIdsText: string;
+  rawTrackIds: string[];
 }
-const EMPTY_FORM_STATE: TrackFormState = { name: '', latitude: '', longitude: '', rawTrackIdsText: '' };
-
-// Every persisted field goes through one per-form schema — including
-// latitude/longitude/raw-ids, which is easy to skip in favor of hand-rolled
-// TextFields since they look like "just numbers", but per-form is the
-// established convention for every editable field in this app regardless
-// (see feedback_per_form_only). Only the geocode search below (a momentary
-// action, not stored state) is a legitimate hand-rolled exception.
-const trackFormSchema = {
-  name: { type: 'text' as const, label: 'Track name' },
-  latitude: { type: 'text' as const, label: 'Latitude' },
-  longitude: { type: 'text' as const, label: 'Longitude' },
-  rawTrackIdsText: {
-    type: 'text' as const,
-    label: 'Raw track ids (one per line — different sim/game, DLC, or layout variants of this circuit)',
-    multiline: true,
-    rows: 4,
-  },
-};
+const EMPTY_FORM_STATE: TrackFormState = { name: '', latitude: '', longitude: '', rawTrackIds: [] };
 
 // Registered for ReactiveAdmin's show/edit/new slots — one component for all
 // three, same rationale as GroupEdit/CarShow.
@@ -57,11 +36,38 @@ const TrackEdit: React.FC = () => {
   const { pathname } = useLocation();
   const isNew = !id;
 
-  const { data: tracksData } = useQuery(GET_TRACK_LOCATIONS, { fetchPolicy: 'cache-and-network', skip: isNew });
+  // Unconditional (not skip: isNew like before) — this now also feeds
+  // `claimedByOthers` below, needed on the New form too so a fresh track
+  // can't silently claim a raw id another TrackLocation already lists.
+  const { data: tracksData } = useQuery(GET_TRACK_LOCATIONS, { fetchPolicy: 'cache-and-network' });
+  const { data: knownTracksData } = useQuery(GET_KNOWN_TRACKS, { fetchPolicy: 'cache-and-network' });
   const [addTrack] = useMutation(ADD_TRACK_LOCATION, { refetchQueries: [{ query: GET_TRACK_LOCATIONS }] });
   const [updateTrack] = useMutation(UPDATE_TRACK_LOCATION, { refetchQueries: [{ query: GET_TRACK_LOCATIONS }] });
 
-  const existing = !isNew ? ((tracksData as any)?.getTrackLocations ?? []).find((t: any) => t.id === id) : undefined;
+  const allTracks: any[] = (tracksData as any)?.getTrackLocations ?? [];
+  const existing = !isNew ? allTracks.find((t: any) => t.id === id) : undefined;
+  const knownTrackIds: string[] = ((knownTracksData as any)?.getKnownTracks ?? []).map((t: any) => t.id);
+  const claimedByOthers = new Set(
+    allTracks.filter(t => t.id !== id).flatMap(t => parseRawIds(t.rawTrackIds)),
+  );
+
+  // Every persisted field goes through one per-form schema (see
+  // feedback_per_form_only) — rawTrackIds mirrors Car's carIds multi-select
+  // exactly (CarDetail.tsx/CarNew.tsx): options come from KnownTrack (raw
+  // ids actually seen in live telemetry, via registerTrack), and an id
+  // already claimed by another TrackLocation is disabled so the same raw id
+  // can't silently end up on two locations (find_track_location would then
+  // resolve it to whichever comes first).
+  const trackFormSchema = {
+    name: { type: 'text' as const, label: 'Track name' },
+    latitude: { type: 'text' as const, label: 'Latitude' },
+    longitude: { type: 'text' as const, label: 'Longitude' },
+    rawTrackIds: {
+      type: 'multi-select' as const,
+      label: 'Raw track ids (seen in telemetry — drive the track once to make it selectable here)',
+      options: knownTrackIds.map(tid => ({ text: tid, value: tid, disabled: claimedByOthers.has(tid) })),
+    },
+  };
 
   // per-form's <Form> is uncontrolled (snapshots initialValues once at
   // mount, per DashPanEditor/ObjectExplorer's established convention) —
@@ -77,7 +83,7 @@ const TrackEdit: React.FC = () => {
       name: existing.name ?? '',
       latitude: String(existing.latitude ?? ''),
       longitude: String(existing.longitude ?? ''),
-      rawTrackIdsText: formatRawIds(existing.rawTrackIds),
+      rawTrackIds: parseRawIds(existing.rawTrackIds),
     });
     setFormKey(k => k + 1);
     setHydrated(true);
@@ -105,7 +111,7 @@ const TrackEdit: React.FC = () => {
       name: raw.name ?? '',
       latitude: raw.latitude ?? '',
       longitude: raw.longitude ?? '',
-      rawTrackIdsText: raw.rawTrackIdsText ?? '',
+      rawTrackIds: raw.rawTrackIds ?? [],
     });
   };
 
@@ -115,7 +121,7 @@ const TrackEdit: React.FC = () => {
     if (!formState.name.trim() || !Number.isFinite(lat) || !Number.isFinite(lon)) return;
     setSaving(true);
     try {
-      const values = { name: formState.name.trim(), latitude: lat, longitude: lon, rawTrackIds: JSON.stringify(parseRawIds(formState.rawTrackIdsText)) };
+      const values = { name: formState.name.trim(), latitude: lat, longitude: lon, rawTrackIds: JSON.stringify(formState.rawTrackIds) };
       if (isNew) {
         const result = await addTrack({ variables: { values } });
         const newId = (result.data as any)?.addTrackLocation?.id;

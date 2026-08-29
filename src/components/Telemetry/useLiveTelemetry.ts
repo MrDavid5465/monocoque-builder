@@ -14,6 +14,7 @@ const SIM_STATUS_MAP: Record<string, string> = { OFF: 'Off', MENU: 'Menu', ACTIV
 export interface LiveTelemetryData {
   values: Record<string, number>;
   car: string;
+  track: string;
   simStatus: string;
 }
 
@@ -39,7 +40,7 @@ export function computeTelemetryValues(t: any): LiveTelemetryData {
     }
   }
   const simStatus = t?.simStatus ?? '';
-  return { values, car: t?.car ?? '', simStatus: SIM_STATUS_MAP[simStatus] ?? simStatus };
+  return { values, car: t?.car ?? '', track: t?.track ?? '', simStatus: SIM_STATUS_MAP[simStatus] ?? simStatus };
 }
 
 export function useLiveTelemetry(skip = false): LiveTelemetryData {

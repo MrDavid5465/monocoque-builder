@@ -11,6 +11,7 @@ import {
 } from './nightModeQueries';
 import { useGlobalNightMode } from './useGlobalNightMode';
 import { computeSimulatedNightState, formatTimeOfDay, parseTimeOfDay } from './dayNightSim';
+import TrackLinkDialog from './TrackLinkDialog';
 
 // Converts between the two ways of expressing simulated clock speed:
 // "a full 24h in-game day takes N real hours" <-> "N% of real-time speed".
@@ -48,6 +49,16 @@ function labelForMinutes(m: number): string {
   const abs = Math.abs(m);
   return abs % 60 === 0 ? `${sign}${abs / 60}h` : `${sign}${abs}m`;
 }
+
+// Pulls the unmatched raw track id straight out of setSunriseSunsetFromDate's
+// own error message (graphql/night_clock.rs: `track {track:?} isn't linked
+// to any Track Location yet — add it on the Tracks page`) rather than a
+// dedicated query/subscription — the error already carries the exact id
+// needed to open TrackLinkDialog, and this panel deliberately avoids opening
+// extra live connections (see its own doc comments on the connection-budget
+// and re-render issues that caused elsewhere in this file). Not anchored to
+// the string start since Apollo/async-graphql may prefix the raw message.
+const UNLINKED_TRACK_RE = /track "([^"]*)" isn't linked to any Track Location yet/;
 
 // Fields that ARE persisted form state (edited via a value, not a momentary
 // action) — kept in per-form's closed catalog. `simEnabled` has no native
@@ -120,6 +131,10 @@ const DayNightSimPanel: React.FC = () => {
   // linked to a Track Location yet) are shown here directly.
   const [computeDate, setComputeDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [computeError, setComputeError] = useState<string | null>(null);
+  // Set (opening TrackLinkDialog) when the compute call fails specifically
+  // because the live track isn't linked to a Track Location yet — see
+  // UNLINKED_TRACK_RE above.
+  const [unlinkedTrack, setUnlinkedTrack] = useState<string | null>(null);
   // Bumped on every successful Compute-from-date call and folded into the
   // config Form's `key` below — per-form's <Form> is uncontrolled and only
   // reads `initialValues` at mount (see that Form's own comment), so the
@@ -137,8 +152,23 @@ const DayNightSimPanel: React.FC = () => {
     setSunriseSunsetFromDate({ variables: { date: computeDate } })
       .then(() => setComputeNonce(n => n + 1))
       .catch((err: any) => {
-        setComputeError(err?.message ?? 'Failed to compute sunrise/sunset');
+        const message = err?.message ?? 'Failed to compute sunrise/sunset';
+        const match = UNLINKED_TRACK_RE.exec(message);
+        if (match) {
+          setUnlinkedTrack(match[1]);
+        } else {
+          setComputeError(message);
+        }
       });
+  };
+
+  // TrackLinkDialog just linked/created a Track Location for the live
+  // track — retry immediately so sunrise/sunset get set as part of the same
+  // couple-of-clicks flow instead of making the user click "Compute from
+  // date" a second time.
+  const handleTrackLinked = () => {
+    setUnlinkedTrack(null);
+    handleComputeFromDate();
   };
 
   // Reuses useGlobalNightMode's subscription for the live clock tick rather
@@ -325,6 +355,12 @@ const DayNightSimPanel: React.FC = () => {
           <span style={{ fontSize: '0.78em', color: theme.semanticColors.errorText }}>{computeError}</span>
         )}
       </Stack>
+
+      <TrackLinkDialog
+        liveTrack={unlinkedTrack}
+        onDismiss={() => setUnlinkedTrack(null)}
+        onLinked={handleTrackLinked}
+      />
     </Stack>
   );
 };

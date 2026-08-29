@@ -41,6 +41,15 @@ export const REMOVE_TRACK_LOCATION = gql`
   }
 `;
 
+// Raw track ids seen in live telemetry (see typiql_types.rs's `KnownTrack`
+// doc comment) — populates TrackEdit.tsx's `rawTrackIds` multi-select the
+// same way Groups/queries.ts's GET_KNOWN_CARS populates the Cars page's.
+export const GET_KNOWN_TRACKS = gql`
+  query getKnownTracks {
+    getKnownTracks { id }
+  }
+`;
+
 export interface GeocodeResult {
   displayName: string;
   latitude: number;
