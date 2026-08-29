@@ -57,17 +57,24 @@ interface Props {
   liveBackground?: React.ReactNode;
   liveBackgroundInteractive?: boolean;
   // True when liveBackground is already a genuine night-specific photo (a car's
-  // True when the live background handles its own day/night appearance —
-  // i.e. any live 360, since Photo360Viewer now darkens the photosphere
-  // in-shader whether or not the car has a real night photo. Suppresses the
-  // darkening overlay below.
+  // True when the live background supplies its own night appearance — a live
+  // 360 whose car has a real night photo, which Photo360Viewer blends to and
+  // then darkens further in-shader. Suppresses the overlay below, which would
+  // otherwise double-darken an already-correct night photo.
   //
-  // Previously this was only set when a real night photo existed, so a car
-  // without one got the flat DOM overlay instead. That overlay sits ABOVE the
-  // viewer (NIGHT_OVERLAY_Z vs the background's z-index: -1), so it also
-  // covered the ambient tint, transmitting ~19% of it at full night — leaving
-  // the tint weaker at night than in daylight despite nightBoost trying to
-  // triple it. The darkening moved into the shader, before the tint.
+  // Deliberately NOT set for a live 360 without a night photo, even though
+  // the shader could darken that case too: this overlay covers the WHOLE
+  // canvas, so it dims the gauges, text and buttons as well, and a shader on
+  // the photosphere reaches none of those. Dropping it there left night mode
+  // looking washed out because every widget stayed at daytime brightness.
+  //
+  // The cost is that the overlay also sits above the ambient tint
+  // (NIGHT_OVERLAY_Z vs the background's z-index: -1) and transmits only ~19%
+  // of it at full night. That is now much less painful than it was, because
+  // nightBoost was separately fixed to read a texture-independent night level
+  // (it read mixAmount, which is pinned to 0 without a night texture, so on
+  // exactly these cars the boost never engaged): tint opacity at full night
+  // went from 0.15 to 0.60, roughly 4x more signal reaching the veil.
   liveBackgroundHandlesNight?: boolean;
   simStatus?: string;
   // Fired once when a canvas-driven move or resize drag ends (pointer up), so

@@ -326,19 +326,18 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
         // cannot stand in for "how night is it" — which is what both the
         // flat darkening and nightBoost actually want.
         nightLevelRef.current = lerp(nightLevelRef.current, stateRef.current.nightAmount, smoothing);
-        // Two different jobs, so two different strengths.
+        // ONLY when a night photo exists — i.e. exactly when Canvas.tsx
+        // suppresses its flat night overlay. Without a photo that overlay is
+        // still what darkens the scene, and it must stay: it covers the whole
+        // canvas, so it dims the gauges and text too, which a shader on the
+        // photosphere cannot do. Darkening here as well would double-darken.
         //
-        // Without a night photo this is the ONLY thing making night look like
-        // night — it replaces the old DOM overlay, so it matches its
-        // effective alpha (see NIGHT_DARKEN_NO_PHOTO in the shader).
-        //
-        // With one, the photo supplies the look but nothing darkens it: the
-        // day/night mix just crossfades between two normally-exposed
-        // photographs, and a night photograph is exposed to look correct on
-        // its own, not to read as dark next to a daylight one. So it needs
-        // some darkening too, just far less.
+        // With a photo, nothing else darkens at all: the day/night mix just
+        // crossfades between two normally-exposed photographs, and a night
+        // photograph is exposed to look correct on its own, not to read as
+        // dark beside a daylight one.
         shaderRef.current.uniforms.nightDarken.value =
-          nightLevelRef.current * (nightTextureRef.current ? NIGHT_DARKEN_WITH_PHOTO : 1);
+          nightTextureRef.current ? nightLevelRef.current * NIGHT_DARKEN_WITH_PHOTO : 0;
 
         // Ambient tint: soft-light blended over the photo at
         // `ambientOpacity` (see the shader's own comment for the full
