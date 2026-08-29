@@ -14,7 +14,8 @@ interface Props {
   // See Photo360Viewer's own doc comment on these two.
   ambientColor?: { r: number; g: number; b: number } | null;
   ambientTintIntensity?: number;
-  ambientSaturationBoost?: number;
+  ambientSaturationBoostDay?: number;
+  ambientSaturationBoostNight?: number;
   yaw: number;
   pitch: number;
   fov: number;

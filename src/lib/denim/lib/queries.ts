@@ -49,7 +49,8 @@ const MY = gql`
         huenicornEnabled
         ambientTintIntensity
         ambientPrimaryChannel
-        ambientSaturationBoost
+        ambientSaturationBoostDay
+        ambientSaturationBoostNight
         ambientChannelGamma {
           channelId
           day
@@ -85,7 +86,8 @@ const UPDATE_SETTINGS = gql`
         huenicornEnabled
         ambientTintIntensity
         ambientPrimaryChannel
-        ambientSaturationBoost
+        ambientSaturationBoostDay
+        ambientSaturationBoostNight
         ambientChannelGamma {
           channelId
           day
@@ -136,7 +138,8 @@ export interface IUserSettingInput {
   huenicornEnabled?: boolean;
   ambientTintIntensity?: number;
   ambientPrimaryChannel?: number;
-  ambientSaturationBoost?: number;
+  ambientSaturationBoostDay?: number;
+  ambientSaturationBoostNight?: number;
   ambientChannelGamma?: IChannelGamma[];
   simdCommand?: string;
   monocoqueCommand?: string;
@@ -162,7 +165,8 @@ export interface ISettings {
   huenicornEnabled?: boolean;
   ambientTintIntensity?: number;
   ambientPrimaryChannel?: number;
-  ambientSaturationBoost?: number;
+  ambientSaturationBoostDay?: number;
+  ambientSaturationBoostNight?: number;
   ambientChannelGamma?: IChannelGamma[];
   simdCommand?: string;
   monocoqueCommand?: string;

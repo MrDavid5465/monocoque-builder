@@ -121,7 +121,8 @@ pub struct HuenicornSettingsChanged {
     pub huenicorn_enabled: bool,
     pub ambient_tint_intensity: f32,
     pub ambient_primary_channel: Option<u8>,
-    pub ambient_saturation_boost: f32,
+    pub ambient_saturation_boost_day: f32,
+    pub ambient_saturation_boost_night: f32,
 }
 
 #[derive(SimpleObject, Clone, Copy, Debug)]

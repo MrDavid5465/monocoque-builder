@@ -104,9 +104,13 @@ impl AppConfigMutation {
                     s.ambient_primary_channel,
                     existing.settings.ambient_primary_channel,
                 ),
-                ambient_saturation_boost: merge_required(
-                    s.ambient_saturation_boost,
-                    existing.settings.ambient_saturation_boost,
+                ambient_saturation_boost_day: merge_required(
+                    s.ambient_saturation_boost_day,
+                    existing.settings.ambient_saturation_boost_day,
+                ),
+                ambient_saturation_boost_night: merge_required(
+                    s.ambient_saturation_boost_night,
+                    existing.settings.ambient_saturation_boost_night,
                 ),
                 ambient_channel_gamma: match s.ambient_channel_gamma {
                     MaybeUndefined::Undefined => existing.settings.ambient_channel_gamma,
@@ -156,7 +160,8 @@ impl AppConfigMutation {
             huenicorn_enabled: app_config.settings.huenicorn_enabled,
             ambient_tint_intensity: app_config.settings.ambient_tint_intensity,
             ambient_primary_channel: app_config.settings.ambient_primary_channel,
-            ambient_saturation_boost: app_config.settings.ambient_saturation_boost,
+            ambient_saturation_boost_day: app_config.settings.ambient_saturation_boost_day,
+            ambient_saturation_boost_night: app_config.settings.ambient_saturation_boost_night,
         });
 
         let mut gql = to_gql_config(app_config);

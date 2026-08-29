@@ -66,7 +66,8 @@ pub fn to_gql_settings(s: AppSettings) -> GqlAppSettings {
         huenicorn_enabled: s.huenicorn_enabled,
         ambient_tint_intensity: s.ambient_tint_intensity,
         ambient_primary_channel: s.ambient_primary_channel,
-        ambient_saturation_boost: s.ambient_saturation_boost,
+        ambient_saturation_boost_day: s.ambient_saturation_boost_day,
+        ambient_saturation_boost_night: s.ambient_saturation_boost_night,
         ambient_channel_gamma: s.ambient_channel_gamma.map(|gs| {
             gs.into_iter()
                 .map(|g| GqlChannelGamma {

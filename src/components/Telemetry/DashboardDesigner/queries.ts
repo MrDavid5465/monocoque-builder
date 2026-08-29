@@ -278,7 +278,8 @@ export const DASHBOARD_UPDATES_SUB = gql`
         huenicornEnabled
         ambientTintIntensity
         ambientPrimaryChannel
-        ambientSaturationBoost
+        ambientSaturationBoostDay
+        ambientSaturationBoostNight
       }
     }
   }

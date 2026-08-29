@@ -207,11 +207,14 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
   const settingsAmbientTintIntensity: number = (myData as any)?.my?.settings?.ambientTintIntensity ?? 0;
   const settingsAmbientPrimaryChannel: number | null =
     (myData as any)?.my?.settings?.ambientPrimaryChannel ?? null;
-  const settingsAmbientSaturationBoost: number =
-    (myData as any)?.my?.settings?.ambientSaturationBoost ?? 1;
+  const settingsAmbientSaturationBoostDay: number =
+    (myData as any)?.my?.settings?.ambientSaturationBoostDay ?? 1;
+  const settingsAmbientSaturationBoostNight: number =
+    (myData as any)?.my?.settings?.ambientSaturationBoostNight ?? 1;
   const [ambientTintIntensity, setAmbientTintIntensity] = useState(settingsAmbientTintIntensity);
   const [ambientPrimaryChannel, setAmbientPrimaryChannel] = useState(settingsAmbientPrimaryChannel);
-  const [ambientSaturationBoost, setAmbientSaturationBoost] = useState(settingsAmbientSaturationBoost);
+  const [ambientSaturationBoostDay, setAmbientSaturationBoostDay] = useState(settingsAmbientSaturationBoostDay);
+  const [ambientSaturationBoostNight, setAmbientSaturationBoostNight] = useState(settingsAmbientSaturationBoostNight);
   useEffect(() => {
     setAmbientTintIntensity(settingsAmbientTintIntensity);
   }, [settingsAmbientTintIntensity]);
@@ -219,8 +222,11 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
     setAmbientPrimaryChannel(settingsAmbientPrimaryChannel);
   }, [settingsAmbientPrimaryChannel]);
   useEffect(() => {
-    setAmbientSaturationBoost(settingsAmbientSaturationBoost);
-  }, [settingsAmbientSaturationBoost]);
+    setAmbientSaturationBoostDay(settingsAmbientSaturationBoostDay);
+  }, [settingsAmbientSaturationBoostDay]);
+  useEffect(() => {
+    setAmbientSaturationBoostNight(settingsAmbientSaturationBoostNight);
+  }, [settingsAmbientSaturationBoostNight]);
   const { templates, saveTemplate, removeTemplate, uploadThumbnail, refetchTemplates } = useTemplates();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [viewing360, setViewing360] = useState(false);
@@ -246,6 +252,7 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
   // When this device's mapping changes while in kiosk mode, re-resolve the route.
   const [liveValues, setLiveValues] = useState<Record<string, number>>({});
   const [car, setCar] = useState('');
+  const [track, setTrack] = useState('');
   const [simStatus, setSimStatus] = useState('');
 
   // This is the ONE place on a DashboardDesigner page that opens the real
@@ -301,7 +308,8 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
   useHubListener(hub, 'HuenicornSettingsChanged', (event: any) => {
     setAmbientTintIntensity(event.ambientTintIntensity);
     setAmbientPrimaryChannel(event.ambientPrimaryChannel ?? null);
-    setAmbientSaturationBoost(event.ambientSaturationBoost ?? 1);
+    setAmbientSaturationBoostDay(event.ambientSaturationBoostDay ?? 1);
+    setAmbientSaturationBoostNight(event.ambientSaturationBoostNight ?? 1);
   });
   const { previewCarId } = useGlobalPreviewCar(hub);
 
@@ -331,6 +339,7 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
     !kioskMode,
     car,
     simStatus,
+    track,
   );
 
   useHubListener(hub, 'DashboardEntryChanged', handleDashboardUpdate);
@@ -349,12 +358,13 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
   // this can compare-before-set without depending on stale closure state.
   const liveValuesRef = useRef<Record<string, number>>({});
   const onTelemetryEvent = useCallback((event: any) => {
-    const { values, car: c, simStatus: s } = computeTelemetryValues(event.frame);
+    const { values, car: c, track: trk, simStatus: s } = computeTelemetryValues(event.frame);
     if (!shallowEqualRecord(liveValuesRef.current, values)) {
       liveValuesRef.current = values;
       setLiveValues(values);
     }
     setCar(c);
+    setTrack(trk);
     setSimStatus(s);
   }, []);
   // Not registered at all while editing — baseTelemetry (below) only reads
@@ -689,7 +699,7 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
     dashboard.canvasWidth, dashboard.canvasHeight, telemetryData,
     dashboard.neckFx, dashboard.neckFxGainX, dashboard.neckFxGainY, dashboard.neckFxDisableX, dashboard.neckFxDisableY,
     ambientColor?.r ?? null, ambientColor?.g ?? null, ambientColor?.b ?? null, ambientTintIntensity,
-    ambientSaturationBoost,
+    ambientSaturationBoostDay, ambientSaturationBoostNight,
   ];
   const kioskLive360CacheStale = !kioskLive360CacheRef.current ||
     kioskLive360Deps.some((d, i) => d !== kioskLive360CacheRef.current!.deps[i]);
@@ -705,7 +715,8 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
           nightAmount={nightAmount}
           ambientColor={ambientColor}
           ambientTintIntensity={ambientTintIntensity}
-          ambientSaturationBoost={ambientSaturationBoost}
+          ambientSaturationBoostDay={ambientSaturationBoostDay}
+          ambientSaturationBoostNight={ambientSaturationBoostNight}
           yaw={kioskPan.yaw}
           pitch={kioskPan.pitch}
           fov={kioskPan.fov}

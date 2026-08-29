@@ -126,7 +126,14 @@ pub struct GqlAppSettings {
     /// captured (default), higher pushes a pale/washed-out reading toward a
     /// genuinely vivid color (a pale red becomes a vibrant red) rather than
     /// just a brighter version of the same pale color.
-    pub ambient_saturation_boost: f32,
+    ///
+    /// `day`/`night` are the endpoints of a blend, not two modes — Photo360Viewer
+    /// interpolates between them by the same smoothed night amount that
+    /// drives its `nightBoost`, so a simulated dawn eases the vividness
+    /// continuously rather than snapping, mirroring `GqlChannelGamma`'s
+    /// day/night pair for the bulbs themselves.
+    pub ambient_saturation_boost_day: f32,
+    pub ambient_saturation_boost_night: f32,
     /// Per-channel day/night gamma for the Hue lights themselves (not the
     /// 360° tint) — see `GqlChannelGamma`. None = never configured, leave
     /// Huenicorn's own profile values alone.
@@ -192,7 +199,8 @@ pub struct AppSettingsInput {
     pub huenicorn_enabled: MaybeUndefined<bool>,
     pub ambient_tint_intensity: MaybeUndefined<f32>,
     pub ambient_primary_channel: MaybeUndefined<u8>,
-    pub ambient_saturation_boost: MaybeUndefined<f32>,
+    pub ambient_saturation_boost_day: MaybeUndefined<f32>,
+    pub ambient_saturation_boost_night: MaybeUndefined<f32>,
     pub ambient_channel_gamma: MaybeUndefined<Vec<ChannelGammaInput>>,
     pub simd_command: MaybeUndefined<String>,
     pub monocoque_command: MaybeUndefined<String>,
@@ -244,7 +252,9 @@ pub struct AppSettings {
     #[serde(default)]
     pub ambient_primary_channel: Option<u8>,
     #[serde(default = "default_ambient_saturation_boost")]
-    pub ambient_saturation_boost: f32,
+    pub ambient_saturation_boost_day: f32,
+    #[serde(default = "default_ambient_saturation_boost")]
+    pub ambient_saturation_boost_night: f32,
     /// Absent (the default) means "leave every channel's gamma exactly as
     /// Huenicorn's own profile has it" — the pusher stays entirely inert
     /// until the Ambient Lights page saves values.

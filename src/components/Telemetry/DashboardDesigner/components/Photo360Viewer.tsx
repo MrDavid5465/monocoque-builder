@@ -33,7 +33,13 @@ interface Props {
   // captured (default), higher pushes a pale/washed-out reading toward a
   // genuinely vivid color instead of just a brighter version of the same
   // pale color (a pale red becomes a vibrant red, not a bright pale red).
-  ambientSaturationBoost?: number;
+  // `day`/`night` are the endpoints of a blend, not two modes: the render
+  // loop interpolates between them by `nightLevelRef` (the same smoothed
+  // night amount `nightBoost` uses), so a simulated dawn/dusk eases the
+  // vividness continuously instead of snapping — mirrors the bulbs' own
+  // day/night gamma blend (see huenicorn::run_gamma_pusher).
+  ambientSaturationBoostDay?: number;
+  ambientSaturationBoostNight?: number;
   yaw: number;
   pitch: number;
   fov: number;
@@ -82,7 +88,7 @@ const NIGHT_DARKEN_WITH_PHOTO = 0.45;
 
 const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
   photoUrl, nightPhotoUrl, nightAmount = 0, ambientColor = null, ambientTintIntensity = 0,
-  ambientSaturationBoost = 1,
+  ambientSaturationBoostDay = 1, ambientSaturationBoostNight = 1,
   yaw, pitch, fov, roll, displayWidth, displayHeight, onChange, readOnly = false,
   telemetryData, swayEnabled = false, swayGainX = 1, swayGainY = 1, swayDisableX = false, swayDisableY = false,
   onLoaded, tintOverlayRef,
@@ -115,8 +121,8 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
   // mixAmountRef. nightBoost previously read mixAmountRef, so on a car with
   // no night photo it stayed pinned at 1 and the boost never engaged at all.
   const nightLevelRef = useRef(0);
-  const stateRef    = useRef({ yaw, pitch, fov, roll, displayWidth, displayHeight, nightAmount, ambientColor, ambientTintIntensity, ambientSaturationBoost });
-  stateRef.current  = { yaw, pitch, fov, roll, displayWidth, displayHeight, nightAmount, ambientColor, ambientTintIntensity, ambientSaturationBoost };
+  const stateRef    = useRef({ yaw, pitch, fov, roll, displayWidth, displayHeight, nightAmount, ambientColor, ambientTintIntensity, ambientSaturationBoostDay, ambientSaturationBoostNight });
+  stateRef.current  = { yaw, pitch, fov, roll, displayWidth, displayHeight, nightAmount, ambientColor, ambientTintIntensity, ambientSaturationBoostDay, ambientSaturationBoostNight };
   const dragRef     = useRef<{ startX: number; startY: number; startYaw: number; startPitch: number } | null>(null);
 
   const telemetryRef = useRef(telemetryData);
@@ -425,7 +431,11 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
           // below fall toward black — so the range floor sits above that
           // (a dim reading still lifts, just gently) and the ceiling is
           // near the old 0.9 (a bright reading pushes as hard as before).
-          const boost = stateRef.current.ambientSaturationBoost;
+          // nightLevelRef, not the raw nightAmount prop — same smoothed
+          // value nightBoost above uses, so the day/night boost blend eases
+          // continuously alongside it instead of snapping.
+          const { ambientSaturationBoostDay: boostDay, ambientSaturationBoostNight: boostNight } = stateRef.current;
+          const boost = boostDay + (boostNight - boostDay) * nightLevelRef.current;
           const boostedR = Math.max(0, luma + (ac.r - luma) * boost);
           const boostedG = Math.max(0, luma + (ac.g - luma) * boost);
           const boostedB = Math.max(0, luma + (ac.b - luma) * boost);

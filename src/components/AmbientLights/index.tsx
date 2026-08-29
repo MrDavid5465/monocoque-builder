@@ -60,7 +60,11 @@ const AmbientLightsMain: React.FC = () => {
   // captured (default), higher turns a pale/washed-out reading into a
   // genuinely vivid color (a pale red becomes a vibrant red). See
   // Photo360Viewer.tsx's own doc comment near `boostedR`/`boostedG`/`boostedB`.
-  const [ambientSaturationBoost, setAmbientSaturationBoost] = useState(1);
+  // Day and night are the endpoints of a blend, not two modes — Photo360Viewer
+  // interpolates between them by the same smoothed night amount its
+  // nightBoost uses, same day/night-blend shape as the gamma sliders below.
+  const [ambientSaturationBoostDay, setAmbientSaturationBoostDay] = useState(1);
+  const [ambientSaturationBoostNight, setAmbientSaturationBoostNight] = useState(1);
   const [saving, setSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
 
@@ -76,8 +80,11 @@ const AmbientLightsMain: React.FC = () => {
     );
   }, [settings.ambientPrimaryChannel]);
   useEffect(() => {
-    if (settings.ambientSaturationBoost != null) setAmbientSaturationBoost(round2(settings.ambientSaturationBoost));
-  }, [settings.ambientSaturationBoost]);
+    if (settings.ambientSaturationBoostDay != null) setAmbientSaturationBoostDay(round2(settings.ambientSaturationBoostDay));
+  }, [settings.ambientSaturationBoostDay]);
+  useEffect(() => {
+    if (settings.ambientSaturationBoostNight != null) setAmbientSaturationBoostNight(round2(settings.ambientSaturationBoostNight));
+  }, [settings.ambientSaturationBoostNight]);
 
   const [updateSettings] = useMutation(dispatcher.updateSettings, {
     refetchQueries: [{ query: dispatcher.my }],
@@ -96,7 +103,8 @@ const AmbientLightsMain: React.FC = () => {
             // channel" — omitting the field would mean "leave unchanged"
             // per AppSettingsInput's MaybeUndefined convention.
             ambientPrimaryChannel: ambientPrimaryChannel === '' ? null : Number(ambientPrimaryChannel),
-            ambientSaturationBoost,
+            ambientSaturationBoostDay,
+            ambientSaturationBoostNight,
           },
         },
       });
@@ -251,9 +259,16 @@ const AmbientLightsMain: React.FC = () => {
         ...channels.map(c => ({ text: c.name, value: String(c.channelId) })),
       ],
     },
-    ambientSaturationBoost: {
+    ambientSaturationBoostDay: {
       type: 'slider',
-      label: 'Color vividness (1 = as captured, higher = pale colors become vibrant)',
+      label: 'Color vividness, day (1 = as captured, higher = pale colors become vibrant)',
+      min: 1,
+      max: 6,
+      step: 0.5,
+    },
+    ambientSaturationBoostNight: {
+      type: 'slider',
+      label: 'Color vividness, night',
       min: 1,
       max: 6,
       step: 0.5,
@@ -293,7 +308,7 @@ const AmbientLightsMain: React.FC = () => {
       <Stack horizontal wrap tokens={{ childrenGap: 16 }} styles={{ inner: { alignItems: 'flex-start' } }}>
       <FormCard style={{ maxWidth: 420 }}>
         <Form
-          key={`${settings.huenicornEnabled}-${settings.ambientTintIntensity}-${settings.ambientPrimaryChannel}-${settings.ambientSaturationBoost}-${channels.length}`}
+          key={`${settings.huenicornEnabled}-${settings.ambientTintIntensity}-${settings.ambientPrimaryChannel}-${settings.ambientSaturationBoostDay}-${settings.ambientSaturationBoostNight}-${channels.length}`}
           form={settingsSchema}
           name="ambientLightsSettings"
           initialValues={{
@@ -306,16 +321,21 @@ const AmbientLightsMain: React.FC = () => {
               settings.ambientPrimaryChannel != null
                 ? String(settings.ambientPrimaryChannel)
                 : ambientPrimaryChannel,
-            ambientSaturationBoost:
-              settings.ambientSaturationBoost != null
-                ? round2(settings.ambientSaturationBoost)
-                : ambientSaturationBoost,
+            ambientSaturationBoostDay:
+              settings.ambientSaturationBoostDay != null
+                ? round2(settings.ambientSaturationBoostDay)
+                : ambientSaturationBoostDay,
+            ambientSaturationBoostNight:
+              settings.ambientSaturationBoostNight != null
+                ? round2(settings.ambientSaturationBoostNight)
+                : ambientSaturationBoostNight,
           }}
           onChange={(_n: string, { clean }: any) => {
             if (clean.huenicornEnabled != null) setHuenicornEnabled(clean.huenicornEnabled);
             if (clean.ambientTintIntensity != null) setAmbientTintIntensity(clean.ambientTintIntensity);
             if (clean.ambientPrimaryChannel != null) setAmbientPrimaryChannel(clean.ambientPrimaryChannel);
-            if (clean.ambientSaturationBoost != null) setAmbientSaturationBoost(clean.ambientSaturationBoost);
+            if (clean.ambientSaturationBoostDay != null) setAmbientSaturationBoostDay(clean.ambientSaturationBoostDay);
+            if (clean.ambientSaturationBoostNight != null) setAmbientSaturationBoostNight(clean.ambientSaturationBoostNight);
           }}
         />
         <PrimaryButton text={saving ? 'Saving…' : 'Save'} onClick={handleSave} disabled={saving} />
