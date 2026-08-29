@@ -62,7 +62,10 @@ modules:
       - type: file
         path: com.telemetryadmin.app.metainfo.xml
     build-commands:
-      - cd src/typiql-tauri/typiql && npm ci --offline
+      # --allow-git=all: npm v12+ disables git-protocol dependencies by
+      # default (EALLOWGIT); @octant/per-form is deliberately one (see
+      # integration-test.yml's npm-ci step for the same flag/reasoning).
+      - cd src/typiql-tauri/typiql && npm ci --offline --allow-git=all
       - cd src/typiql-tauri/typiql && npm run build
       - cd src/typiql-tauri/typiql/src-tauri && cargo build --release --offline --locked
       - install -Dm755 src/typiql-tauri/typiql/src-tauri/target/release/typiql /app/bin/typiql
