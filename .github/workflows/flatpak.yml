@@ -71,11 +71,17 @@ jobs:
           # default package.
           sudo add-apt-repository -y ppa:flatpak/stable
           sudo apt-get update
-          # libarchive-tools provides bsdunzip, which this newer
-          # flatpak-builder shells out to for extracting zip-type sources
-          # (e.g. the Playwright browser downloads in generated-node-sources)
-          # instead of plain unzip; not installed by default on this runner.
+          # This newer flatpak-builder shells out to bsdunzip for extracting
+          # zip-type sources (e.g. the Playwright browser downloads in
+          # generated-node-sources) instead of plain unzip. libarchive-tools
+          # provides the underlying bsdtar binary, but Ubuntu 22.04's version
+          # (3.6.0-1ubuntu1.8, confirmed via a failed run) doesn't also wire
+          # up a bsdunzip name for it -- bsdtar is a multi-call binary that
+          # switches behavior based on how it's invoked (argv[0]), same as
+          # busybox, so a plain symlink is the standard way to get its
+          # unzip personality.
           sudo apt-get install -y flatpak flatpak-builder libarchive-tools
+          sudo ln -sf "$(command -v bsdtar)" /usr/local/bin/bsdunzip
           sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
           sudo flatpak install -y --noninteractive flathub org.gnome.Platform//49 org.gnome.Sdk//49
           sudo flatpak install -y --noninteractive flathub org.freedesktop.Sdk.Extension.rust-stable//25.08 org.freedesktop.Sdk.Extension.node20//25.08
