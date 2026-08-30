@@ -46,6 +46,15 @@ uuid = { version = "1", features = ["v4"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 typiql = { path = "../../../typiql-rs/crates/typiql-core", package = "typiql-core" }
 typiql-adapter-json = { path = "../../../typiql-rs/crates/typiql-adapter-json" }
-typiql-adapter-duckdb = { path = "../../../typiql-rs/crates/typiql-adapter-duckdb" }
+typiql-adapter-duckdb = { path = "../../../typiql-rs/crates/typiql-adapter-duckdb", default-features = false }
 evdev = "0.12"
 nusb = "0.2.7"
+
+[features]
+# On by default so `cargo build` and the deb/rpm/AppImage builds keep
+# compiling DuckDB from source exactly as before. The Flatpak build passes
+# --no-default-features and supplies a prebuilt libduckdb instead, which cuts
+# that build from ~42 minutes to ~6. See the adapter crate's own [features]
+# for the version-matching constraint.
+default = ["duckdb-bundled"]
+duckdb-bundled = ["typiql-adapter-duckdb/bundled"]
