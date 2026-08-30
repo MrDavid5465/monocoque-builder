@@ -32,6 +32,12 @@ finish-args:
   - --socket=wayland
   - --device=dri
   - --socket=pulseaudio
+  # monocoque exposes a local GraphQL API (port 9000) this app connects to.
+  # Flatpak network-namespaces each sandboxed app separately, so this needs
+  # sharing for loopback communication to work at all between two Flatpak
+  # apps -- added alongside monocoque's own Flatpak manifest gaining the
+  # same flag.
+  - --share=network
   - --filesystem=xdg-config/dashboard-designer:create
   - --filesystem=xdg-data/dashboard-designer:create
 
