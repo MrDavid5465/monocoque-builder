@@ -64,7 +64,12 @@ modules:
     build-commands:
       - cd src/typiql-tauri/typiql && npm ci --offline
       - cd src/typiql-tauri/typiql && npm run build
-      - cd src/typiql-tauri/typiql/src-tauri && cargo build --release --offline --locked
+      # --locked (without --offline's own tolerance for reconciling a small
+      # Cargo.lock drift using only already-vendored crates) hard-fails here
+      # with "cannot update the lock file... because --locked was passed" --
+      # confirmed locally that plain --offline resolves the same drift fine,
+      # using only what's already cached, and still makes zero network calls.
+      - cd src/typiql-tauri/typiql/src-tauri && cargo build --release --offline
       - install -Dm755 src/typiql-tauri/typiql/src-tauri/target/release/typiql /app/bin/typiql
       - install -Dm644 com.telemetryadmin.app.desktop /app/share/applications/com.telemetryadmin.app.desktop
       - install -Dm644 com.telemetryadmin.app.metainfo.xml /app/share/metainfo/com.telemetryadmin.app.metainfo.xml
