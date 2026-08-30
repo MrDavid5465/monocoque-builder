@@ -1,7 +1,7 @@
 use async_graphql::SimpleObject;
 use serde::Serialize;
 use serde_json::Value;
-use std::process::Command;
+use crate::host_command::host_command;
 use std::sync::Mutex;
 
 #[derive(Debug, Clone, Serialize, SimpleObject)]
@@ -17,7 +17,7 @@ pub struct AudioSinkInfo {
 /// Excludes the app's own DSP sinks themselves, if currently loaded, so
 /// they can't be picked as their own playback target.
 pub fn list_audio_sinks() -> Result<Vec<AudioSinkInfo>, String> {
-    let output = Command::new("pactl")
+    let output = host_command("pactl")
         .args(["-f", "json", "list", "sinks"])
         .output()
         .map_err(|e| format!("Failed to run pactl: {e}"))?;
@@ -626,7 +626,7 @@ context.modules = [
     let log_file = std::fs::File::create(log_file_path()).map_err(|e| e.to_string())?;
     let log_file_err = log_file.try_clone().map_err(|e| e.to_string())?;
 
-    let mut child = Command::new("pipewire")
+    let mut child = host_command("pipewire")
         .arg("-c")
         .arg(&config_path)
         .stdout(log_file)
@@ -674,7 +674,7 @@ pub fn unload_filter_chain() -> Result<(), String> {
 
     let config_path = config_file_path();
     let config_path_str = config_path.to_string_lossy();
-    Command::new("pkill")
+    host_command("pkill")
         .arg("-f")
         .arg(format!("pipewire -c {config_path_str}"))
         .output()
@@ -689,7 +689,7 @@ pub fn unload_filter_chain() -> Result<(), String> {
 /// something this process can cache/predict). Uses `pw-dump`'s JSON output
 /// rather than parsing `pw-cli ls`'s text format.
 fn find_node_id_by_name(target_name: &str) -> Result<u32, String> {
-    let output = Command::new("pw-dump")
+    let output = host_command("pw-dump")
         .arg("Node")
         .output()
         .map_err(|e| format!("Failed to run pw-dump: {e}"))?;
@@ -721,7 +721,7 @@ fn find_effect_capture_node_id(devid: &str, effect_key: &str) -> Result<u32, Str
 /// there can now be more than one (one per device with an active LFE
 /// corner), unlike the single global LFE_NODE_NAME this replaced.
 fn find_node_ids_by_suffix(suffix: &str) -> Result<Vec<u32>, String> {
-    let output = Command::new("pw-dump")
+    let output = host_command("pw-dump")
         .arg("Node")
         .output()
         .map_err(|e| format!("Failed to run pw-dump: {e}"))?;
@@ -750,7 +750,7 @@ fn find_node_ids_by_suffix(suffix: &str) -> Result<Vec<u32>, String> {
 /// enum-params.
 fn set_prop(node_id: u32, key: &str, value: f32) -> Result<(), String> {
     let pod = format!(r#"{{ params = [ "{key}" {value} ] }}"#);
-    let output = Command::new("pw-cli")
+    let output = host_command("pw-cli")
         .arg("s")
         .arg(node_id.to_string())
         .arg("Props")

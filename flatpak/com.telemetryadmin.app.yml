@@ -26,6 +26,21 @@ sdk-extensions:
   - org.freedesktop.Sdk.Extension.rust-stable
   - org.freedesktop.Sdk.Extension.node20
 command: typiql
+#
+# NOTE ON SANDBOXING: this app is a host-orchestration tool, not a
+# self-contained one. It drives host audio (pactl, pw-dump, pw-cli,
+# pipewire), signals host processes (pkill), and installs a udev rule via
+# pkexec. None of those binaries exist in the runtime, and even bundled they
+# would act on the sandbox's own namespaces rather than the host's. So the
+# Rust side routes every such call through `flatpak-spawn --host` (see
+# src-tauri/src/host_command.rs), which requires --talk-name below.
+#
+# The practical consequence is that this Flatpak's sandbox is largely
+# decorative: an app that can spawn arbitrary host commands can do anything
+# the user can. It is packaged this way because Flatpak is a convenient
+# delivery mechanism on immutable distros, not because it isolates anything.
+# The .deb/.rpm/AppImage builds from release-please.yml are the same program
+# with the same reach and no such pretence.
 finish-args:
   - --share=ipc
   - --socket=fallback-x11
@@ -38,8 +53,21 @@ finish-args:
   # apps -- added alongside monocoque's own Flatpak manifest gaining the
   # same flag.
   - --share=network
+  # Lets flatpak-spawn --host run commands outside the sandbox. Without it
+  # the spawn is refused and every host command silently fails.
+  - --talk-name=org.freedesktop.Flatpak
+  # WebKitGTK crashes on this hardware with `Error 71 (Protocol error)
+  # dispatching to Wayland display` -- the known DMABUF-renderer failure on
+  # NVIDIA. Confirmed fixed by this env var on a real launch, so it is baked
+  # in rather than left for users to discover.
+  - --env=WEBKIT_DISABLE_DMABUF_RENDERER=1
   - --filesystem=xdg-config/dashboard-designer:create
   - --filesystem=xdg-data/dashboard-designer:create
+  # The real ~/.config/monocoque, not the sandbox-private XDG_CONFIG_HOME.
+  # This app exists to configure monocoque, and monocoque reads its config
+  # from the host path -- without this grant the app would edit a private
+  # copy nothing ever reads. See config_manager::monocoque_config_dir().
+  - --filesystem=xdg-config/monocoque:create
 
 build-options:
   append-path: /usr/lib/sdk/rust-stable/bin:/usr/lib/sdk/node20/bin

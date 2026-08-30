@@ -103,10 +103,11 @@ pub fn applications() -> Vec<AppEntry> {
 }
 
 fn config_path() -> PathBuf {
-    dirs::config_dir()
-        .unwrap()
-        .join("monocoque")
-        .join("typiql.json")
+    // Shares monocoque's config directory, so it resolves the same real path
+    // under Flatpak rather than the sandbox-private one -- see
+    // super::monocoque_config_dir(). Keeping both files together also means a
+    // Flatpak install and a native install see the same settings.
+    super::monocoque_config_dir().join("typiql.json")
 }
 
 pub fn read_app_config() -> Result<AppConfig, String> {
@@ -124,5 +125,16 @@ pub fn read_app_config() -> Result<AppConfig, String> {
 pub fn write_app_config(config: &AppConfig) -> Result<(), String> {
     let path = config_path();
     let text = serde_json::to_string_pretty(config).map_err(|e| e.to_string())?;
+    // Create the parent directory first. read_app_config() calls this on first
+    // run to seed defaults, and fs::write fails with ENOENT when the directory
+    // doesn't exist yet. This never surfaced on a developer machine because
+    // ~/.config/monocoque already exists anywhere monocoque itself has run --
+    // but in a genuinely clean environment (a fresh install without monocoque,
+    // or a Flatpak's private config dir) the first run failed, the `my` query
+    // returned "No such file or directory (os error 2)", and the UI sat on its
+    // splash screen forever.
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
     fs::write(path, text).map_err(|e| e.to_string())
 }

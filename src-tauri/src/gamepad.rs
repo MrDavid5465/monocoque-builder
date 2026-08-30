@@ -121,7 +121,7 @@ pub fn setup_gamepad_udev() -> Result<String, String> {
     let tmp = "/tmp/99-dashboard-gamepad.rules";
     std::fs::write(tmp, UDEV_RULE).map_err(|e| e.to_string())?;
 
-    let status = std::process::Command::new("pkexec")
+    let status = crate::host_command::host_command("pkexec")
         .args([
             "sh",
             "-c",
