@@ -1,11 +1,11 @@
 # Best-effort Flatpak manifest — NOT submitted anywhere (Flathub or
 # otherwise), built in CI purely so a .flatpak bundle exists as a release
-# asset. Verified (2026-08-29, locally and via real GitHub Actions runs) past
-# the `dir` source's path, the offline-npm-cache setup, and a stale git
-# dependency that made the offline build unsatisfiable — see
-# .github/workflows/flatpak.yml's header for the full list of what that
-# caught and fixed. Not yet covered: this repo's own git submodules under
-# src/lib/, added on a branch not yet merged to master.
+# asset. Verified end-to-end (2026-08-30): a real workflow_dispatch run
+# produced a working com.telemetryadmin.app .flatpak bundle for the first
+# time — see .github/workflows/flatpak.yml's header for the full list of
+# real bugs that took ten iterations against real CI to find and fix. Not
+# yet covered: this repo's own git submodules under src/lib/, added on a
+# branch not yet merged to master.
 #
 # Builds via `cargo build --release` + a plain Vite build directly, not
 # through Tauri's own bundler — the bundler's .deb/AppImage/rpm targets

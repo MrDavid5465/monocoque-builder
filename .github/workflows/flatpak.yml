@@ -8,11 +8,14 @@ name: Flatpak (best effort)
 # cross-workflow `needs:`, which doesn't work across separate workflow
 # files.
 #
-# VERIFIED (2026-08-29): ran flatpak-builder for real, both locally (GNOME 49
-# runtime/SDK + rust-stable/node20 at freedesktop 25.08, bumped from the
-# original GNOME 46/24.08 pins, which were already EOL) and via real
-# workflow_dispatch runs on GitHub Actions. That process caught and fixed
-# four real bugs nobody had hit before:
+# VERIFIED END-TO-END (2026-08-30): a real workflow_dispatch run
+# (33313137887) completed the full pipeline for the first time ever --
+# npm ci, npm run build, cargo build --release --offline (DuckDB compiled
+# from source, ~40min), appstreamcli compose, and `flatpak build-bundle`
+# all succeeded, producing a real com.telemetryadmin.app .flatpak (~80MB).
+# Getting there took ten iterations against real GitHub Actions runs (plus
+# local flatpak-builder runs where the failure didn't need CI to reproduce),
+# fixing real bugs nobody had hit before:
 #  - the `dir` source's `path: ../..` was one level too shallow to reach the
 #    sibling typiql-rs checkout (needed `../../..`)
 #  - `npm ci --offline` had no XDG_CACHE_HOME/npm_config_cache pointed at
@@ -25,18 +28,37 @@ name: Flatpak (best effort)
 #    dependency: unused by any actual import (the app consumes per-form via
 #    the src/lib/per-form submodule instead) and no longer even installable
 #    as an npm package, since per-form's own master branch was restructured
-#    to a submodule-only, no-package.json layout. npm's offline install tried
-#    to prepare/build the dependency's own (uncached, unpinned) devDependency
-#    tree and failed — removing the dead dependency was the actual fix, not
-#    a flatpak-side workaround. Also dropped the now-unnecessary
-#    --allow-git=all from integration-test.yml's npm-ci step, added for this
-#    same dependency.
+#    to a submodule-only, no-package.json layout. Removing the dead
+#    dependency was the actual fix, not a flatpak-side workaround. Also
+#    dropped the now-unnecessary --allow-git=all from integration-test.yml's
+#    npm-ci step, added for this same dependency.
+#  - `cargo build --release --offline --locked` failed on a real (harmless)
+#    Cargo.lock drift -- src-tauri's own package version was stale at 0.2.0
+#    against Cargo.toml/tauri.conf.json's 0.4.0. Synced Cargo.lock and
+#    dropped --locked (--offline alone still guarantees no network access).
+#  - GNOME 46/freedesktop 24.08 were already EOL; bumped to GNOME 49/
+#    freedesktop 25.08, which surfaced the next one --
+#  - GNOME Sdk 49 dropped the legacy `appstream-compose` binary (just
+#    `appstreamcli` now). Ubuntu 22.04's apt-packaged flatpak-builder
+#    predates the `appstreamcli compose` fallback for this. Tried
+#    org.flatpak.Builder (Flathub's flatpak-wrapped build, confirmed via
+#    `strings` on the binary to have the fallback) but flatpak-in-flatpak
+#    introduced its own unrelated failure ("Unable to find sdk
+#    org.gnome.Sdk version 49"). Landed on a native flatpak-builder from
+#    ppa:flatpak/stable (the flatpak project's own PPA for exactly this)
+#    instead, which also happens to pull in a real appstream-compose 0.15.2
+#    package as a dependency.
+#  - that newer flatpak-builder needs `bsdunzip` for zip-type sources (e.g.
+#    Playwright's browser downloads in generated-node-sources); Ubuntu
+#    22.04's libarchive-tools only provides `bsdtar`. Symlinking bsdunzip to
+#    bsdtar first seemed reasonable (both are libarchive tools) but they're
+#    not flag-compatible -- real bsdunzip mimics classic Info-ZIP unzip's
+#    CLI, so symlinking to plain `unzip` instead is what actually worked.
 #
-# Still not covered by any local or CI run so far: this repo's own git
-# submodules (src/lib/per-form, src/lib/typical-admin-fabric), added in the
-# feat/huenicorn-ambient-lights branch and not yet on master — worth a real
-# test once that branch merges and this workflow runs against a checkout
-# that actually has them.
+# Not yet covered: this repo's own git submodules (src/lib/per-form,
+# src/lib/typical-admin-fabric), added in the feat/huenicorn-ambient-lights
+# branch and not yet on master -- worth a real test once that branch merges
+# and this workflow runs against a checkout that actually has them.
 on:
   push:
     tags: ['v*']
