@@ -4,23 +4,24 @@ import { PrimaryButton } from '@fluentui/react';
 import { getTheme, Form, FormCard } from '../../lib/denim/lib';
 import settingsDispatcher from '../../lib/denim/lib/queries';
 import { confirmAsync } from '../../lib/denim/components/ConfirmDialog';
-import { GET_ITEMS, UPDATE_ITEM, CREATE_ITEM, REMOVE_ITEM, ITEM_CHANGED } from './queries';
+import { GET_ITEMS, UPDATE_ITEM, CREATE_ITEM, REMOVE_ITEM } from './queries';
+import { SHAKER_UPDATES } from './shakerUpdatesQueries';
 import { EffectRow, EFFECTS, EFFECT_LABELS, ShakerRec } from './EffectRow';
 import { LfeRow } from './LfeRow';
 import ChannelHeader from './ChannelHeader';
 import {
-  GET_AUDIO_SINKS, ENABLE_SHAKER_DSP, DISABLE_SHAKER_DSP,
+  GET_AUDIO_SINKS, ENABLE_SHAKER_DSP, DISABLE_SHAKER_DSP, RELOAD_SHAKER_DSP,
   WRITE_MONOCOQUE_CONFIG, RELOAD_MONOCOQUE, APPLY_DSP_CHANNEL_LIVE,
-  GET_DSP_CHANNELS, ADD_DSP_CHANNEL, UPDATE_DSP_CHANNEL, REMOVE_DSP_CHANNEL, DSP_CHANNEL_CHANGED,
+  GET_DSP_CHANNELS, ADD_DSP_CHANNEL, UPDATE_DSP_CHANNEL, REMOVE_DSP_CHANNEL,
   AudioSinkInfo, ShakerDspChannel,
 } from './dspQueries';
 import {
   GET_LFE_CHANNELS, ADD_LFE_CHANNEL, UPDATE_LFE_CHANNEL, REMOVE_LFE_CHANNEL,
-  LFE_CHANNEL_CHANGED, APPLY_LFE_CHANNEL_LIVE, APPLY_LFE_LPF_LIVE, LfeChannel,
+  APPLY_LFE_CHANNEL_LIVE, APPLY_LFE_LPF_LIVE, LfeChannel,
 } from './lfeQueries';
 import {
   GET_SHAKER_CHANNELS, ADD_SHAKER_CHANNEL, UPDATE_SHAKER_CHANNEL, REMOVE_SHAKER_CHANNEL,
-  SHAKER_CHANNEL_CHANGED, ShakerChannel,
+  ShakerChannel,
 } from './channelQueries';
 import { ADD_PROFILE, GET_PROFILES, SoundDeviceProfile } from './Profiles/queries';
 import { GET_SHIFT_LIGHTS, ShiftLightRec } from './ShiftLights/queries';
@@ -82,7 +83,10 @@ const ShakerMatrix: React.FC<{ profileId?: string | null }> = ({ profileId = nul
   const [dspStatus, setDspStatus] = React.useState<string | null>(null);
 
   const { data } = useQuery(GET_ITEMS);
-  useSubscription(ITEM_CHANGED);
+  // One merged subscription for all 4 of this page's live-update sources —
+  // see shakerUpdatesQueries.ts / graphql/mod.rs's shaker_updates doc
+  // comment for why this replaced 4 separate useSubscription calls.
+  useSubscription(SHAKER_UPDATES);
 
   const allRecords: ShakerRec[] = useMemo(
     () => (data as any)?.getMonocoqueSoundDevices ?? [],
@@ -102,7 +106,6 @@ const ShakerMatrix: React.FC<{ profileId?: string | null }> = ({ profileId = nul
   // inferred from whichever effect rows happen to exist (see
   // ShakerChannel's backend doc comment) ──
   const { data: channelsData } = useQuery(GET_SHAKER_CHANNELS);
-  useSubscription(SHAKER_CHANNEL_CHANGED);
   const [addShakerChannel] = useMutation(ADD_SHAKER_CHANNEL, { refetchQueries: [{ query: GET_SHAKER_CHANNELS }] });
   const [updateShakerChannel] = useMutation(UPDATE_SHAKER_CHANNEL);
   const [removeShakerChannel] = useMutation(REMOVE_SHAKER_CHANNEL, { refetchQueries: [{ query: GET_SHAKER_CHANNELS }] });
@@ -128,6 +131,9 @@ const ShakerMatrix: React.FC<{ profileId?: string | null }> = ({ profileId = nul
   const { data: sinksData } = useQuery(GET_AUDIO_SINKS, { fetchPolicy: 'network-only' });
   const [enableDsp] = useMutation(ENABLE_SHAKER_DSP, { refetchQueries: [{ query: settingsDispatcher.my }, { query: GET_ITEMS }] });
   const [disableDsp] = useMutation(DISABLE_SHAKER_DSP, { refetchQueries: [{ query: settingsDispatcher.my }, { query: GET_ITEMS }] });
+  // No refetchQueries: this rebuilds the running chain without changing any
+  // stored value, so there's nothing for the settings query to re-read.
+  const [reloadDsp] = useMutation(RELOAD_SHAKER_DSP);
   const [writeConfig] = useMutation(WRITE_MONOCOQUE_CONFIG);
   const [reloadMonocoque] = useMutation(RELOAD_MONOCOQUE);
 
@@ -135,20 +141,45 @@ const ShakerMatrix: React.FC<{ profileId?: string | null }> = ({ profileId = nul
   // still has to write the WHOLE monocoque config, so it needs every
   // category's live rows too, not just this page's own Sound devices (see
   // monocoqueConfig.ts's doc comment). Deliberately plain useQuery, no
-  // useSubscription — this page already runs 4 long-lived subscriptions
-  // (ITEM_CHANGED, SHAKER_CHANNEL_CHANGED, DSP_CHANNEL_CHANGED,
-  // LFE_CHANNEL_CHANGED) and the browser's ~6-connection HTTP/1.1 pool means
-  // more would risk starving this page's own mutations (see
-  // feedback_subscription_connection_limit). handleExport explicitly
-  // refetches all three right before building the combined config instead,
-  // so a stale cache (e.g. edited on another page in another tab) can't
-  // silently drop a device from the exported file.
+  // useSubscription — this page only runs 2 long-lived connections now
+  // (the always-on dashboardUpdates plus this page's own merged
+  // shakerUpdates, see the SHAKER_UPDATES subscription above), but the
+  // browser's ~6-connection HTTP/1.1 pool still means more would risk
+  // starving this page's own mutations (see
+  // feedback_subscription_connection_limit — this is exactly the bug that
+  // merge fixed: 4 separate subscriptions here plus the global one hung
+  // "Enable DSP" and any other mutation with no error, since the request
+  // was queued behind a full connection pool, not actually blocked
+  // server-side). handleExport explicitly refetches all three right before
+  // building the combined config instead, so a stale cache (e.g. edited on
+  // another page in another tab) can't silently drop a device from the
+  // exported file.
   const { refetch: refetchShiftLights } = useQuery(GET_SHIFT_LIGHTS);
   const { refetch: refetchLeds } = useQuery(GET_LEDS);
   const { refetch: refetchSimWind } = useQuery(GET_SIM_WINDS);
 
   const dspEnabled: boolean = (myData as any)?.my?.settings?.shakerDspEnabled ?? false;
   const audioSinks: AudioSinkInfo[] = (sinksData as any)?.getAudioSinks ?? [];
+
+  // Rebuilds the filter-chain after a device edit. A device change is the one
+  // edit on this page that can't be pushed into the running chain with
+  // pw-cli — which sink it feeds is part of the graph, not a parameter on it
+  // (see reloadShakerDsp's own doc comment) — so without this, DSP mode kept
+  // driving the OLD device until the user toggled it off and on.
+  //
+  // Only the live (profileId === null) scope drives the running chain, so
+  // editing a saved profile's devices deliberately leaves it alone.
+  // Best-effort for the same reason as the per-corner live-apply calls: the
+  // persisted change is already correct, and the next enable/resume rebuilds
+  // from it regardless.
+  const reloadDspForDeviceChange = async () => {
+    if (profileId !== null || !dspEnabled) return;
+    try {
+      await reloadDsp();
+    } catch {
+      // DSP may have been disabled concurrently, or pipewire/pw-cli hiccuped.
+    }
+  };
   // {text, value} shape for Fabric.tsx's 'select' field type — see
   // ChannelHeader.tsx's device options for the same pattern.
   const sinkSelectOptions = [
@@ -198,7 +229,6 @@ const ShakerMatrix: React.FC<{ profileId?: string | null }> = ({ profileId = nul
   // own dspSlot — not shared per physical channel — scoped by the same
   // profileId convention as MonocoqueSoundDevice rows) ──
   const { data: dspChannelsData } = useQuery(GET_DSP_CHANNELS);
-  useSubscription(DSP_CHANNEL_CHANGED);
   const [addDspChannel] = useMutation(ADD_DSP_CHANNEL, { refetchQueries: [{ query: GET_DSP_CHANNELS }] });
   const [updateDspChannel] = useMutation(UPDATE_DSP_CHANNEL);
   const [removeDspChannel] = useMutation(REMOVE_DSP_CHANNEL, { refetchQueries: [{ query: GET_DSP_CHANNELS }] });
@@ -253,6 +283,10 @@ const ShakerMatrix: React.FC<{ profileId?: string | null }> = ({ profileId = nul
 
   const handleLfeSourceChange = async (deviceName: string) => {
     await updateSettings({ variables: { settings: { shakerLfeSourceDevice: deviceName || null } } });
+    // The LFE source is the device whose monitor the chain taps, baked into
+    // the graph at build time — switching it needs a rebuild, not a live
+    // parameter push like handleLfeLpfChange below.
+    await reloadDspForDeviceChange();
   };
 
   const handleLfeLpfChange = async (hz: number | null) => {
@@ -278,7 +312,6 @@ const ShakerMatrix: React.FC<{ profileId?: string | null }> = ({ profileId = nul
   const lfeSettingsSkipFirst = useRef(true);
 
   const { data: lfeChannelsData } = useQuery(GET_LFE_CHANNELS);
-  useSubscription(LFE_CHANNEL_CHANGED);
   const [addLfeChannel] = useMutation(ADD_LFE_CHANNEL, { refetchQueries: [{ query: GET_LFE_CHANNELS }] });
   const [updateLfeChannel] = useMutation(UPDATE_LFE_CHANNEL);
   const [removeLfeChannel] = useMutation(REMOVE_LFE_CHANNEL, { refetchQueries: [{ query: GET_LFE_CHANNELS }] });
@@ -415,6 +448,10 @@ const ShakerMatrix: React.FC<{ profileId?: string | null }> = ({ profileId = nul
   const handleChannelDevidChange = async (channel: ShakerChannel, devid: string) => {
     const deviceChannels = audioSinks.find(s => s.name === devid)?.channels ?? channel.channels;
     await updateShakerChannel({ variables: { id: channel.id, update: { devid, channels: deviceChannels } } });
+    // Both halves of this edit change the graph's shape — which sink the
+    // chain feeds, and how many output channels it has — so the chain has to
+    // be rebuilt onto the new device rather than live-adjusted.
+    await reloadDspForDeviceChange();
   };
 
   const handleChannelPositionChange = async (channel: ShakerChannel, position: string) => {
@@ -550,11 +587,12 @@ const ShakerMatrix: React.FC<{ profileId?: string | null }> = ({ profileId = nul
   const profilePrevRef = useRef('');
 
   // Deliberately no useSubscription(PROFILE_CHANGED) here — this page
-  // already holds several long-lived subscriptions (ITEM_CHANGED,
-  // SHAKER_CHANNEL_CHANGED, DSP_CHANNEL_CHANGED, LFE_CHANNEL_CHANGED, plus
-  // global ones elsewhere), and the browser's per-origin HTTP/1.1
-  // connection limit (6) means one more can silently starve out every
-  // other request on the page, including this card's own mutations.
+  // already holds 2 long-lived subscriptions (the merged SHAKER_UPDATES
+  // above, plus the global dashboardUpdates elsewhere), and the browser's
+  // per-origin HTTP/1.1 connection limit (6) means one more can silently
+  // starve out every other request on the page, including this card's own
+  // mutations — see SHAKER_UPDATES' own doc comment for what happens when
+  // this page runs too many of these.
   // refetchQueries on each mutation below keeps the list fresh without one.
   const { data: profilesData } = useQuery(GET_PROFILES);
   const [addProfile] = useMutation(ADD_PROFILE, { refetchQueries: [{ query: GET_PROFILES }] });

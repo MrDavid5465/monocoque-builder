@@ -14,6 +14,7 @@ import Shakers from "./components/Shakers"
 import LedsDevices from "./components/LedsDevices";
 import ShiftLights from "./components/ShiftLights";
 import SimWindDevices from "./components/SimWindDevices";
+import AmbientLights from "./components/AmbientLights";
 import TelemetryAdmin from "./components/TelemetryAdmin";
 import TelemetryControls from "./components/Telemetry/Controls";
 import { useMutation, useQuery } from "@apollo/client/react";
@@ -74,7 +75,7 @@ const App: React.FC = () => {
         )}
         RootComponent={DefaultLanding}
         Controls={TelemetryControls}
-        components={{ Shakers, LedsDevices, ShiftLights, SimWindDevices, TelemetryAdmin }}
+        components={{ Shakers, LedsDevices, ShiftLights, SimWindDevices, AmbientLights, TelemetryAdmin }}
         themes={THEMES}
         />
     </>

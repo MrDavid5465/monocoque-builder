@@ -1,5 +1,7 @@
 import React, { useRef } from 'react';
+import { Label, Stack } from '@fluentui/react';
 import { Form } from '../../lib/denim/lib';
+import { TyreGrid } from '../shared/TyreGrid';
 import { TYRE_SHORT } from './EffectRow';
 import { ShakerChannel } from './channelQueries';
 import { AudioSinkInfo } from './dspQueries';
@@ -43,9 +45,19 @@ const ChannelHeader: React.FC<Props> = ({ channel, audioSinks, onDevidChange, on
         text: channelPositionName(channel.channels, i), value: i,
       })),
     },
+    // 'custom', not a Fabric builtin 'tyre-position' case: TyreGrid is this
+    // app's own component (Monocoque tyre-position picker) with no place in
+    // typical-admin-fabric, which is now a shared package submoduled by
+    // apps that don't have it.
     position: {
-      type: 'tyre-position',
+      type: 'custom' as const,
       label: 'Position',
+      onRender: ({ value, onChange, name }: any) => (
+        <Stack>
+          <Label>Position</Label>
+          <TyreGrid current={value ?? null} onApply={(pos: string) => onChange(name, pos)} />
+        </Stack>
+      ),
     },
   };
 

@@ -647,6 +647,18 @@ context.modules = [
         Ok(None) => {
             let pid = child.id();
             *FILTER_CHAIN_PID.lock().map_err(|e| e.to_string())? = Some(pid);
+
+            // Reap it on exit. Dropping `Child` doesn't wait, so every
+            // teardown used to leave a `<defunct>` pipewire behind — one per
+            // load, and reloads are no longer rare now that a device change
+            // triggers one (see graphql::shaker_dsp::reload_shaker_dsp).
+            // Nothing here reads liveness by name the way the service
+            // watchdogs do (see `process_liveness`), so those zombies were
+            // harmless rather than load-bearing, but they were still ours.
+            std::thread::spawn(move || {
+                let _ = child.wait();
+            });
+
             Ok(pid)
         }
         Err(e) => Err(format!("Failed to check pipewire process status: {e}")),

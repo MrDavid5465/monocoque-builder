@@ -65,4 +65,25 @@ impl ClientsMutation {
         }
         Ok(false)
     }
+
+    /// Same upsert-if-not-already-known shape as `register_car`, for raw
+    /// telemetry track ids instead of car names — see `KnownTrack`'s own doc
+    /// comment for why this exists (feeding the Tracks page's `rawTrackIds`
+    /// multi-select).
+    async fn register_track(&self, ctx: &Context<'_>, name: String) -> GqlResult<bool> {
+        let adapter = crate::graphql::default_adapter(ctx)?;
+        let existing = adapter.get_one("known_tracks".into(), "id", &name).await;
+        if existing.is_none() {
+            adapter
+                .add(
+                    "known_tracks".into(),
+                    "id",
+                    json!({ "id": name, "name": name }),
+                )
+                .await
+                .map_err(async_graphql::Error::new)?;
+            return Ok(true);
+        }
+        Ok(false)
+    }
 }

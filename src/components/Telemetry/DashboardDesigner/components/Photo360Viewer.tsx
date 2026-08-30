@@ -16,6 +16,30 @@ interface Props {
   // ease in the render loop, matching the CSS crossfade this replaced.
   nightPhotoUrl?: string;
   nightAmount?: number;
+  // Ambient-light tint from Huenicorn (see graphql/mod.rs's AmbientColor
+  // event / huenicorn.rs) — blended in after the day/night mix so the
+  // virtual cockpit visually agrees with the physical room's Hue lighting.
+  // v1 drives this from one picked channel (the wire format carries all of
+  // them — see AmbientColorChanged's own doc comment — so a later
+  // per-region effect is a pure addition, not a rework).
+  // `ambientTintIntensity` (0-1) is the Settings dial behind the
+  // soft-light blend's opacity (scaled by night/spike conditions in the
+  // render loop, see there); 0 or a missing `ambientColor` both resolve to
+  // a no-op tint.
+  ambientColor?: { r: number; g: number; b: number } | null;
+  ambientTintIntensity?: number;
+  // How much to exaggerate the tint color's own saturation (see the render
+  // loop's own comment near `boostedR`/`boostedG`/`boostedB`) — 1 = as
+  // captured (default), higher pushes a pale/washed-out reading toward a
+  // genuinely vivid color instead of just a brighter version of the same
+  // pale color (a pale red becomes a vibrant red, not a bright pale red).
+  // `day`/`night` are the endpoints of a blend, not two modes: the render
+  // loop interpolates between them by `nightLevelRef` (the same smoothed
+  // night amount `nightBoost` uses), so a simulated dawn/dusk eases the
+  // vividness continuously instead of snapping — mirrors the bulbs' own
+  // day/night gamma blend (see huenicorn::run_gamma_pusher).
+  ambientSaturationBoostDay?: number;
+  ambientSaturationBoostNight?: number;
   yaw: number;
   pitch: number;
   fov: number;
@@ -38,6 +62,14 @@ interface Props {
   // texture loads asynchronously, so capturing before this fires yields a
   // blank/untextured sphere).
   onLoaded?: () => void;
+  // When present, the ambient tint is painted into THIS element (a
+  // soft-light overlay Canvas.tsx renders above its night overlay) instead of
+  // being blended in the shader — because the night overlay sits above this
+  // canvas and would otherwise transmit only ~19% of the tint. Written
+  // imperatively from the render loop, never through React state: the tint
+  // moves at ~60Hz. The in-shader tint is zeroed while this is in use so the
+  // two never stack.
+  tintOverlayRef?: React.RefObject<HTMLDivElement>;
 }
 
 // Calibrated so typical cornering g (~1g) gives ~1-2° of sway, and the clamped
@@ -47,10 +79,19 @@ interface Props {
 const SWAY_YAW_DEG_PER_G   = 1.5;
 const SWAY_PITCH_DEG_PER_G = 0.75;
 
+// Fraction of the full night darkening applied when the car HAS a night
+// photo. The photo already supplies the night *look*; this only takes the
+// overall level down so it reads as night rather than as a differently-lit
+// daytime shot. Turn this up if night still isn't dark enough, down if the
+// scene goes muddy. 0 restores the previous behaviour (photo only).
+const NIGHT_DARKEN_WITH_PHOTO = 0.45;
+
 const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
-  photoUrl, nightPhotoUrl, nightAmount = 0, yaw, pitch, fov, roll, displayWidth, displayHeight, onChange, readOnly = false,
+  photoUrl, nightPhotoUrl, nightAmount = 0, ambientColor = null, ambientTintIntensity = 0,
+  ambientSaturationBoostDay = 1, ambientSaturationBoostNight = 1,
+  yaw, pitch, fov, roll, displayWidth, displayHeight, onChange, readOnly = false,
   telemetryData, swayEnabled = false, swayGainX = 1, swayGainY = 1, swayDisableX = false, swayDisableY = false,
-  onLoaded,
+  onLoaded, tintOverlayRef,
 }, ref) => {
   const mountRef    = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -70,8 +111,18 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
   // after that). The render loop reconciles both every frame instead of
   // either side waiting on the other.
   const nightTextureRef = useRef<THREE.Texture | null>(null);
-  const stateRef    = useRef({ yaw, pitch, fov, roll, displayWidth, displayHeight, nightAmount });
-  stateRef.current  = { yaw, pitch, fov, roll, displayWidth, displayHeight, nightAmount };
+  // Current lerped ambientTint/ambientOpacity values, mirroring
+  // mixAmountRef's role for the day/night blend — smoothed here (not just
+  // in the shader) so JS always knows the in-flight value for the next
+  // frame's lerp target.
+  const ambientTintVecRef = useRef(new THREE.Vector3(0, 0, 0));
+  const ambientOpacityRef = useRef(0);
+  // Smoothed nightAmount that is NOT gated on having a night texture, unlike
+  // mixAmountRef. nightBoost previously read mixAmountRef, so on a car with
+  // no night photo it stayed pinned at 1 and the boost never engaged at all.
+  const nightLevelRef = useRef(0);
+  const stateRef    = useRef({ yaw, pitch, fov, roll, displayWidth, displayHeight, nightAmount, ambientColor, ambientTintIntensity, ambientSaturationBoostDay, ambientSaturationBoostNight });
+  stateRef.current  = { yaw, pitch, fov, roll, displayWidth, displayHeight, nightAmount, ambientColor, ambientTintIntensity, ambientSaturationBoostDay, ambientSaturationBoostNight };
   const dragRef     = useRef<{ startX: number; startY: number; startYaw: number; startPitch: number } | null>(null);
 
   const telemetryRef = useRef(telemetryData);
@@ -80,6 +131,8 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
   swayConfigRef.current = { swayEnabled, swayGainX, swayGainY, swayDisableX, swayDisableY };
   const onLoadedRef = useRef(onLoaded);
   onLoadedRef.current = onLoaded;
+  const tintOverlayRefRef = useRef(tintOverlayRef);
+  tintOverlayRefRef.current = tintOverlayRef;
   // Bumped once the GL-setup effect below acquires a context. The
   // texture-loading effect depends on this (not just photoUrl) so it can
   // pick up the material once it exists.
@@ -127,10 +180,58 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
     material.onBeforeCompile = (shader) => {
       shader.uniforms.nightMap = { value: null };
       shader.uniforms.mixAmount = { value: 0 };
+      // ambientTint is SOFT-LIGHT blended over the photo (see softLight()
+      // below), at `ambientOpacity`. History, since three blend modes have
+      // been tried here and each failed differently: a plain multiplier left
+      // dark/shadowed pixels dark no matter how extreme it got (black *
+      // anything = black); a mix()-toward-color fixed that but replaced the
+      // photo's own local detail/contrast with a flat wash at any real
+      // strength (confirmed live: "washes out the image"); additive fixed
+      // the flatness but applied the same absolute lift to every pixel, so
+      // it read as uniformly strong across the whole frame and blew out
+      // highlights. Soft light is luminance-dependent instead — it pushes
+      // midtones hardest and falls off toward both ends, so deep shadows
+      // stay dark and bright highlights stay bright, which is how real
+      // in-game light (fireworks, neon) actually washes over a cockpit.
+      // ambientOpacity (0 = no-op) is how far to blend toward the
+      // soft-lit result, smoothed separately in JS the same way mixAmount is.
+      shader.uniforms.ambientTint = { value: new THREE.Vector3(0, 0, 0) };
+      shader.uniforms.ambientOpacity = { value: 0 };
+      // Only non-zero for cars with no night photo — see the fragment
+      // shader's own comment on why this darkening lives here and not in a
+      // DOM overlay above the canvas.
+      shader.uniforms.nightDarken = { value: 0 };
       shader.fragmentShader = shader.fragmentShader
         .replace(
           '#include <common>',
-          '#include <common>\nuniform sampler2D nightMap;\nuniform float mixAmount;',
+          `#include <common>
+          uniform sampler2D nightMap;
+          uniform float mixAmount;
+          uniform vec3 ambientTint;
+          uniform float ambientOpacity;
+          uniform float nightDarken;
+          // Standard (W3C/Photoshop) soft light. blend == 0.5 is the neutral
+          // point and returns base untouched; above pushes toward white,
+          // below toward black, both with a falloff that shrinks as base
+          // approaches the corresponding end — that falloff is the whole
+          // point, it's what keeps crushed blacks and blown highlights from
+          // moving while midtones take the full effect.
+          float softLightChannel( float base, float blend ) {
+            if ( blend <= 0.5 ) {
+              return base - ( 1.0 - 2.0 * blend ) * base * ( 1.0 - base );
+            }
+            float d = ( base <= 0.25 )
+              ? ( ( 16.0 * base - 12.0 ) * base + 4.0 ) * base
+              : sqrt( base );
+            return base + ( 2.0 * blend - 1.0 ) * ( d - base );
+          }
+          vec3 softLight( vec3 base, vec3 blend ) {
+            return vec3(
+              softLightChannel( base.r, blend.r ),
+              softLightChannel( base.g, blend.g ),
+              softLightChannel( base.b, blend.b )
+            );
+          }`,
         )
         .replace(
           '#include <map_fragment>',
@@ -138,6 +239,21 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
             vec4 dayTexel = texture2D( map, vMapUv );
             vec4 nightTexel = texture2D( nightMap, vMapUv );
             vec4 sampledDiffuseColor = mix( dayTexel, nightTexel, mixAmount );
+            // Flat night darkening for cars with NO night photo. This used to
+            // be a DOM overlay (rgba(0,0,0,0.85) at NIGHT_OVERLAY_Z in
+            // Canvas.tsx) painted ABOVE this canvas — which meant it also
+            // covered the ambient tint below it, transmitting only ~19% of it
+            // at full night and making the tint 42% WEAKER at night than in
+            // daylight, while nightBoost was busy trying to make it 3x
+            // stronger. Doing it here instead puts the darkening BEFORE the
+            // tint, so the tint modulates the pixels actually on screen.
+            // 0.8 matches the old overlay's effective alpha (0.85 * 0.95), so
+            // the no-night-photo case looks unchanged. The JS side scales
+            // nightDarken down (NIGHT_DARKEN_WITH_PHOTO) when a real night
+            // photo is supplying most of the look already.
+            sampledDiffuseColor.rgb *= ( 1.0 - nightDarken * 0.8 );
+            vec3 softLit = softLight( sampledDiffuseColor.rgb, ambientTint );
+            sampledDiffuseColor.rgb = mix( sampledDiffuseColor.rgb, softLit, ambientOpacity );
             diffuseColor *= sampledDiffuseColor;
           #endif`,
         );
@@ -220,6 +336,146 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
         mixAmountRef.current = lerp(mixAmountRef.current, target, smoothing);
         shaderRef.current.uniforms.mixAmount.value = mixAmountRef.current;
         shaderRef.current.uniforms.nightMap.value = nightTextureRef.current;
+
+        // Texture-independent night level. mixAmount is forced to 0 without a
+        // night texture (sampling an unbound nightMap yields black), so it
+        // cannot stand in for "how night is it" — which is what both the
+        // flat darkening and nightBoost actually want.
+        nightLevelRef.current = lerp(nightLevelRef.current, stateRef.current.nightAmount, smoothing);
+        // ONLY when a night photo exists — i.e. exactly when Canvas.tsx
+        // suppresses its flat night overlay. Without a photo that overlay is
+        // still what darkens the scene, and it must stay: it covers the whole
+        // canvas, so it dims the gauges and text too, which a shader on the
+        // photosphere cannot do. Darkening here as well would double-darken.
+        //
+        // With a photo, nothing else darkens at all: the day/night mix just
+        // crossfades between two normally-exposed photographs, and a night
+        // photograph is exposed to look correct on its own, not to read as
+        // dark beside a daylight one.
+        shaderRef.current.uniforms.nightDarken.value =
+          nightTextureRef.current ? nightLevelRef.current * NIGHT_DARKEN_WITH_PHOTO : 0;
+
+        // Ambient tint: soft-light blended over the photo at
+        // `ambientOpacity` (see the shader's own comment for the full
+        // multiply → mix → additive → soft-light history and why each
+        // earlier mode was abandoned). `ambientTintIntensity` — the "Tint
+        // intensity" slider on the Ambient Lights page — is the user-facing
+        // dial for that opacity; everything below scales it by conditions
+        // (night, spike selectivity) rather than replacing it.
+        const { ambientColor: ac, ambientTintIntensity: intensity } = stateRef.current;
+        const tintTarget = { x: 0, y: 0, z: 0 };
+        let opacityTarget = 0;
+        if (ac && intensity > 0) {
+          // A physical ambient light's color cast reads far stronger
+          // against a dark room than a bright one. mixAmountRef is already
+          // this frame's smoothed day/night blend; boosts opacity up to 3x
+          // at full night. The `* 0.5` keeps the slider's *default* (0.3)
+          // landing at ~0.15 opacity in daylight — the 15-20% range this
+          // was tuned to by eye — while leaving the slider's top half as
+          // headroom, so full intensity at full night can still reach a
+          // complete (1.0) soft-light blend. No hard sub-1.0 cap here
+          // anymore: the old 0.5 ceiling existed because additive blending
+          // overexposed the scene toward the tint color, which soft light's
+          // highlight falloff makes a non-issue.
+          // nightLevelRef, not mixAmountRef: the latter is pinned to 0 on a
+          // car with no night photo, which is exactly the case that needs the
+          // boost most — it's now the darkened-in-shader one.
+          const nightBoost = 1 + nightLevelRef.current * 2;
+          // Gate on ABSOLUTE colourfulness, not deviation from a rolling
+          // baseline.
+          //
+          // The previous version tracked a slow (tau 4s) baseline of recent
+          // saturation and drove opacity from `saturation - baseline`. That
+          // is self-cancelling by construction: hold any colour steady and
+          // the baseline converges onto it within a few seconds, deviation
+          // goes to zero, and the tint fades itself out — a sustained red
+          // sunset would light up briefly and then vanish. Squaring the
+          // result made it worse (half the deviation gave a quarter of the
+          // opacity), and it fed a second 830ms smoother, so the whole
+          // response was sluggish twice over. Net effect: only sharp
+          // transients ever showed, and only for a moment.
+          //
+          // A plain floor/ceiling ramp on absolute saturation keeps a
+          // colourful scene tinted for as long as it stays colourful, while
+          // still leaving genuinely neutral/grey captures untinted. SAT_FULL
+          // is deliberately reachable: Huenicorn's capture regions are large,
+          // so a vivid burst averaged over a mostly-dark region still only
+          // reads ~0.32 raw saturation — measured live under in-game
+          // fireworks — and a ceiling above that would never be hit.
+          const maxChannel = Math.max(ac.r, ac.g, ac.b, 0.0001);
+          const minChannel = Math.min(ac.r, ac.g, ac.b);
+          const saturation = (maxChannel - minChannel) / maxChannel;
+          const luma = (ac.r + ac.g + ac.b) / 3;
+          const SAT_FLOOR = 0.10; // below this the reading is effectively grey
+          const SAT_FULL  = 0.35; // at/above this the gate is fully open
+          const t = Math.min(1, Math.max(0, (saturation - SAT_FLOOR) / (SAT_FULL - SAT_FLOOR)));
+          // smoothstep, so the gate eases in/out instead of cornering at the
+          // floor — no squaring, so mid-range colour keeps mid-range opacity.
+          const saturationGate = t * t * (3 - 2 * t);
+          opacityTarget = Math.min(1, intensity * nightBoost * 0.5) * saturationGate;
+          // ambientSaturationBoost pushes each channel's deviation from the
+          // reading's own average outward before picking the tint color —
+          // 1 (default) leaves hue/saturation untouched, higher values turn
+          // a pale/washed-out reading (e.g. a dim, barely-red capture) into
+          // a genuinely vivid one (a saturated red) rather than just a
+          // brighter version of the same pale color.
+          //
+          // The result is then scaled to a LEVEL derived from the reading's
+          // own luma, rather than pinning the max channel to a fixed 0.9.
+          // That fixed value was calibrated for additive blending, where it
+          // just meant "a bright version of the color", and it threw the
+          // reading's intensity away: a dim red and a blazing red produced
+          // the identical tint, so the effect had no dynamics.
+          //
+          // Soft light is neutral at 0.5 — channels above lift toward white,
+          // below fall toward black — so the range floor sits above that
+          // (a dim reading still lifts, just gently) and the ceiling is
+          // near the old 0.9 (a bright reading pushes as hard as before).
+          // nightLevelRef, not the raw nightAmount prop — same smoothed
+          // value nightBoost above uses, so the day/night boost blend eases
+          // continuously alongside it instead of snapping.
+          const { ambientSaturationBoostDay: boostDay, ambientSaturationBoostNight: boostNight } = stateRef.current;
+          const boost = boostDay + (boostNight - boostDay) * nightLevelRef.current;
+          const boostedR = Math.max(0, luma + (ac.r - luma) * boost);
+          const boostedG = Math.max(0, luma + (ac.g - luma) * boost);
+          const boostedB = Math.max(0, luma + (ac.b - luma) * boost);
+          const maxBoosted = Math.max(boostedR, boostedG, boostedB, 0.0001);
+          const LEVEL_MIN = 0.60;
+          const LEVEL_MAX = 0.95;
+          const level = LEVEL_MIN + Math.min(1, Math.max(0, luma)) * (LEVEL_MAX - LEVEL_MIN);
+          const vividScale = level / maxBoosted;
+          tintTarget.x = boostedR * vividScale;
+          tintTarget.y = boostedG * vividScale;
+          tintTarget.z = boostedB * vividScale;
+        }
+        // Ambient gets its own, much shorter tau than the day/night blend's
+        // 830ms. They were sharing `smoothing` — but the day/night crossfade
+        // is deliberately slow (it stands in for a 2.5s CSS transition),
+        // whereas the ambient tint is tracking a light that is physically
+        // changing right now. At 830ms on top of the old 4s baseline the
+        // tint always arrived late; on its own at ~250ms it reads as
+        // responsive while still filtering out per-frame capture jitter.
+        const ambientTauMs = 250;
+        const ambientSmoothing = 1 - Math.exp(-dtMs / ambientTauMs);
+        ambientTintVecRef.current.set(
+          lerp(ambientTintVecRef.current.x, tintTarget.x, ambientSmoothing),
+          lerp(ambientTintVecRef.current.y, tintTarget.y, ambientSmoothing),
+          lerp(ambientTintVecRef.current.z, tintTarget.z, ambientSmoothing),
+        );
+        ambientOpacityRef.current = lerp(ambientOpacityRef.current, opacityTarget, ambientSmoothing);
+        // Route the tint either into the shader or into the DOM overlay,
+        // never both. The overlay only exists when Canvas is drawing its
+        // night overlay, which is exactly the case where an in-shader tint
+        // would be mostly swallowed by it.
+        const overlayEl = tintOverlayRefRef.current?.current ?? null;
+        const t = ambientTintVecRef.current;
+        shaderRef.current.uniforms.ambientTint.value.copy(t);
+        shaderRef.current.uniforms.ambientOpacity.value = overlayEl ? 0 : ambientOpacityRef.current;
+        if (overlayEl) {
+          const to255 = (v: number) => Math.round(Math.min(1, Math.max(0, v)) * 255);
+          overlayEl.style.backgroundColor = `rgb(${to255(t.x)}, ${to255(t.y)}, ${to255(t.z)})`;
+          overlayEl.style.opacity = String(ambientOpacityRef.current);
+        }
       }
 
       renderer.render(scene, cameraRef.current!);

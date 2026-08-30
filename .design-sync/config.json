@@ -1,0 +1,94 @@
+{
+  "projectId": "2f696372-abce-49a2-b68c-77e133c9562c",
+  "shape": "package",
+  "pkg": "denim",
+  "globalName": "Denim",
+  "srcDir": "src/lib",
+  "tsconfig": "tsconfig.json",
+  "entry": ".design-sync/ds-entry.tsx",
+  "provider": {
+    "component": "DesignPreviewShell"
+  },
+  "componentSrcMap": {
+    "Form": "src/lib/typical-admin-fabric/lib/templates/Form.tsx",
+    "FormCard": "src/lib/typical-admin-fabric/lib/templates/FormCard.tsx",
+    "ThumbnailCard": "src/lib/typical-admin-fabric/lib/templates/ThumbnailCard.tsx",
+    "List": "src/lib/typical-admin-fabric/lib/List.tsx",
+    "ListControls": "src/lib/typical-admin-fabric/lib/ListControls.tsx",
+    "Prompt": "src/lib/typical-admin-fabric/Prompt.tsx",
+    "Fabric": "src/lib/typical-admin-fabric/lib/templates/Fabric.tsx",
+    "ButtonDropdown": "src/lib/denim/lib/ButtonDropdown.tsx",
+    "ConfirmDialogHost": "src/lib/denim/components/ConfirmDialog.tsx",
+    "Splashscreen": "src/lib/denim/components/Splashscreen/index.tsx",
+    "Photo": "src/lib/denim/components/Photo/index.tsx",
+    "Logo": "src/lib/denim/logo.tsx",
+    "Header": "src/lib/denim/components/Header/index.tsx",
+    "HeaderLink": "src/lib/denim/components/Header/lib/HeaderLink.tsx",
+    "ReactiveAdmin": "src/lib/typical-admin-fabric/index.tsx",
+    "ListScreen": "src/lib/typical-admin-fabric/List.tsx",
+    "Create": "src/lib/typical-admin-fabric/Create.tsx",
+    "Update": "src/lib/typical-admin-fabric/Update.tsx",
+    "Show": "src/lib/typical-admin-fabric/Show.tsx",
+    "Delete": "src/lib/typical-admin-fabric/Delete.tsx",
+    "Links": "src/lib/typical-admin-fabric/Links.tsx",
+    "CardList": "src/lib/typical-admin-fabric/CardList.tsx",
+    "SwitchableList": "src/lib/typical-admin-fabric/SwitchableList.tsx",
+    "Denim": "src/lib/denim/components/index.tsx",
+    "DesignPreviewShell": null,
+    "MemoryRouter": null,
+    "Routes": null,
+    "Route": null,
+    "useNavigate": null,
+    "denimDispatcher": null,
+    "ThemeProvider": null,
+    "getTheme": null,
+    "useTheme": null
+  },
+  "dtsPropsFor": {
+    "Form": "/** Field definitions keyed by field name \u2014 the schema drives what renders. */\n  form: Record<string, any>;\n  /** Form identity; also namespaces the rendered field ids. */\n  name: string;\n  /** Seed values, keyed by field name. Omit for an empty form. */\n  initialValues?: Record<string, any>;\n  /** Fires on every edit with the form name and the current values. */\n  onChange?: (name: string, values: any) => void;\n  /** Per-field prop overrides, keyed by field name \u2014 for props a static schema can't know (live option lists etc). */\n  fieldProps?: { [key: string]: any };\n  /** Value converters applied at submit time, keyed by field type. */\n  converters?: any;",
+    "FormCard": "children?: React.ReactNode;\n  style?: React.CSSProperties;",
+    "ThumbnailCard": "title: string;\n  /** Rendered before the truncated title text, e.g. a colored type badge. */\n  titlePrefix?: React.ReactNode;\n  /** Header-right content, typically a row of IconButtons. */\n  actions?: React.ReactNode;\n  /** Renders a background image, fit per `fit`. Ignored if children is set. */\n  thumbnailUrl?: string;\n  /** 'cover' (default) crops to fill; 'contain' letterboxes and never crops. */\n  fit?: 'cover' | 'contain';\n  width?: number;\n  thumbnailHeight?: number;\n  children?: React.ReactNode;",
+    "List": "/** Rows to render. */\n  items: Array<any>;\n  /** Column definitions keyed by field name (DisplaySchema). */\n  schema: Record<string, any>;\n  /** List identity; also the default persistence key. */\n  name: string;\n  onSelect?: (values: any) => void;\n  pageSize?: number;\n  csvHeaders?: Array<{ label: string; key: string }>;\n  /** Opts in to a \"Columns\" picker letting the user hide/show columns. Off by default. */\n  columnSelectable?: boolean;",
+    "ListControls": "visibleCount: number;\n  totalCount: number;\n  pickableKeys: string[];\n  columnSelectSchema: Record<string, any>;\n  initialValues: Record<string, boolean>;\n  onColumnsChange: (hidden: Set<string>) => void;\n  columnSelectable?: boolean;\n  /** Undefined = the schema didn't declare buttons.add, so nothing renders. */\n  onAdd?: () => void;\n  /** Caller-defined toolbar actions that don't fit the add/columns shape. */\n  customButtons?: Array<any>;",
+    "Prompt": "isOpen: boolean;\n  message: any;\n  toggle: (response: boolean) => void;",
+    "Fabric": "/** per-form's field renderer (passed as FormWrapper's `Template`). One switch\n   * over `type` covering every field kind; unmatched types fall back to a TextField.\n   * Rarely rendered directly \u2014 Form wires it for you. */\n  type: string;\n  label?: string;\n  name: string;\n  value: any;\n  onChange: (name: string, value: any) => void;\n  onFocus?: (name: string) => void;\n  errors?: string[];\n  dirty?: boolean;\n  touched?: boolean;\n  parent?: any;\n  [key: string]: unknown;",
+    "ButtonDropdown": "/** Button label. */\n  value: any;\n  /** Menu entries; each item's `value` becomes its text. */\n  menuActions: Array<{ value: string; [key: string]: any }>;\n  /** 'primary' renders a PrimaryButton, anything else a DefaultButton. */\n  color?: string;\n  [key: string]: unknown;",
+    "ConfirmDialogHost": "/** Takes no props. Mount once near the app root; trigger it by awaiting\n   * `confirmAsync(message, options)`, which resolves true/false. */",
+    "Splashscreen": "/** Logo component rendered centred while the app loads. */\n  Icon: React.FC<any>;\n  /** Shown below the logo once the initial load has actually failed \u2014\n   * not during the normal brief first fetch. Empty renders nothing. */\n  statusText?: string;",
+    "Photo": "/** Image source rendered in the preview. */\n  image?: string;\n  base64URL?: string | null;\n  /** Enables the crop UI. */\n  cropping?: boolean;\n  previewDimensions?: { height: number; width: number };\n  fileDimensions?: Record<string, any>;\n  icon?: string;\n  selected?: boolean;\n  error?: any;\n  [key: string]: unknown;",
+    "Logo": "style?: any;\n  className?: any;\n  onClick?: any;",
+    "Header": "/** The current user/settings payload (`my`) that drives nav and settings. */\n  my: any;\n  Brand?: React.FC<any>;\n  Controls?: React.FC<any>;\n  ExternalApps?: React.FC<any>;",
+    "HeaderLink": "to: any;\n  children: any;\n  className?: string;\n  active?: boolean;",
+    "ReactiveAdmin": "/** gql documents per slot: list, show, and optionally new/edit/delete/subscribe.\n   * Each slot's presence gates real behaviour, not just which mutation fires. */\n  dispatcher: any;\n  /** Singular/plural display names for the record type. */\n  name: any;\n  /** Field definitions for list/show/edit/new (ITASchema). */\n  schemaDefinition: any;\n  /** Override individual slots (list/new/show/edit); omitted slots keep the\n   * Fluent defaults. Caller overrides always win. */\n  components?: any;\n  callBacks?: any;\n  pageSize?: number;",
+    "ListScreen": "dispatcher: any;\n  name: any;\n  schemaDefinition: any;\n  pageSize?: number;\n  components?: any;\n  /** Overrides the query's result field \u2014 defaults to `get${name.plural}`. */\n  queryResultKey?: string;\n  /** Suppresses the built-in heading + Links row, for embedding. */\n  hideHeader?: boolean;",
+    "Create": "dispatcher: any;\n  name: any;\n  schemaDefinition: any;\n  callBacks?: any;\n  components?: any;",
+    "Update": "dispatcher: any;\n  name: any;\n  schemaDefinition: any;\n  callBacks?: any;\n  components?: any;",
+    "Show": "dispatcher: any;\n  name: any;\n  schemaDefinition: any;\n  callBacks?: any;\n  components?: any;",
+    "Delete": "dispatcher: any;\n  id: any;\n  name: any;\n  callBacks?: any;",
+    "Links": "name: any;\n  dispatcher: any;",
+    "CardList": "dispatcher: any;\n  name: any;\n  schemaDefinition: any;\n  /** Schema key rendered as each card's title. */\n  titleField: string;\n  /** Schema key holding an image URL for the thumbnail. Omit for text-only cards. */\n  thumbnailField?: string;\n  cardWidth?: number;\n  components?: any;\n  pageSize?: number;",
+    "SwitchableList": "dispatcher: any;\n  name: any;\n  schemaDefinition: any;\n  /** Card-view title field (card view only). */\n  titleField: string;\n  thumbnailField?: string;\n  cardWidth?: number;\n  thumbnailHeight?: number;\n  thumbnailFit?: 'cover' | 'contain';\n  defaultView?: string;\n  components?: any;\n  pageSize?: number;",
+    "Denim": "/** Theme map keyed by theme name; each entry is a (fontSize) => theme factory. */\n  themes: any;\n  /** Component registry keyed by an application's `frontEnd` value. */\n  components?: any;\n  /** Rendered at the root route when no launch page is configured. */\n  RootComponent?: any;\n  Logo?: React.FC<any>;\n  Brand?: React.FC<any>;\n  Controls?: React.FC<any>;\n  ExternalApps?: React.FC<any>;"
+  },
+  "overrides": {
+    "Header": {
+      "cardMode": "single",
+      "primaryStory": "WithBrandAndControls"
+    },
+    "Prompt": {
+      "cardMode": "single",
+      "primaryStory": "Open"
+    },
+    "HeaderLink": {
+      "cardMode": "column"
+    },
+    "ListControls": {
+      "cardMode": "column"
+    },
+    "Denim": {
+      "cardMode": "single",
+      "primaryStory": "WithRootComponent"
+    }
+  },
+  "readmeHeader": ".design-sync/conventions.md"
+}

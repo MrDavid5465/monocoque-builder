@@ -197,6 +197,36 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
   const { data: myData } = useQuery(dispatcher.my, { fetchPolicy: 'cache-first' });
   const globalSteerMaxDeg: number = (myData as any)?.my?.settings?.steerMaxDeg ?? 400;
   const gamepadMappings = (myData as any)?.my?.settings?.gamepadMappings ?? [];
+  // Local state (not a plain derived const, unlike globalSteerMaxDeg above)
+  // because these two also update live from HuenicornSettingsChanged (see
+  // the useHubListener call below `hub` is defined) — so a settings change
+  // made from a different window/device (e.g. the Ambient Lights page on
+  // another tablet) reaches an already-open kiosk dashboard without a
+  // reload, the same live-config problem NightModeChanged already solves
+  // for night-mode settings.
+  const settingsAmbientTintIntensity: number = (myData as any)?.my?.settings?.ambientTintIntensity ?? 0;
+  const settingsAmbientPrimaryChannel: number | null =
+    (myData as any)?.my?.settings?.ambientPrimaryChannel ?? null;
+  const settingsAmbientSaturationBoostDay: number =
+    (myData as any)?.my?.settings?.ambientSaturationBoostDay ?? 1;
+  const settingsAmbientSaturationBoostNight: number =
+    (myData as any)?.my?.settings?.ambientSaturationBoostNight ?? 1;
+  const [ambientTintIntensity, setAmbientTintIntensity] = useState(settingsAmbientTintIntensity);
+  const [ambientPrimaryChannel, setAmbientPrimaryChannel] = useState(settingsAmbientPrimaryChannel);
+  const [ambientSaturationBoostDay, setAmbientSaturationBoostDay] = useState(settingsAmbientSaturationBoostDay);
+  const [ambientSaturationBoostNight, setAmbientSaturationBoostNight] = useState(settingsAmbientSaturationBoostNight);
+  useEffect(() => {
+    setAmbientTintIntensity(settingsAmbientTintIntensity);
+  }, [settingsAmbientTintIntensity]);
+  useEffect(() => {
+    setAmbientPrimaryChannel(settingsAmbientPrimaryChannel);
+  }, [settingsAmbientPrimaryChannel]);
+  useEffect(() => {
+    setAmbientSaturationBoostDay(settingsAmbientSaturationBoostDay);
+  }, [settingsAmbientSaturationBoostDay]);
+  useEffect(() => {
+    setAmbientSaturationBoostNight(settingsAmbientSaturationBoostNight);
+  }, [settingsAmbientSaturationBoostNight]);
   const { templates, saveTemplate, removeTemplate, uploadThumbnail, refetchTemplates } = useTemplates();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [viewing360, setViewing360] = useState(false);
@@ -222,6 +252,7 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
   // When this device's mapping changes while in kiosk mode, re-resolve the route.
   const [liveValues, setLiveValues] = useState<Record<string, number>>({});
   const [car, setCar] = useState('');
+  const [track, setTrack] = useState('');
   const [simStatus, setSimStatus] = useState('');
 
   // This is the ONE place on a DashboardDesigner page that opens the real
@@ -240,6 +271,9 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
   const [hub, hubSubscriber] = useLiveUpdatesHub({
     includeTelemetry: kioskMode,
     includeNightClock: kioskMode,
+    // Same gating as includeTelemetry — only a kiosk 360 dashboard with the
+    // feature actually dialed up needs this stream; the editor never does.
+    includeAmbientColor: kioskMode && ambientTintIntensity > 0,
     // Skip until dashboard is loaded — avoids a useSyncExternalStore commit
     // during the initial mount burst when Apollo is already processing
     // multiple queries.
@@ -247,6 +281,36 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
   });
 
   const { isNight, nightAmount, simTimeMs, toggleNightMode } = useGlobalNightMode(hub, { liveClock: kioskMode });
+
+  // v1 picks one channel from the per-channel array to actually drive the
+  // 360 viewer's tint (the wire format already carries all channels — see
+  // AmbientColorChanged's own doc comment — so a later per-region effect is
+  // additive, not a rework). Prefers the user's ambientPrimaryChannel pick
+  // (AmbientLights/index.tsx's select field); falls back to whichever
+  // channel Huenicorn reports first if unset or not found.
+  const [ambientColor, setAmbientColor] = useState<{ r: number; g: number; b: number } | null>(null);
+  // The element Canvas paints the ambient tint into when its night overlay is
+  // up (that overlay would otherwise swallow an in-shader tint). Stable
+  // identity, written imperatively by Photo360Viewer's render loop — so it is
+  // deliberately NOT in kioskLive360Deps below.
+  const ambientOverlayRef = useRef<HTMLDivElement>(null);
+  useHubListener(hub, 'AmbientColorChanged', kioskMode ? (event: any) => {
+    const colors = event?.colors ?? [];
+    const picked = (ambientPrimaryChannel != null
+      ? colors.find((c: any) => c.channelId === ambientPrimaryChannel)
+      : undefined) ?? colors[0];
+    setAmbientColor(picked ? { r: picked.r, g: picked.g, b: picked.b } : null);
+  } : undefined);
+  // Unconditional (not kioskMode-gated like AmbientColorChanged above) —
+  // HuenicornSettingsChanged is cheap/low-frequency (only fires on an
+  // actual settings save), so there's no cost concern gating it the way
+  // the ~30Hz color stream needs.
+  useHubListener(hub, 'HuenicornSettingsChanged', (event: any) => {
+    setAmbientTintIntensity(event.ambientTintIntensity);
+    setAmbientPrimaryChannel(event.ambientPrimaryChannel ?? null);
+    setAmbientSaturationBoostDay(event.ambientSaturationBoostDay ?? 1);
+    setAmbientSaturationBoostNight(event.ambientSaturationBoostNight ?? 1);
+  });
   const { previewCarId } = useGlobalPreviewCar(hub);
 
   const { data: carsData } = useQuery(GET_CARS, {
@@ -275,6 +339,7 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
     !kioskMode,
     car,
     simStatus,
+    track,
   );
 
   useHubListener(hub, 'DashboardEntryChanged', handleDashboardUpdate);
@@ -293,12 +358,13 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
   // this can compare-before-set without depending on stale closure state.
   const liveValuesRef = useRef<Record<string, number>>({});
   const onTelemetryEvent = useCallback((event: any) => {
-    const { values, car: c, simStatus: s } = computeTelemetryValues(event.frame);
+    const { values, car: c, track: trk, simStatus: s } = computeTelemetryValues(event.frame);
     if (!shallowEqualRecord(liveValuesRef.current, values)) {
       liveValuesRef.current = values;
       setLiveValues(values);
     }
     setCar(c);
+    setTrack(trk);
     setSimStatus(s);
   }, []);
   // Not registered at all while editing — baseTelemetry (below) only reads
@@ -601,6 +667,7 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
       ref={viewer360Ref}
       dayPhotoUrl={dayPhoto360Url}
       nightPhotoUrl={nightPhoto360Url}
+      tintOverlayRef={ambientOverlayRef}
       nightAmount={nightAmount}
       yaw={dashboard.photo360Yaw ?? 0}
       pitch={dashboard.photo360Pitch ?? 0}
@@ -631,6 +698,8 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
     kioskPan.yaw, kioskPan.pitch, kioskPan.fov, kioskPan.roll,
     dashboard.canvasWidth, dashboard.canvasHeight, telemetryData,
     dashboard.neckFx, dashboard.neckFxGainX, dashboard.neckFxGainY, dashboard.neckFxDisableX, dashboard.neckFxDisableY,
+    ambientColor?.r ?? null, ambientColor?.g ?? null, ambientColor?.b ?? null, ambientTintIntensity,
+    ambientSaturationBoostDay, ambientSaturationBoostNight,
   ];
   const kioskLive360CacheStale = !kioskLive360CacheRef.current ||
     kioskLive360Deps.some((d, i) => d !== kioskLive360CacheRef.current!.deps[i]);
@@ -642,7 +711,12 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
         <Photo360CrossfadeViewer
           dayPhotoUrl={dayPhoto360Url}
           nightPhotoUrl={nightPhoto360Url}
+          tintOverlayRef={ambientOverlayRef}
           nightAmount={nightAmount}
+          ambientColor={ambientColor}
+          ambientTintIntensity={ambientTintIntensity}
+          ambientSaturationBoostDay={ambientSaturationBoostDay}
+          ambientSaturationBoostNight={ambientSaturationBoostNight}
           yaw={kioskPan.yaw}
           pitch={kioskPan.pitch}
           fov={kioskPan.fov}
@@ -696,7 +770,8 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
       globalSteerMaxDeg={globalSteerMaxDeg}
       panBgMode={panBgMode && !show360}
       liveBackground={liveBackground360 ?? kioskLive360}
-      liveBackgroundIsNightPhoto={showingLive360 && hasCarNightPhoto}
+      liveBackgroundHandlesNight={showingLive360 && hasCarNightPhoto}
+      ambientOverlayRef={ambientOverlayRef}
       liveBackgroundInteractive={viewing360 && !kioskMode}
       gamepadMappings={gamepadMappings}
       simStatus={simStatus}

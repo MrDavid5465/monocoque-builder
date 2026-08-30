@@ -243,6 +243,43 @@ impl ShakerDspMutation {
         Ok(true)
     }
 
+    /// Rebuilds the filter-chain from current state and reloads it, leaving
+    /// `shakerDspEnabled` alone.
+    ///
+    /// Every other live edit (fader, mute, LPF) reaches the running chain
+    /// through `pw-cli` without touching the process — see
+    /// `apply_shaker_dsp_channel_live`. A **device** change can't: which sink
+    /// each chain feeds, how many output channels it has, and which monitor
+    /// the LFE taps are all baked into the filter-chain's config at build
+    /// time (`DeviceChainSpec::output_device`/`output_channel_count`,
+    /// `LfeSpec::source_device`), so switching devices means rebuilding the
+    /// graph, not poking a parameter on it. Without this, changing a
+    /// channel's device while DSP was on left the chain feeding the OLD
+    /// device until the user manually toggled DSP off and on again.
+    ///
+    /// Returns false (rather than erroring) when DSP isn't currently
+    /// enabled, so the frontend can fire it after any device edit without
+    /// first checking — there's simply no chain to rebuild in that case, and
+    /// the next enable/resume builds a fresh one from the same state anyway.
+    ///
+    /// `load_filter_chain` unloads any previous instance itself, so this
+    /// deliberately doesn't unload first: doing so would add a second gap of
+    /// silence for no benefit.
+    async fn reload_shaker_dsp(&self, ctx: &Context<'_>) -> GqlResult<bool> {
+        let app_config = read_app_config().map_err(async_graphql::Error::new)?;
+        if !app_config.settings.shaker_dsp_enabled {
+            return Ok(false);
+        }
+
+        let adapter = crate::graphql::default_adapter(ctx)?;
+        let chains = build_device_chains(&adapter)
+            .await
+            .map_err(async_graphql::Error::new)?;
+        pipewire_dsp::load_filter_chain(&chains).map_err(async_graphql::Error::new)?;
+
+        Ok(true)
+    }
+
     /// Unloads the filter-chain and flips shakerDspEnabled off. No row
     /// mutations — see enable_shaker_dsp's doc comment for why none are
     /// needed at all under the ShakerChannel model.

@@ -31,3 +31,9 @@ export const REGISTER_CAR = gql`
     registerCar(name: $name)
   }
 `;
+
+export const REGISTER_TRACK = gql`
+  mutation registerTrack($name: String!) {
+    registerTrack(name: $name)
+  }
+`;

@@ -10,7 +10,12 @@ mod device_enumeration;
 mod gamepad;
 mod graphql;
 mod host_command;
+mod huenicorn;
+mod night_state;
 mod pipewire_dsp;
+mod process_liveness;
+mod service_commands;
+mod service_watchdogs;
 mod sun_position;
 mod telemetry;
 mod typiql_types;
@@ -25,15 +30,15 @@ fn main() {
     }));
 
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![
-            gamepad::gamepad_udev_status,
-            gamepad::setup_gamepad_udev,
-        ])
         .setup(|_app| {
             std::thread::spawn(|| {
                 let rt = Runtime::new().unwrap();
                 rt.block_on(async {
                     tokio::spawn(gamepad::run_watchdog());
+                    tokio::spawn(huenicorn::run_sim_watcher());
+                    tokio::spawn(huenicorn::run_color_poller());
+                    tokio::spawn(service_watchdogs::run_simd_watchdog());
+                    tokio::spawn(service_watchdogs::run_monocoque_watchdog());
 
                     let app = api::build_router().await;
 

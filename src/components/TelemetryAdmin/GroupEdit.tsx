@@ -11,6 +11,28 @@ const groupSchema = {
   name: { label: 'Group name' },
 };
 
+/** One car→dashboard row. Stored as a `Record<car, dash>` JSON string on the
+ *  record; kept as rows while editing so a row can exist before its car is
+ *  picked. */
+interface CarRow {
+  car: string;
+  dash: string;
+}
+
+const rowsFromJson = (json: string | undefined): CarRow[] => {
+  try {
+    return Object.entries(JSON.parse(json ?? '{}') as Record<string, string>)
+      .map(([car, dash]) => ({ car, dash: dash ?? '' }));
+  } catch {
+    return [];
+  }
+};
+
+/** Drops not-yet-assigned rows, and lets a later row win a duplicated car
+ *  (which the per-row option filtering already makes hard to produce). */
+const jsonFromRows = (rows: CarRow[]): string =>
+  JSON.stringify(Object.fromEntries(rows.filter(r => r.car).map(r => [r.car, r.dash ?? ''])));
+
 // Registered for ReactiveAdmin's show/edit/new slots — one component for all
 // three (matching CarShow's shared show/edit precedent) since the editing UI
 // is identical whether id is present (edit an existing group, via useParams)
@@ -36,10 +58,10 @@ const GroupEdit: React.FC = () => {
 
   const [name, setName] = useState(existing?.name ?? '');
   const [defaultDash, setDefaultDash] = useState<string>(existing?.defaultDash ?? '');
-  const [carDashMap, setCarDashMap] = useState<Record<string, string>>(() => {
-    try { return JSON.parse(existing?.carDashMap ?? '{}'); } catch { return {}; }
-  });
-  const [pendingCar, setPendingCar] = useState('');
+  // Rows, not the Record — a row exists (and is editable) before its car is
+  // chosen, which a car-keyed map can't represent. Converted back to the
+  // stored `Record<car, dash>` shape only at save time.
+  const [carRows, setCarRows] = useState<CarRow[]>(() => rowsFromJson(existing?.carDashMap));
   const [saving, setSaving] = useState(false);
 
   // Reset local state once the existing record actually loads (initial fetch
@@ -49,24 +71,60 @@ const GroupEdit: React.FC = () => {
   if (!hydrated && existing) {
     setName(existing.name ?? '');
     setDefaultDash(existing.defaultDash ?? '');
-    try { setCarDashMap(JSON.parse(existing.carDashMap ?? '{}')); } catch { setCarDashMap({}); }
+    setCarRows(rowsFromJson(existing.carDashMap));
     setHydrated(true);
   }
 
   const dashOptions: IDropdownOption[] = ((dashData as any)?.getDashboardEntries ?? []).map((d: any) => ({ key: d.name, text: d.name }));
   const carOptions: IDropdownOption[] = ((carsData as any)?.getKnownCars ?? []).map((c: any) => ({ key: c.id, text: c.id }));
   const allDashOptions: IDropdownOption[] = [{ key: '', text: '(none)' }, ...dashOptions];
-  const usedCars = new Set(Object.keys(carDashMap));
-  const availableCarOptions: IDropdownOption[] = [
-    { key: '', text: '— Select car —' },
-    ...carOptions.filter(c => !usedCars.has(c.key as string)),
-  ];
+
+  // The car→dashboard rows as one `list` field. The "a car already used by
+  // another row must not be offered again" rule that previously needed a
+  // separate `usedCars` set plus a dedicated "Add car" dropdown is now just
+  // a function itemSchema filtering against the OTHER rows — which also
+  // means the rule holds when editing an existing row, not only when adding.
+  const carMapSchema = {
+    carMappings: {
+      type: 'list' as const,
+      label: 'Car mappings',
+      singular: 'car mapping',
+      addLabel: 'Add car',
+      removeLabel: 'Remove mapping',
+      emptyText: 'No car mappings — every car in this group uses the default dashboard.',
+      horizontal: true,
+      newRow: { car: '', dash: '' },
+      // Falls back to the index while a row's car is still unset, so two
+      // blank rows stay distinct.
+      rowKey: (r: CarRow, i: number) => r.car || `unassigned-${i}`,
+      itemSchema: ({ index, rows }: { index: number; rows: CarRow[] }) => ({
+        car: {
+          type: 'select' as const,
+          label: 'Car',
+          options: [
+            { text: '— Select car —', value: '' },
+            ...carOptions
+              .filter(c => !rows.some((r, j) => j !== index && r.car === String(c.key)))
+              .map(c => ({ text: String(c.text), value: String(c.key) })),
+          ],
+        },
+        dash: {
+          type: 'select' as const,
+          label: 'Dashboard',
+          options: [
+            { text: '(none)', value: '' },
+            ...dashOptions.map(d => ({ text: String(d.text), value: String(d.key) })),
+          ],
+        },
+      }),
+    },
+  };
 
   const handleSave = async () => {
     if (!name.trim()) return;
     setSaving(true);
     try {
-      const values = { name: name.trim(), defaultDash: defaultDash || null, carDashMap: JSON.stringify(carDashMap) };
+      const values = { name: name.trim(), defaultDash: defaultDash || null, carDashMap: jsonFromRows(carRows) };
       if (isNew) {
         const result = await addGroup({ variables: { values } });
         const newId = (result.data as any)?.addDashGroup?.id;
@@ -102,43 +160,16 @@ const GroupEdit: React.FC = () => {
         />
       </Stack>
 
-      <div style={{ fontWeight: 600, fontSize: '0.85em', marginTop: '1em' }}>Car mappings</div>
-      {Object.entries(carDashMap).map(([car, dash]) => (
-        <Stack key={car} horizontal verticalAlign="center" tokens={{ childrenGap: 8 }} style={{ marginTop: '0.4em' }}>
-          <span style={{ minWidth: 150, fontSize: '0.9em' }}>{car}</span>
-          <Dropdown
-            selectedKey={dash}
-            options={allDashOptions}
-            onChange={(_, opt) => setCarDashMap(m => ({ ...m, [car]: opt?.key as string ?? '' }))}
-            styles={{ root: { flex: 1 } }}
-          />
-          <IconButton
-            iconProps={{ iconName: 'Delete' }}
-            title="Remove mapping"
-            onClick={() => setCarDashMap(m => { const n = { ...m }; delete n[car]; return n; })}
-          />
-        </Stack>
-      ))}
-
-      <Stack horizontal verticalAlign="end" tokens={{ childrenGap: 8 }} style={{ marginTop: '0.5em' }}>
-        <Dropdown
-          label="Add car"
-          selectedKey={pendingCar}
-          options={availableCarOptions}
-          onChange={(_, opt) => setPendingCar(opt?.key as string ?? '')}
-          styles={{ root: { flex: 1 } }}
+      <Stack style={{ marginTop: '1em' }}>
+        <Form
+          // Remounts once when the fetched record hydrates local state; row
+          // remounting during editing is the list field's own business.
+          key={`carmap-${id ?? 'new'}-${hydrated}`}
+          form={carMapSchema}
+          name="groupCarMap"
+          initialValues={{ carMappings: carRows }}
+          onChange={(_: string, { raw }: any) => setCarRows(raw.carMappings ?? [])}
         />
-        <PrimaryButton
-          disabled={!pendingCar}
-          onClick={() => {
-            if (pendingCar) {
-              setCarDashMap(m => ({ ...m, [pendingCar]: '' }));
-              setPendingCar('');
-            }
-          }}
-        >
-          Add
-        </PrimaryButton>
       </Stack>
 
       <PrimaryButton disabled={!name.trim() || saving} style={{ marginTop: '1.5em' }} onClick={handleSave}>
