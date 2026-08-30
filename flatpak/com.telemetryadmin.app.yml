@@ -1,11 +1,11 @@
 # Best-effort Flatpak manifest — NOT submitted anywhere (Flathub or
 # otherwise), built in CI purely so a .flatpak bundle exists as a release
-# asset. Locally verified (2026-08-29, via a real `flatpak-builder` run) past
-# the `dir` source's path and offline-npm-cache setup — see .github/workflows/
-# flatpak.yml's header for what that caught and fixed, and what's still
-# unverified (the github: npm dependency's sandboxed git-clone step, and this
-# repo's own git submodules under src/lib/). Treat the next real CI run as
-# the actual first end-to-end test.
+# asset. Verified (2026-08-29, locally and via real GitHub Actions runs) past
+# the `dir` source's path, the offline-npm-cache setup, and a stale git
+# dependency that made the offline build unsatisfiable — see
+# .github/workflows/flatpak.yml's header for the full list of what that
+# caught and fixed. Not yet covered: this repo's own git submodules under
+# src/lib/, added on a branch not yet merged to master.
 #
 # Builds via `cargo build --release` + a plain Vite build directly, not
 # through Tauri's own bundler — the bundler's .deb/AppImage/rpm targets
@@ -62,10 +62,7 @@ modules:
       - type: file
         path: com.telemetryadmin.app.metainfo.xml
     build-commands:
-      # --allow-git=all: npm v12+ disables git-protocol dependencies by
-      # default (EALLOWGIT); @octant/per-form is deliberately one (see
-      # integration-test.yml's npm-ci step for the same flag/reasoning).
-      - cd src/typiql-tauri/typiql && npm ci --offline --allow-git=all
+      - cd src/typiql-tauri/typiql && npm ci --offline
       - cd src/typiql-tauri/typiql && npm run build
       - cd src/typiql-tauri/typiql/src-tauri && cargo build --release --offline --locked
       - install -Dm755 src/typiql-tauri/typiql/src-tauri/target/release/typiql /app/bin/typiql

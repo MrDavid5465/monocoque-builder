@@ -8,29 +8,35 @@ name: Flatpak (best effort)
 # cross-workflow `needs:`, which doesn't work across separate workflow
 # files.
 #
-# PARTIALLY VERIFIED (2026-08-29): ran flatpak-builder for real for the first
-# time, in a local container with a matching GNOME 49 runtime/SDK + rust-stable/
-# node20 extensions at freedesktop 25.08 (bumped from the original GNOME 46/
-# freedesktop 24.08 pins, which were already EOL). That run caught and fixed
-# three real bugs nobody had hit before: the `dir` source's `path: ../..` was
-# one level too shallow to reach the sibling typiql-rs checkout (needed
-# `../../..`); `npm ci --offline` had no XDG_CACHE_HOME/npm_config_cache
-# pointed at flatpak-node-generator's cache, so it always fell through to
-# hitting the real registry; and flatpak-node-generator.py doesn't exist at
-# that path anymore (it's a pip package with a console-script entry point
-# now) and flatpak-cargo-generator.py needs tomlkit, not toml.
+# VERIFIED (2026-08-29): ran flatpak-builder for real, both locally (GNOME 49
+# runtime/SDK + rust-stable/node20 at freedesktop 25.08, bumped from the
+# original GNOME 46/24.08 pins, which were already EOL) and via real
+# workflow_dispatch runs on GitHub Actions. That process caught and fixed
+# four real bugs nobody had hit before:
+#  - the `dir` source's `path: ../..` was one level too shallow to reach the
+#    sibling typiql-rs checkout (needed `../../..`)
+#  - `npm ci --offline` had no XDG_CACHE_HOME/npm_config_cache pointed at
+#    flatpak-node-generator's cache, so it always fell through to the real
+#    registry
+#  - flatpak-node-generator.py doesn't exist at that path anymore (it's a pip
+#    package with a console-script entry point now), and
+#    flatpak-cargo-generator.py needs tomlkit, not toml
+#  - package.json's "@octant/per-form": "github:...#master" was a stale git
+#    dependency: unused by any actual import (the app consumes per-form via
+#    the src/lib/per-form submodule instead) and no longer even installable
+#    as an npm package, since per-form's own master branch was restructured
+#    to a submodule-only, no-package.json layout. npm's offline install tried
+#    to prepare/build the dependency's own (uncached, unpinned) devDependency
+#    tree and failed — removing the dead dependency was the actual fix, not
+#    a flatpak-side workaround. Also dropped the now-unnecessary
+#    --allow-git=all from integration-test.yml's npm-ci step, added for this
+#    same dependency.
 #
-# STILL UNVERIFIED: the build got as far as flatpak-builder's own sandboxed
-# git-clone step for the @octant/per-form github: npm dependency, then hit
-# `bwrap: No permissions to create a new namespace` — this container doesn't
-# allow nested unprivileged user namespaces. GitHub-hosted ubuntu-22.04
-# runners generally do, so this specific failure isn't expected to reproduce
-# here, but that's untested. Also still unverified: whether flatpak-builder's
-# automatic git-submodule handling for the `dir` source correctly resolves
-# this repo's own submodules (src/lib/per-form, src/lib/typical-admin-fabric,
-# added in the feat/huenicorn-ambient-lights branch, not yet on master) — the
-# build never got that far locally. Treat the next real CI run as the actual
-# first test of both.
+# Still not covered by any local or CI run so far: this repo's own git
+# submodules (src/lib/per-form, src/lib/typical-admin-fabric), added in the
+# feat/huenicorn-ambient-lights branch and not yet on master — worth a real
+# test once that branch merges and this workflow runs against a checkout
+# that actually has them.
 on:
   push:
     tags: ['v*']
