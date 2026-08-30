@@ -234,6 +234,12 @@ pub fn start_huenicorn() -> Result<u32, String> {
             .to_string()
     })?;
 
+    // Same host-resolution the watchdogs do: this spawn runs on the host under
+    // Flatpak, so a command that only exists in a Flatpak has to be named as
+    // one. A no-op today, since huenicorn is installed to ~/.local/bin, which
+    // is on the host's PATH.
+    let command = crate::service_commands::resolve_for_host(&command);
+
     let log_file = std::fs::File::create(log_file_path()).map_err(|e| e.to_string())?;
     let log_file_err = log_file.try_clone().map_err(|e| e.to_string())?;
 

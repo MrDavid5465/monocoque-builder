@@ -46,7 +46,14 @@ const WATCHDOG_POLL_INTERVAL: Duration = Duration::from_secs(5);
 /// the liveness checks below report a corpse as running and stopped the
 /// watchdog from ever restarting it. See `process_liveness`.
 fn spawn_command_line(service: &str, command_line: &str) -> std::io::Result<()> {
-    let fifo = std::env::temp_dir().join(format!("typiql-{service}-stdin"));
+    // host_shared_dir(), not temp_dir(): `mkfifo` and the `sh` that opens the
+    // FIFO both run on the host, while the `remove_file` below runs in the
+    // sandbox. On the sandbox's private /tmp those two halves address
+    // different files -- the stale-FIFO cleanup would quietly delete nothing,
+    // the host `mkfifo` would then fail because the path already exists, and
+    // every spawn after the first would fall into the no-pollable-stdin path
+    // that makes monocoque's game loop exit immediately with code 1.
+    let fifo = crate::host_command::host_shared_dir().join(format!("typiql-{service}-stdin"));
     // Recreated per spawn: a stale FIFO from a previous run is harmless, but
     // a stale *regular* file at that path (or a leftover of the wrong type)
     // would silently put us back on an unpollable stdin.
@@ -309,6 +316,10 @@ pub async fn run_simd_watchdog() {
             continue;
         };
 
+        // Under Flatpak the spawn lands on the host, which may not have the
+        // configured binary at all -- see service_commands::resolve_for_host.
+        let command = service_commands::resolve_for_host(&command);
+
         eprintln!("run_simd_watchdog: simd not running, starting it via `{command}`");
         if let Err(e) = spawn_command_line("simd", &command) {
             eprintln!("run_simd_watchdog: failed to spawn simd: {e}");
@@ -453,6 +464,8 @@ pub async fn run_monocoque_watchdog() {
             }
             continue;
         };
+
+        let command = service_commands::resolve_for_host(&command);
 
         eprintln!(
             "run_monocoque_watchdog: sim active but monocoque not running, starting it via `{command}`"
