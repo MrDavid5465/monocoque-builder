@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { useMutation, useQuery } from '@apollo/client/react';
 import { PrimaryButton, DefaultButton } from '@fluentui/react';
-import { getTheme, Form, FormCard, Stack } from '../../lib/denim/lib';
+import { getTheme, Form, FormCard, Stack, TextField } from '../../lib/denim/lib';
 import dispatcher, { IMy, IChannelGamma } from '../../lib/denim/lib/queries';
 import { useLiveUpdatesHub, useHubListener } from '../Telemetry/liveUpdatesHub';
 import { DevColorTest } from './DevColorTest';
@@ -39,6 +39,10 @@ interface GammaRow {
   day: number;
   night: number;
 }
+
+// The upstream project's actual repo (GitLab, not GitHub) — linked from the
+// "not installed" gate below.
+const HUENICORN_GITLAB_URL = 'https://gitlab.com/openjowelsofts/huenicorn';
 
 const AmbientLightsMain: React.FC = () => {
   const theme = getTheme();
@@ -125,6 +129,30 @@ const AmbientLightsMain: React.FC = () => {
     fetchPolicy: 'network-only',
   });
   const huenicornStatus = statusData?.huenicornStatus;
+
+  // Which command line is actually "live" is the build type, not a toggle —
+  // see service_commands.rs's own doc comment — so the fix-it field below
+  // edits whichever one huenicornStatus.installed is actually checking
+  // against, same convention as the global Settings modal's Services tab.
+  const commandFieldName = settings.debugBuild ? 'huenicornDebugCommand' : 'huenicornCommand';
+  const [commandDraft, setCommandDraft] = useState('');
+  const [savingCommand, setSavingCommand] = useState(false);
+  useEffect(() => {
+    const current = settings.debugBuild ? settings.huenicornDebugCommand : settings.huenicornCommand;
+    setCommandDraft(current ?? '');
+  }, [settings.debugBuild, settings.huenicornCommand, settings.huenicornDebugCommand]);
+
+  // Saves only the one command field — omitting every other field reads as
+  // "leave unchanged" per AppSettingsInput's MaybeUndefined convention, same
+  // isolation as handleSaveGamma below.
+  const handleSaveCommand = async () => {
+    setSavingCommand(true);
+    try {
+      await updateSettings({ variables: { settings: { [commandFieldName]: commandDraft.trim() } } });
+    } finally {
+      setSavingCommand(false);
+    }
+  };
 
   const { data: channelsData } = useQuery<IHuenicornChannels>(GET_HUENICORN_CHANNELS, {
     pollInterval: 5000,
@@ -296,6 +324,56 @@ const AmbientLightsMain: React.FC = () => {
     : huenicornStatus?.running
       ? '#c9a227'
       : theme.palette.neutralSecondary;
+
+  // Gates the whole configuration UI behind "is Huenicorn even installed" —
+  // otherwise every card below (Start/Stop, gamma, screen mapping…) just
+  // fails against a binary that will never launch, with no indication why.
+  // `huenicornStatus === undefined` is "haven't heard back from the first
+  // poll yet", not "not installed" — don't flash the gate for that.
+  if (huenicornStatus && !huenicornStatus.installed) {
+    return (
+      <div style={{ padding: 16, color: theme.palette.neutralPrimary }}>
+        <FormCard style={{ maxWidth: 480 }}>
+          <div style={{ fontWeight: 600, marginBottom: 8, fontSize: '1.1em' }}>Huenicorn isn't installed</div>
+          <div style={{ fontSize: '0.85em', opacity: 0.8, marginBottom: 12 }}>
+            Ambient Lights needs Huenicorn — a separate companion program that captures your
+            screen's colors and streams them to your Hue lights. The configured command
+            (<code>{settings.debugBuild ? settings.huenicornDebugCommand || '(none set)' : settings.huenicornCommand}</code>)
+            couldn't be found.
+          </div>
+          <a
+            href={HUENICORN_GITLAB_URL}
+            target="_blank"
+            rel="noreferrer"
+            style={{ color: theme.palette.themePrimary, fontSize: '0.85em' }}
+          >
+            View Huenicorn on GitLab →
+          </a>
+
+          <div style={{ fontWeight: 600, marginTop: 20, marginBottom: 4, fontSize: '0.9em' }}>
+            Already have it built somewhere non-standard?
+          </div>
+          <div style={{ fontSize: '0.8em', opacity: 0.7, marginBottom: 8 }}>
+            {settings.debugBuild
+              ? 'This is a development build — set the dev command (e.g. a path to your own build).'
+              : 'Point this at the binary or wrapper script directly.'}
+          </div>
+          <TextField
+            label={settings.debugBuild ? 'huenicorn command (dev build)' : 'huenicorn command'}
+            placeholder="huenicorn"
+            value={commandDraft}
+            onChange={(_e, v) => setCommandDraft(v ?? '')}
+          />
+          <PrimaryButton
+            text={savingCommand ? 'Saving…' : 'Save'}
+            onClick={handleSaveCommand}
+            disabled={savingCommand || !commandDraft.trim()}
+            style={{ marginTop: 8 }}
+          />
+        </FormCard>
+      </div>
+    );
+  }
 
   return (
     <div style={{ padding: 16, color: theme.palette.neutralPrimary }}>

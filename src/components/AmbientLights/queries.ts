@@ -10,6 +10,7 @@ export interface IHuenicornStatus {
   huenicornStatus: {
     running: boolean;
     apiReachable: boolean;
+    installed: boolean;
   };
 }
 
@@ -18,6 +19,7 @@ export const GET_HUENICORN_STATUS = gql`
     huenicornStatus {
       running
       apiReachable
+      installed
     }
   }
 `;

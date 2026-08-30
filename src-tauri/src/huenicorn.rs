@@ -139,6 +139,14 @@ pub struct HuenicornStatus {
     /// *liveness*, only persists an on/off flag. `run_sim_watcher` acts on
     /// the second case; this pair is what the Ambient Lights page renders.
     pub api_reachable: bool,
+    /// Whether `AppSettings::huenicorn_command` (after `service_commands::
+    /// resolve`) actually resolves to something launchable — see
+    /// `command_installed`. Lets the Ambient Lights page gate its whole
+    /// settings UI behind "is this even installed" instead of just cycling
+    /// Start/Stop against a binary that will never come up. Trivially `true`
+    /// whenever `running` is (an already-running process is by definition
+    /// installed), so this never pays for the probe below in the common case.
+    pub installed: bool,
 }
 
 /// Whether a live (non-zombie) `huenicorn` process exists — see
@@ -161,6 +169,47 @@ pub fn set_manually_stopped(stopped: bool) {
     MANUAL_STOP.store(stopped, Ordering::Relaxed);
 }
 
+/// The command that would actually run huenicorn right now, after
+/// `service_commands::resolve` — `None` when this is a debug build with no
+/// dev command configured (see that module's own doc comment on why that's a
+/// refusal, not a fallback). Shared by `start_huenicorn` (which errors out on
+/// `None`) and `huenicorn_status` (which reports it as not installed).
+fn resolved_command() -> Option<String> {
+    let config = read_app_config().ok();
+    let production = config
+        .as_ref()
+        .map(|c| c.settings.huenicorn_command.clone())
+        .unwrap_or_else(|| "huenicorn".into());
+    let debug = config
+        .as_ref()
+        .and_then(|c| c.settings.huenicorn_debug_command.clone());
+    crate::service_commands::resolve(&production, debug.as_deref())
+}
+
+/// Whether `command`'s first whitespace-separated token resolves to
+/// something launchable, checked via the shell's own `command -v` rather than
+/// a `which`-crate lookup — the configured command can carry arguments (a
+/// wrapper script), so only the first token is meaningful to look up, and
+/// `command -v` (unlike `which`) also recognizes shell functions/builtins a
+/// wrapper might rely on. The token is passed as `sh -c`'s positional `$0`,
+/// never interpolated into the script text, so this is safe even though the
+/// command string comes from a user-editable setting. Deliberately does NOT
+/// fully spawn huenicorn just to answer "is this installed" — a real launch
+/// pops the XDG screen-picker portal, which would be a bizarre side effect of
+/// what's meant to be a passive status check.
+fn command_installed(command: &str) -> bool {
+    let Some(first) = command.split_whitespace().next() else {
+        return false;
+    };
+    Command::new("sh")
+        .arg("-c")
+        .arg("command -v -- \"$0\" >/dev/null 2>&1")
+        .arg(first)
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
 /// Spawns `AppSettings::huenicorn_command` (default: bare `huenicorn`,
 /// PATH-resolved — see `is_running`'s doc comment) through a shell, so a
 /// multi-word override (e.g. a wrapper script with args) works the same as a
@@ -180,21 +229,11 @@ pub fn start_huenicorn() -> Result<u32, String> {
     // (sim went Active, or the Ambient Lights page's Start button), so the
     // debug-build refusal is returned as an error the caller surfaces rather
     // than only logged.
-    let config = read_app_config().ok();
-    let production = config
-        .as_ref()
-        .map(|c| c.settings.huenicorn_command.clone())
-        .unwrap_or_else(|| "huenicorn".into());
-    let debug = config
-        .as_ref()
-        .and_then(|c| c.settings.huenicorn_debug_command.clone());
-
-    let command =
-        crate::service_commands::resolve(&production, debug.as_deref()).ok_or_else(|| {
-            "This is a debug build and no Huenicorn dev command is set (Settings > Services). \
-             Refusing to start the installed Huenicorn."
-                .to_string()
-        })?;
+    let command = resolved_command().ok_or_else(|| {
+        "This is a debug build and no Huenicorn dev command is set (Settings > Services). \
+         Refusing to start the installed Huenicorn."
+            .to_string()
+    })?;
 
     let log_file = std::fs::File::create(log_file_path()).map_err(|e| e.to_string())?;
     let log_file_err = log_file.try_clone().map_err(|e| e.to_string())?;
@@ -330,10 +369,15 @@ async fn api_reachable() -> bool {
 
 pub async fn huenicorn_status() -> HuenicornStatus {
     let running = is_running();
+    let installed = running
+        || resolved_command()
+            .map(|cmd| command_installed(&cmd))
+            .unwrap_or(false);
 
     HuenicornStatus {
         running,
         api_reachable: running && api_reachable().await,
+        installed,
     }
 }
 
