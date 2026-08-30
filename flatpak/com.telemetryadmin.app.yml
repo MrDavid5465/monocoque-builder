@@ -102,6 +102,22 @@ modules:
       # as 1.MAJOR_MINOR_PATCH.x, so 1.10505.0 => DuckDB 1.5.5. If the crate is
       # bumped, this URL and checksum must move with it or the build will fail
       # to link -- or worse, link against a mismatched ABI.
+      # The two git submodules, pinned to the commits the tree records. The
+      # checkout step deliberately omits `submodules: recursive` -- doing that
+      # writes a real .git file at each submodule path, which then collides
+      # with flatpak-builder's own git source ("cannot overwrite non-directory
+      # .git with directory"), a failure already hit on the sibling monocoque
+      # manifest. Fetching them here instead keeps the checkout clean and
+      # pins them reproducibly. Without these the frontend build fails with
+      # TS2307 "Cannot find module '../per-form'" and friends.
+      - type: git
+        url: https://github.com/MrDavid5465/per-form.git
+        commit: 1bbbf36ffbecab67ddd1375b4d9b35f2b6cd6a3f
+        dest: src/typiql-tauri/typiql/src/lib/per-form
+      - type: git
+        url: https://github.com/MrDavid5465/typical-admin-fabric.git
+        commit: e99b6f06edfdf1480c558927028d8c718ac8cf16
+        dest: src/typiql-tauri/typiql/src/lib/typical-admin-fabric
       - type: archive
         url: https://github.com/duckdb/duckdb/releases/download/v1.5.5/libduckdb-linux-amd64.zip
         sha256: 1fb8ce388157d84a25abe685a8a2520bf00c00321821968e4bb398fd766e7abb
