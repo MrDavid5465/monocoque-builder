@@ -47,12 +47,22 @@ finish-args:
   - --socket=wayland
   - --device=dri
   - --socket=pulseaudio
-  # monocoque exposes a local GraphQL API (port 9000) this app connects to.
-  # Flatpak network-namespaces each sandboxed app separately, so this needs
-  # sharing for loopback communication to work at all between two Flatpak
-  # apps -- added alongside monocoque's own Flatpak manifest gaining the
-  # same flag.
+  # This app's own Rust backend serves the GraphQL API on 0.0.0.0:9000
+  # (src-tauri/src/main.rs) -- monocoque does not, contrary to what this
+  # comment claimed before it was checked against the source. The webview
+  # would reach it over loopback even inside an isolated network namespace,
+  # but the dashboard clients on other devices (phones, tablets, the rig's
+  # second screen -- "connected_clients" in the app's own data) could not,
+  # so the namespace has to be shared.
   - --share=network
+  # Host /dev/shm. Flatpak hands the sandbox a private one -- measured with
+  # simd running: 0 entries inside this sandbox against 18 on the host --
+  # and it is its own device option, NOT covered by --device=dri or even
+  # --device=all. Every telemetry frame this app reads comes from simd's
+  # POSIX shared memory at /dev/shm/SIMAPI.DAT (telemetry/mod.rs), so
+  # without this the Flatpak build launches, serves its UI, and reports a
+  # sim that is never running.
+  - --device=shm
   # Lets flatpak-spawn --host run commands outside the sandbox. Without it
   # the spawn is refused and every host command silently fails.
   - --talk-name=org.freedesktop.Flatpak
