@@ -140,6 +140,16 @@ jobs:
           flatpak-builder --force-clean --repo=repo build-dir com.telemetryadmin.app.yml
           flatpak build-bundle repo typiql.flatpak com.telemetryadmin.app
 
+      # Always uploaded (unlike the release step below, which only fires on
+      # tag pushes) so a manual workflow_dispatch run -- like the one that
+      # first proved this pipeline end-to-end -- still produces a
+      # downloadable artifact for manual host testing.
+      - name: Upload .flatpak as a build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: typiql.flatpak
+          path: typiql-tauri/typiql/flatpak/typiql.flatpak
+
       - name: Upload .flatpak to the matching (draft) release
         if: success() && startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
