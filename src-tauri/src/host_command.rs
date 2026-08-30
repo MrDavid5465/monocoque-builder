@@ -28,6 +28,41 @@ pub fn in_flatpak() -> bool {
     *IN_FLATPAK.get_or_init(|| std::path::Path::new("/.flatpak-info").exists())
 }
 
+/// A directory whose contents are visible at the *same path* on the host.
+///
+/// `/tmp` is not one: Flatpak gives the sandbox a private `/tmp`, so a file
+/// written there and then *named on the command line* of a `host_command` is
+/// simply absent when the host process opens it. Confirmed live -- the shaker
+/// DSP filter-chain failed on every Flatpak launch with `pipewire` reporting
+/// `can't load config /tmp/typiql-shaker-dsp.conf: No such file or directory`
+/// while that exact file existed inside the sandbox.
+///
+/// `$XDG_RUNTIME_DIR/app/$FLATPAK_ID` is the location Flatpak mounts into the
+/// sandbox under its real host path — measured: a file written there from
+/// inside was read back byte-for-byte by `flatpak-spawn --host cat` using the
+/// same path string. Outside a sandbox this is just the temp dir, so the
+/// .deb/.rpm/AppImage builds behave exactly as before.
+///
+/// Only needed for files whose *path* crosses the boundary. A file handed over
+/// as an already-open descriptor (the `stdout`/`stderr` logs in
+/// `pipewire_dsp` and `huenicorn`) crosses fine and can stay in the temp dir.
+pub fn host_shared_dir() -> std::path::PathBuf {
+    if in_flatpak() {
+        if let (Ok(runtime_dir), Ok(app_id)) = (
+            std::env::var("XDG_RUNTIME_DIR"),
+            std::env::var("FLATPAK_ID"),
+        ) {
+            let dir = std::path::PathBuf::from(runtime_dir).join("app").join(app_id);
+            // Flatpak creates this itself, but create_dir_all keeps the
+            // failure mode a fall-back rather than a panic if it ever moves.
+            if std::fs::create_dir_all(&dir).is_ok() {
+                return dir;
+            }
+        }
+    }
+    std::env::temp_dir()
+}
+
 /// Builds a `Command` that runs `program` on the host.
 ///
 /// Use this instead of `Command::new` for anything that must affect the host:
@@ -54,6 +89,16 @@ mod tests {
     /// Outside a sandbox the wrapper must be a pure passthrough -- otherwise
     /// the native .deb/.rpm/AppImage builds would gain a dependency on
     /// flatpak-spawn, which won't be installed.
+    /// Outside a sandbox the shared dir must stay the plain temp dir, so the
+    /// native builds keep writing where they always have.
+    #[test]
+    fn shared_dir_is_temp_dir_when_not_sandboxed() {
+        if in_flatpak() {
+            return; // the whole point is that it differs inside one
+        }
+        assert_eq!(host_shared_dir(), std::env::temp_dir());
+    }
+
     #[test]
     fn passthrough_when_not_sandboxed() {
         if in_flatpak() {

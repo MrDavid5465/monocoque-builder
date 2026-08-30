@@ -141,9 +141,13 @@ pub fn setup_gamepad_udev() -> Result<String, String> {
     }
 
     // Write rule to a temp file first (no privileges needed), then use
-    // pkexec to install it and reload udev — single auth prompt.
-    let tmp = "/tmp/99-dashboard-gamepad.rules";
-    std::fs::write(tmp, UDEV_RULE).map_err(|e| e.to_string())?;
+    // pkexec to install it and reload udev — single auth prompt. The staging
+    // path has to be one the host can open under the same name, since pkexec
+    // runs out there and the sandbox's /tmp is its own — see
+    // `host_command::host_shared_dir`.
+    let tmp = crate::host_command::host_shared_dir().join("99-dashboard-gamepad.rules");
+    let tmp = tmp.display().to_string();
+    std::fs::write(&tmp, UDEV_RULE).map_err(|e| e.to_string())?;
 
     let status = crate::host_command::host_command("pkexec")
         .args([

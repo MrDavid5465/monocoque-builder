@@ -194,8 +194,11 @@ pub struct LfeSpec {
 /// "Run the filters with pipewire -c filter-chain.conf").
 static FILTER_CHAIN_PID: Mutex<Option<u32>> = Mutex::new(None);
 
+/// Not the temp dir: this path is handed to `pipewire -c` running on the
+/// *host*, and the sandbox's `/tmp` is not the host's. See
+/// `host_command::host_shared_dir`.
 fn config_file_path() -> std::path::PathBuf {
-    std::env::temp_dir().join("typiql-shaker-dsp.conf")
+    crate::host_command::host_shared_dir().join("typiql-shaker-dsp.conf")
 }
 
 fn log_file_path() -> std::path::PathBuf {
