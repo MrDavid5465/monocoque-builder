@@ -61,7 +61,11 @@ jobs:
       - name: Install flatpak-builder + GNOME runtime/SDK + extensions
         run: |
           sudo apt-get update
-          sudo apt-get install -y flatpak flatpak-builder
+          # appstream provides appstream-compose, which flatpak-builder's
+          # finish phase shells out to for the metainfo.xml -> AppStream
+          # catalog step; not pulled in automatically by the flatpak-builder
+          # package on this runner image.
+          sudo apt-get install -y flatpak flatpak-builder appstream
           sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
           sudo flatpak install -y --noninteractive flathub org.gnome.Platform//49 org.gnome.Sdk//49
           sudo flatpak install -y --noninteractive flathub org.freedesktop.Sdk.Extension.rust-stable//25.08 org.freedesktop.Sdk.Extension.node20//25.08
