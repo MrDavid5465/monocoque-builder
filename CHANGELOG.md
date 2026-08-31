@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.5.0](https://github.com/MrDavid5465/telemetry-admin/compare/telemetry-admin-v0.4.0...telemetry-admin-v0.5.0) (2026-08-31)
+
+
+### Features
+
+* **360-viewer:** paint the ambient tint above the night overlay ([c526685](https://github.com/MrDavid5465/telemetry-admin/commit/c526685375392a8813719c8223a02ae6ffa8586f))
+* **ambient-lights:** gate settings behind a Huenicorn-installed check ([02d1121](https://github.com/MrDavid5465/telemetry-admin/commit/02d1121cf3c41a8bac8da4acba6e99c4945fa1cc))
+* **ambient-lights:** soft-light 360 blend, channel mapping, screen reselect ([92c20ba](https://github.com/MrDavid5465/telemetry-admin/commit/92c20ba509f0d73397101f46ba3d0e22a22b8296))
+* **ambient-lights:** split saturation boost into day/night values ([42e87fc](https://github.com/MrDavid5465/telemetry-admin/commit/42e87fc6971609c9c16b4ea31cda526edf687e72))
+* **per-form:** first-class `list` field for repeating rows ([62b94e3](https://github.com/MrDavid5465/telemetry-admin/commit/62b94e347a4bab49e468e07af352d5590d44ee97))
+* **per-form:** migrate hand-rolled repeating rows to the `list` field ([7e9608a](https://github.com/MrDavid5465/telemetry-admin/commit/7e9608adb4e232b4a03445b72a1d8b6aa814c444))
+* **services:** configurable service commands, liveness checks, restart backoff ([91d7243](https://github.com/MrDavid5465/telemetry-admin/commit/91d72431de1b12183798da6759125c27ca0b5a7f))
+* **tracks:** select track ids from telemetry instead of typing them ([c742c7c](https://github.com/MrDavid5465/telemetry-admin/commit/c742c7c5193dbbd474d58d2df2b7307205830812))
+* **typical-admin:** per-row delete in the table view, single Add button ([692d8ed](https://github.com/MrDavid5465/telemetry-admin/commit/692d8eddca9f218c1b84e2ba2a9d2977f6607dd7))
+
+
+### Bug Fixes
+
+* **360-viewer:** darken the scene at night even when the car has a night photo ([6c195e9](https://github.com/MrDavid5465/telemetry-admin/commit/6c195e963beac0ca6a269f0ebbe7d2c7d06e9fad))
+* **360-viewer:** drop the rolling-baseline gate that faded the ambient tint out ([cda0b3c](https://github.com/MrDavid5465/telemetry-admin/commit/cda0b3cc1a8ac30d0d7ac5e590968d99b70e6c9e))
+* **360-viewer:** move night darkening into the shader so the tint survives it ([de0aeba](https://github.com/MrDavid5465/telemetry-admin/commit/de0aeba72eb92a2ea82302db247b3c472e020c73))
+* **360-viewer:** restore the night overlay for cars without a night photo ([113e033](https://github.com/MrDavid5465/telemetry-admin/commit/113e0337306cd11426ae0bdab2f32397fdcb4deb))
+* **cargo:** sync the stale version in Cargo.lock ([7807f1b](https://github.com/MrDavid5465/telemetry-admin/commit/7807f1bfa17740b0f951ec88116ce63900075db6))
+* **design-sync:** silence the unused car fixture in two previews ([5855d39](https://github.com/MrDavid5465/telemetry-admin/commit/5855d397cff7977f807707a53e217e0586b0380b))
+* **gamepad:** report udev status by capability, not by artifact ([8a6e307](https://github.com/MrDavid5465/telemetry-admin/commit/8a6e307921d6167e5f121ef6a1b9e29be3368555))
+
 ## [0.4.0](https://github.com/MrDavid5465/telemetry-admin/compare/telemetry-admin-v0.3.0...telemetry-admin-v0.4.0) (2026-08-24)
 
 
