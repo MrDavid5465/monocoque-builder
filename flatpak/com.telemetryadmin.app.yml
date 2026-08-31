@@ -149,6 +149,13 @@ modules:
       # has to ship inside the bundle.
       - install -Dm755 duckdb-prebuilt/libduckdb.so /app/lib/libduckdb.so
       - install -Dm755 src/typiql-tauri/typiql/src-tauri/target/release/typiql /app/bin/typiql
+      # The Vite build, for the browsers on other devices that load their
+      # dashboards over HTTP. The window itself uses the copy embedded in the
+      # binary, so this is easy to forget -- and its absence is silent: the API
+      # answers normally while every page request 404s. api.rs looks for it
+      # next to the executable, hence /app/share/typiql/dist.
+      - mkdir -p /app/share/typiql
+      - cp -r src/typiql-tauri/typiql/dist /app/share/typiql/dist
       - install -Dm644 com.telemetryadmin.app.desktop /app/share/applications/com.telemetryadmin.app.desktop
       - install -Dm644 com.telemetryadmin.app.metainfo.xml /app/share/metainfo/com.telemetryadmin.app.metainfo.xml
       - install -Dm644 src/typiql-tauri/typiql/src-tauri/icons/128x128.png /app/share/icons/hicolor/128x128/apps/com.telemetryadmin.app.png

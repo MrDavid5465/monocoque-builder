@@ -34,6 +34,41 @@ async fn long_cache(request: Request, next: Next) -> axum::response::Response {
     response
 }
 
+/// Where the built frontend lives, for the browsers on other devices that load
+/// their dashboards over HTTP (the Tauri window itself uses the copy embedded
+/// in the binary and never comes here).
+///
+/// This used to be the relative path "dist", resolved against the working
+/// directory, which is only ever right when the app is started from the source
+/// tree. In a packaged build it silently isn't: measured in the Flatpak, cwd is
+/// /home/david, so every request -- including / -- returned 404 and a browser
+/// could not load anything at all. The same is true of any .deb/.rpm/AppImage
+/// install launched from a desktop file.
+///
+/// Looked up next to the executable rather than hardcoded, so /app/bin/typiql
+/// finds /app/share/typiql/dist and /usr/bin/typiql finds
+/// /usr/share/typiql/dist without either build knowing about the other.
+/// TYPIQL_DIST_DIR overrides for anyone with a different layout, and "dist"
+/// remains the last resort so running from the source tree behaves as before.
+fn frontend_dist_dir() -> std::path::PathBuf {
+    if let Ok(dir) = std::env::var("TYPIQL_DIST_DIR") {
+        if !dir.is_empty() {
+            return std::path::PathBuf::from(dir);
+        }
+    }
+
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(bin_dir) = exe.parent() {
+            let installed = bin_dir.join("../share/typiql/dist");
+            if installed.join("index.html").is_file() {
+                return installed;
+            }
+        }
+    }
+
+    std::path::PathBuf::from("dist")
+}
+
 fn typiql_data_dir() -> std::path::PathBuf {
     let config = read_app_config().unwrap_or_default();
     if let Some(dir) = config.settings.typiql_data_dir {
@@ -196,10 +231,22 @@ pub async fn build_router() -> Router {
     );
 
     #[cfg(not(debug_assertions))]
-    let router = router.fallback_service(
-        tower_http::services::ServeDir::new("dist")
-            .not_found_service(tower_http::services::ServeFile::new("dist/index.html")),
-    );
+    let router = {
+        let dist = frontend_dist_dir();
+        if !dist.join("index.html").is_file() {
+            eprintln!(
+                "No frontend at {} -- the API will answer but browsers on other \
+                 devices will get 404 for every page. Set TYPIQL_DIST_DIR if this \
+                 build keeps it somewhere else.",
+                dist.display()
+            );
+        }
+        let index = dist.join("index.html");
+        router.fallback_service(
+            tower_http::services::ServeDir::new(&dist)
+                .not_found_service(tower_http::services::ServeFile::new(index)),
+        )
+    };
 
     router.layer(cors)
 }
