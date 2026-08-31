@@ -100,7 +100,8 @@ fn rewrite_for_flatpak(
         // reports the real failure, which is more useful than a rewrite that
         // would fail differently.
         eprintln!(
-            "resolve_for_host: `{program}` is not on the host's PATH and no installed Flatpak              app id ends in `{suffix}` — starting it as configured, which will probably fail"
+            "resolve_for_host: `{program}` is not on the host's PATH and no installed \
+Flatpak app id ends in `{suffix}` — starting it as configured, which will probably fail"
         );
         return command_line.to_string();
     };
