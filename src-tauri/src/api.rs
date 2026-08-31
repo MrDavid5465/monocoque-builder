@@ -50,6 +50,7 @@ async fn long_cache(request: Request, next: Next) -> axum::response::Response {
 /// /usr/share/typiql/dist without either build knowing about the other.
 /// TYPIQL_DIST_DIR overrides for anyone with a different layout, and "dist"
 /// remains the last resort so running from the source tree behaves as before.
+#[cfg(not(debug_assertions))]
 fn frontend_dist_dir() -> std::path::PathBuf {
     if let Ok(dir) = std::env::var("TYPIQL_DIST_DIR") {
         if !dir.is_empty() {
@@ -59,9 +60,18 @@ fn frontend_dist_dir() -> std::path::PathBuf {
 
     if let Ok(exe) = std::env::current_exe() {
         if let Some(bin_dir) = exe.parent() {
-            let installed = bin_dir.join("../share/typiql/dist");
-            if installed.join("index.html").is_file() {
-                return installed;
+            // One destination for every package: the Flatpak manifest
+            // installs it to /app/share/typiql/dist, and tauri.conf.json's
+            // per-bundle `files` maps put it at /usr/share/typiql/dist in the
+            // .deb, .rpm and AppImage. `bundle.resources` would have been the
+            // obvious way to carry it, but it makes the build script fail
+            // ("resource path `../dist` doesn't exist") before Vite has ever
+            // run, which breaks a bare `cargo test`.
+            for candidate in ["../share/typiql/dist", "dist"] {
+                let dir = bin_dir.join(candidate);
+                if dir.join("index.html").is_file() {
+                    return dir;
+                }
             }
         }
     }

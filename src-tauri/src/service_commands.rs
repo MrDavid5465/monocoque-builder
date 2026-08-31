@@ -58,13 +58,18 @@ fn resolve_with_mode(production: &str, debug: Option<&str>, debug_build: bool) -
 /// command that can never start, forever, while `pgrep` kept reporting the
 /// service down.
 ///
-/// So when the program isn't on the host's PATH and an installed Flatpak app
-/// id ends in `.<program>`, the line becomes
-/// `flatpak run --command=<program> <app-id> <args…>`. Suffix-matching the app
-/// id is deliberate over a hardcoded table: it picks up
-/// `io.github.spacefreak18.monocoque` for `monocoque` without this app needing
-/// to know that id, and it only ever runs when the host has nothing by that
-/// name anyway.
+/// So when the program isn't on the host's PATH but some installed Flatpak
+/// *provides* a binary by that name, the line becomes
+/// `flatpak run --command=<program> <app-id> <args…>`.
+///
+/// Asking which app provides the binary, rather than matching the app id's
+/// last segment, is what makes `simd` work: it ships inside monocoque's
+/// Flatpak, so its id ends in `.monocoque` and a suffix match found nothing —
+/// the log said "no installed Flatpak app id ends in `.simd`" while `simd` sat
+/// in that app's own bin directory. The lookup reads
+/// `flatpak info --show-location` for each installed app and tests
+/// `files/bin/<program>`, which needs no table of ids here and keeps working
+/// when a binary moves between bundles.
 ///
 /// Anything already resolvable on the host is returned untouched, as is every
 /// command when not sandboxed.
@@ -72,7 +77,7 @@ pub fn resolve_for_host(command_line: &str) -> String {
     if !crate::host_command::in_flatpak() {
         return command_line.to_string();
     }
-    rewrite_for_flatpak(command_line, host_has_program, installed_flatpak_apps)
+    rewrite_for_flatpak(command_line, host_has_program, flatpak_app_providing)
 }
 
 /// The rewrite itself, with both host lookups injected — they shell out to the
@@ -80,7 +85,7 @@ pub fn resolve_for_host(command_line: &str) -> String {
 fn rewrite_for_flatpak(
     command_line: &str,
     host_has: impl Fn(&str) -> bool,
-    installed_apps: impl Fn() -> Vec<String>,
+    app_providing: impl Fn(&str) -> Option<String>,
 ) -> String {
     let trimmed = command_line.trim();
     let (program, args) = match trimmed.split_once(char::is_whitespace) {
@@ -93,15 +98,13 @@ fn rewrite_for_flatpak(
         return command_line.to_string();
     }
 
-    let suffix = format!(".{program}");
-    let Some(app_id) = installed_apps().into_iter().find(|id| id.ends_with(&suffix)) else {
-        // Nothing to fall back to (simd, for one, has no Flatpak at all).
-        // Left alone on purpose: the caller's existing "child exited" logging
-        // reports the real failure, which is more useful than a rewrite that
-        // would fail differently.
+    let Some(app_id) = app_providing(program) else {
+        // Nothing to fall back to. Left alone on purpose: the caller's existing
+        // "child exited" logging reports the real failure, which is more useful
+        // than a rewrite that would fail differently.
         eprintln!(
             "resolve_for_host: `{program}` is not on the host's PATH and no installed \
-Flatpak app id ends in `{suffix}` — starting it as configured, which will probably fail"
+Flatpak provides it — starting it as configured, which will probably fail"
         );
         return command_line.to_string();
     };
@@ -131,20 +134,31 @@ fn host_has_program(program: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Application ids of the Flatpak apps installed on the host.
-fn installed_flatpak_apps() -> Vec<String> {
-    crate::host_command::host_command("flatpak")
-        .args(["list", "--app", "--columns=application"])
+/// The id of an installed Flatpak whose own `bin` directory holds `program`.
+///
+/// One host command rather than one per app: `flatpak info --show-location`
+/// has to run for every installed app, and driving that loop from here would
+/// be a separate `flatpak-spawn` round trip each time.
+fn flatpak_app_providing(program: &str) -> Option<String> {
+    let script = format!(
+        "for id in $(flatpak list --app --columns=application); do \
+             loc=$(flatpak info --show-location \"$id\" 2>/dev/null) || continue; \
+             if [ -x \"$loc/files/bin/{program}\" ]; then echo \"$id\"; break; fi; \
+         done"
+    );
+
+    let out = crate::host_command::host_command("sh")
+        .arg("-lc")
+        .arg(script)
         .output()
-        .map(|out| {
-            String::from_utf8_lossy(&out.stdout)
-                .lines()
-                .map(str::trim)
-                .filter(|l| !l.is_empty())
-                .map(str::to_string)
-                .collect()
-        })
-        .unwrap_or_default()
+        .ok()?;
+
+    let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if id.is_empty() {
+        None
+    } else {
+        Some(id)
+    }
 }
 
 #[cfg(test)]
@@ -185,43 +199,43 @@ mod tests {
     #[test]
     fn leaves_commands_the_host_can_run_alone() {
         assert_eq!(
-            rewrite_for_flatpak("huenicorn --port 8080", |_| true, Vec::new),
+            rewrite_for_flatpak("huenicorn --port 8080", |_| true, |_| None),
             "huenicorn --port 8080"
         );
     }
 
     #[test]
-    fn rewrites_to_the_matching_flatpak_keeping_arguments() {
-        let apps = || {
-            vec![
-                "com.telemetryadmin.app".to_string(),
-                "io.github.spacefreak18.monocoque".to_string(),
-            ]
-        };
+    fn rewrites_to_the_providing_flatpak_keeping_arguments() {
+        let provider = |_: &str| Some("io.github.spacefreak18.monocoque".to_string());
         assert_eq!(
-            rewrite_for_flatpak("monocoque play", |_| false, apps),
+            rewrite_for_flatpak("monocoque play", |_| false, provider),
             "flatpak run --command=monocoque io.github.spacefreak18.monocoque play"
         );
         assert_eq!(
-            rewrite_for_flatpak("monocoque", |_| false, apps),
+            rewrite_for_flatpak("monocoque", |_| false, provider),
             "flatpak run --command=monocoque io.github.spacefreak18.monocoque"
         );
     }
 
-    /// simd has no Flatpak anywhere; the command stays as configured so the
-    /// spawn failure the caller already logs is the one the user sees.
+    /// simd ships inside monocoque's Flatpak, so nothing about the app id
+    /// mentions it -- the whole reason this asks which app provides a binary
+    /// rather than reading the id.
     #[test]
-    fn leaves_the_command_alone_when_no_flatpak_matches() {
-        let apps = || vec!["io.github.spacefreak18.monocoque".to_string()];
-        assert_eq!(rewrite_for_flatpak("simd", |_| false, apps), "simd");
+    fn finds_a_binary_bundled_under_an_unrelated_app_id() {
+        let provider = |program: &str| {
+            (program == "simd").then(|| "io.github.spacefreak18.monocoque".to_string())
+        };
+        assert_eq!(
+            rewrite_for_flatpak("simd", |_| false, provider),
+            "flatpak run --command=simd io.github.spacefreak18.monocoque"
+        );
     }
 
-    /// A partial name must not match: `.app` ending in the app id is not a
-    /// program called `app` unless it really is one.
+    /// Nothing provides it: the command stays as configured, so the spawn
+    /// failure the caller already logs is the one the user sees.
     #[test]
-    fn matches_the_whole_final_segment_only() {
-        let apps = || vec!["io.github.spacefreak18.monocoque".to_string()];
-        assert_eq!(rewrite_for_flatpak("coque play", |_| false, apps), "coque play");
+    fn leaves_the_command_alone_when_nothing_provides_it() {
+        assert_eq!(rewrite_for_flatpak("simd", |_| false, |_| None), "simd");
     }
 
     /// An explicit `flatpak run …` in settings is already host-runnable even
@@ -229,7 +243,7 @@ mod tests {
     #[test]
     fn leaves_an_explicit_flatpak_invocation_alone() {
         let line = "flatpak run --command=monocoque io.github.spacefreak18.monocoque play";
-        assert_eq!(rewrite_for_flatpak(line, |_| false, Vec::new), line);
+        assert_eq!(rewrite_for_flatpak(line, |_| false, |_| None), line);
     }
 
     #[test]
