@@ -18,6 +18,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           path: typiql-tauri/typiql
+          # per-form and typical-admin-fabric are git submodules, so without
+          # this their paths arrive empty and both tsc and eslint fail with
+          # TS2307 "Cannot find module '../per-form'". The flatpak manifest
+          # solves the same problem differently (pinned git sources) because
+          # a real .git file there collides with flatpak-builder's own git
+          # source -- that constraint doesn't apply to a plain checkout.
+          submodules: recursive
       - uses: actions/setup-node@v4
         with:
           node-version: lts/*

@@ -65,6 +65,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           path: typiql-tauri/typiql
+          # Needed for the frontend half of `tauri build` (its
+          # beforeBuildCommand runs `npm run build`): per-form and
+          # typical-admin-fabric are submodules, and without them the build
+          # dies with TS2307 "Cannot find module '../per-form'".
+          submodules: recursive
       - uses: actions/checkout@v4
         with:
           repository: MrDavid5465/typiql-rs
