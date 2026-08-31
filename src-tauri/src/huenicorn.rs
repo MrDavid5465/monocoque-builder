@@ -540,9 +540,16 @@ pub async fn list_channels() -> Vec<ChannelInfo> {
 /// guarded against server-side (Huenicorn indexes its channel map with
 /// `.at()`, which throws), but ChannelMapper.tsx only ever sends ids it just
 /// read from `list_channels`, so that path isn't expected to be hit.
-pub async fn set_channel_uv(channel_id: u8, corner: u8, x: f32, y: f32) -> Result<ChannelUVs, String> {
+pub async fn set_channel_uv(
+    channel_id: u8,
+    corner: u8,
+    x: f32,
+    y: f32,
+) -> Result<ChannelUVs, String> {
     let res = reqwest::Client::new()
-        .put(format!("{HUENICORN_BASE_URL}/api/setChannelUV/{channel_id}"))
+        .put(format!(
+            "{HUENICORN_BASE_URL}/api/setChannelUV/{channel_id}"
+        ))
         .json(&json!({ "x": x, "y": y, "type": corner }))
         .timeout(Duration::from_millis(500))
         .send()
@@ -910,7 +917,9 @@ pub async fn set_entertainment_configuration(id: String) -> Result<Vec<ChannelIn
         .map_err(|e| format!("setEntertainmentConfiguration PUT returned no JSON: {e}"))?;
 
     if !body.succeeded {
-        return Err(format!("huenicorn rejected entertainment configuration {id}"));
+        return Err(format!(
+            "huenicorn rejected entertainment configuration {id}"
+        ));
     }
 
     Ok(body.channels.into_iter().map(raw_channel_to_info).collect())

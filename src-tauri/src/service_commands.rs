@@ -41,10 +41,10 @@ fn resolve_with_mode(production: &str, debug: Option<&str>, debug_build: bool) -
 
     // Whitespace-only counts as unset: these come from a text field, and a
     // stray space shouldn't become a command that fails in a confusing way.
-    match debug.map(str::trim).filter(|d| !d.is_empty()) {
-        Some(dev) => Some(dev.to_string()),
-        None => None,
-    }
+    debug
+        .map(str::trim)
+        .filter(|d| !d.is_empty())
+        .map(|dev| dev.to_string())
 }
 
 #[cfg(test)]

@@ -430,7 +430,7 @@ pub async fn run_monocoque_watchdog() {
         // turned that single crash into a core dump every 5 seconds for
         // minutes. Backing off keeps a bad config cheap.
         let wait = monocoque_start_backoff(consecutive_failed_starts);
-        if last_start_attempt.map_or(false, |at| at.elapsed() < wait) {
+        if last_start_attempt.is_some_and(|at| at.elapsed() < wait) {
             continue;
         }
 
@@ -526,7 +526,10 @@ mod tests {
         // would eventually stop being retried at all.
         assert_eq!(monocoque_start_backoff(6), MONOCOQUE_START_BACKOFF_MAX);
         assert_eq!(monocoque_start_backoff(50), MONOCOQUE_START_BACKOFF_MAX);
-        assert_eq!(monocoque_start_backoff(u32::MAX), MONOCOQUE_START_BACKOFF_MAX);
+        assert_eq!(
+            monocoque_start_backoff(u32::MAX),
+            MONOCOQUE_START_BACKOFF_MAX
+        );
     }
 
     fn scratch_pidfile(name: &str) -> std::path::PathBuf {
