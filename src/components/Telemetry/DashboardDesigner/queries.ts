@@ -199,8 +199,8 @@ export const TEMPLATE_CHANGED_SUB = gql`
 // fragments) since this file doesn't otherwise import from those, and a
 // mismatch here would only mean an extra/missing field, not a real bug.
 export const DASHBOARD_UPDATES_SUB = gql`
-  subscription dashboardUpdates($includeTelemetry: Boolean, $includeNightClock: Boolean) {
-    dashboardUpdates(includeTelemetry: $includeTelemetry, includeNightClock: $includeNightClock) {
+  subscription dashboardUpdates($includeTelemetry: Boolean, $includeNightClock: Boolean, $includeAmbientColor: Boolean) {
+    dashboardUpdates(includeTelemetry: $includeTelemetry, includeNightClock: $includeNightClock, includeAmbientColor: $includeAmbientColor) {
       ... on DashboardEntryChanged {
         operationName
         value {
@@ -265,6 +265,21 @@ export const DASHBOARD_UPDATES_SUB = gql`
         isPlaying
         recordingId
         playingId
+      }
+      ... on AmbientColorChanged {
+        colors {
+          channelId
+          r
+          g
+          b
+        }
+      }
+      ... on HuenicornSettingsChanged {
+        huenicornEnabled
+        ambientTintIntensity
+        ambientPrimaryChannel
+        ambientSaturationBoostDay
+        ambientSaturationBoostNight
       }
     }
   }

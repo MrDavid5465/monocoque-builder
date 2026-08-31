@@ -64,6 +64,14 @@ pub async fn build_router() -> Router {
         dsp_resume_adapter,
     ));
 
+    // Day/night gamma for the Hue lights. Spawned here rather than in
+    // main.rs alongside huenicorn's other permanent loops (run_sim_watcher /
+    // run_color_poller) purely because it needs an adapter handle to read
+    // the NightMode singleton, and this is where one exists — same reason
+    // and same shape as the DSP resume above.
+    let gamma_adapter: Arc<dyn TypiQLAdapter> = Arc::new(adapter.clone());
+    tokio::spawn(crate::huenicorn::run_gamma_pusher(gamma_adapter));
+
     // Every hand-written resolver and every existing typiql type stays on
     // "default" (JsonAdapter) — only DuckDB-backed types (currently just
     // RecordingFrame, see typiql_types.rs) opt into "duckdb" via

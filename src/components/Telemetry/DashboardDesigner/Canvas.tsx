@@ -57,11 +57,30 @@ interface Props {
   liveBackground?: React.ReactNode;
   liveBackgroundInteractive?: boolean;
   // True when liveBackground is already a genuine night-specific photo (a car's
-  // uploaded night 360°, not a day photo or generic default being reused for
-  // night). Suppresses the darkening overlay below, which otherwise assumes the
-  // background has no day/night distinction of its own and double-darkens an
-  // already-correct night photo.
-  liveBackgroundIsNightPhoto?: boolean;
+  // True when the live background supplies its own night appearance — a live
+  // 360 whose car has a real night photo, which Photo360Viewer blends to and
+  // then darkens further in-shader. Suppresses the overlay below, which would
+  // otherwise double-darken an already-correct night photo.
+  //
+  // Deliberately NOT set for a live 360 without a night photo, even though
+  // the shader could darken that case too: this overlay covers the WHOLE
+  // canvas, so it dims the gauges, text and buttons as well, and a shader on
+  // the photosphere reaches none of those. Dropping it there left night mode
+  // looking washed out because every widget stayed at daytime brightness.
+  //
+  // The cost is that the overlay also sits above the ambient tint
+  // (NIGHT_OVERLAY_Z vs the background's z-index: -1) and transmits only ~19%
+  // of it at full night. That is now much less painful than it was, because
+  // nightBoost was separately fixed to read a texture-independent night level
+  // (it read mixAmount, which is pinned to 0 without a night texture, so on
+  // exactly these cars the boost never engaged): tint opacity at full night
+  // went from 0.15 to 0.60, roughly 4x more signal reaching the veil.
+  liveBackgroundHandlesNight?: boolean;
+  // Target for the ambient tint painted above the night overlay. Owned by
+  // DashboardDesigner and handed to Photo360Viewer too, which writes its
+  // colour/opacity every frame. Only rendered when the night overlay is,
+  // since it exists purely to get past it.
+  ambientOverlayRef?: React.RefObject<HTMLDivElement>;
   simStatus?: string;
   // Fired once when a canvas-driven move or resize drag ends (pointer up), so
   // the properties panel — which shows a snapshot taken at mount/selection
@@ -1185,7 +1204,7 @@ const NodeRenderer: React.FC<NodeRendererProps> = ({
 const Canvas = React.memo(forwardRef<CanvasHandle, Props>(({
   dashboard, sprites, gamepadMappings = [], selectedId, onSelect, onUpdate, onUpdateDashboard, kioskMode, onKioskButton, isNight: isNightProp, nightAmount: nightAmountProp, onToggleNightMode, forceNightPreview, skipTransition, telemetryData,
   kioskSweepActive = false,
-  globalSteerMaxDeg, panBgMode, liveBackground, liveBackgroundInteractive, liveBackgroundIsNightPhoto, simStatus = '',
+  globalSteerMaxDeg, panBgMode, liveBackground, liveBackgroundInteractive, liveBackgroundHandlesNight, ambientOverlayRef, simStatus = '',
   onDragCommit, activeTool,
 }, ref) => {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -1534,17 +1553,46 @@ const Canvas = React.memo(forwardRef<CanvasHandle, Props>(({
         onPointerUp={onPointerUp}
         onPointerDown={panBgMode ? (e => { e.stopPropagation(); startBgPan(e); }) : undefined}
       >
-        {dashboard.dayNight && !liveBackgroundIsNightPhoto && (
-          <div
-            style={{
-              position: 'absolute', inset: 0,
-              zIndex: NIGHT_OVERLAY_Z,
-              background: 'rgba(0, 0, 0, 0.850)',
-              opacity: nightAmount * 0.95,
-              transition: skipTransition ? undefined : 'opacity 2s ease',
-              pointerEvents: 'none',
-            }}
-          />
+        {dashboard.dayNight && !liveBackgroundHandlesNight && (
+          <>
+            <div
+              style={{
+                position: 'absolute', inset: 0,
+                zIndex: NIGHT_OVERLAY_Z,
+                background: 'rgba(0, 0, 0, 0.850)',
+                opacity: nightAmount * 0.95,
+                transition: skipTransition ? undefined : 'opacity 2s ease',
+                pointerEvents: 'none',
+              }}
+            />
+            {/* Ambient tint, ABOVE the night overlay above it.
+              *
+              * The overlay has to cover the whole canvas (it's what dims the
+              * gauges and text, which a shader on the photosphere cannot
+              * reach), but that also means it sits over the shader's tint and
+              * transmits only ~19% of it at full night. Painting the tint
+              * here instead puts it past the overlay entirely.
+              *
+              * Consequence, and it is a real one: this casts over the widgets
+              * too, not just the photosphere. That is arguably what a room
+              * light actually does, but it is a visible behaviour change.
+              *
+              * Driven imperatively by Photo360Viewer's render loop (see its
+              * tintOverlayRef prop) rather than through React state — the
+              * tint updates at ~60Hz and re-rendering Canvas at that rate
+              * would defeat its memo. The viewer also zeroes its own in-shader
+              * tint whenever this element exists, so the two never stack. */}
+            <div
+              ref={ambientOverlayRef}
+              style={{
+                position: 'absolute', inset: 0,
+                zIndex: NIGHT_OVERLAY_Z + 1,
+                mixBlendMode: 'soft-light',
+                opacity: 0,
+                pointerEvents: 'none',
+              }}
+            />
+          </>
         )}
         {liveBackground && (
           <div style={{

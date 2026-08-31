@@ -11,6 +11,11 @@ interface Props {
   // into a smooth transition (see its onBeforeCompile/render-loop comments),
   // the simulated clock produces a real ramp through dawn/dusk already.
   nightAmount: number;
+  // See Photo360Viewer's own doc comment on these two.
+  ambientColor?: { r: number; g: number; b: number } | null;
+  ambientTintIntensity?: number;
+  ambientSaturationBoostDay?: number;
+  ambientSaturationBoostNight?: number;
   yaw: number;
   pitch: number;
   fov: number;
@@ -26,6 +31,8 @@ interface Props {
   swayDisableX?: boolean;
   swayDisableY?: boolean;
   onLoaded?: () => void;
+  // Straight pass-through — see Photo360Viewer's own doc comment.
+  tintOverlayRef?: React.RefObject<HTMLDivElement>;
 }
 
 // Thin pass-through onto Photo360Viewer, which does the actual day/night

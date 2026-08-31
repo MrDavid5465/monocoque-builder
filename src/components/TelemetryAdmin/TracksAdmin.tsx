@@ -35,7 +35,7 @@ const TracksAdmin: React.FC = () => (
           queryResultKey="getTrackLocations"
           titleField="name"
           idField="id"
-          defaultView="table"
+          defaultView="list"
           columnSelectable
           storageKey="tracks-columns"
         />

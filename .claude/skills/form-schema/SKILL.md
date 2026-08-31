@@ -57,6 +57,7 @@ when in doubt, check what Fluent component the type wraps (see Fabric.tsx).
 | `signature` | — | reads `signature` off the field def itself |
 | `tyre-position` | — | app-specific, wraps `TyreGrid`, no extras |
 | `custom` | `onRender({value,onChange,name}) => ReactElement` | escape hatch, bypasses everything else |
+| `list` | `itemSchema` | repeating rows; see the section below |
 | *(unmatched string)* | — | plain `TextField`. `type` itself is never forwarded as a prop (Fabric.tsx destructures it out before `...rest` on **every** case) — `type: 'password'` does **not** get you a masked input, it silently renders as an ordinary `TextField`. `text`/`number`/`email`/`password`/`tel`/`url`/`textarea`/`search` are common intentional uses of this fallback. |
 
 ### Deferred `options`: schema-as-factory-function
@@ -108,22 +109,65 @@ gone. If you see `fileSelect` anywhere, that schema was missed in the
 migration; convert it to the factory-function pattern above rather than
 reviving the sentinel.
 
-### `gamepad-select` is slated for replacement
+### `list` — repeating rows
 
-It works, but via its own separate, ad hoc runtime injection: unlike the
+A field whose value is an **array of row objects**. Each row mounts its own
+nested `useForm` over `itemSchema`, so row fields are ordinary top-level
+keys — which is exactly why this works at all: `useForm.onChange` does
+`name.split('.').slice(-1)[0]`, so dotted/nested field paths are actively
+destroyed. Nesting the form is what makes that constraint irrelevant. Never
+try to express rows as `rows.0.price`.
+
+Required: **`itemSchema`** — a plain `SchemaDefinition`, or
+`({row, index, rows}) => SchemaDefinition` when a row's field *config* must
+depend on that row's own data (a gamepad mapping's `index` maxing at 5 for
+an axis but 31 for a button), or when one row's `options` must exclude
+values already used by sibling rows.
+
+> **Hard rule:** a function `itemSchema` may vary field config but must
+> return the **same key set** every call. `useForm` seeds `values` once at
+> mount, so a key added later never receives a value. Asserted in dev.
+
+Other props: `rowKey` (stable identity — supply a real id whenever rows can
+be removed or reordered, or removing row 0 appears to edit row 1),
+`rowLabel`, `min`/`max`, `fixed` (rows derived from external data, no
+add/remove UI), `newRow`, `singular`/`addLabel`/`removeLabel`/`emptyText`,
+`deriveRow` (cross-field coupling *within* a row — it's told which field
+changed, rather than inferring it by diffing), `onRowCommit` (for consumers
+issuing one server mutation per row), `deferWhileDragging`, `converters`,
+`horizontal`/`rowStyle`.
+
+You do **not** write validations for a list: `useSchema` derives them from
+`itemSchema` + `min`/`max` and surfaces indexed messages
+(`Row 2: Name — This field is required`) at the list's own key, which is
+what flips the parent form invalid. `required: true` is a no-op on an array
+(`!![]` is `true`) — use `min: 1`; the validator script warns about this.
+
+Drag hooks are injected into every `slider`/`range` row field
+automatically. Do not thread `onActivate`/`onDeactivate` by hand.
+
+Related: **`useRowCommit`** (`per-form/useRowCommit.ts`) is the same
+commit-gating primitive `list` uses, exported separately for per-row forms
+that can't be a `list` — notably the Shakers grid cells, which are
+`DetailsList` columns and so can't render as a vertical row stack. It
+handles mount-tick suppression, the during-render identity reset, and
+drag-deferred commits.
+
+### `gamepad-select`
+
+Renders a dropdown of named gamepad mappings, and **stays** — it's consumed
+by the `button-control`/`slider-control` schemas. What the `list` field
+replaced was the hand-rolled *editor* for those mappings in denim's
+Settings, not this render case.
+
+It still uses its own ad hoc runtime injection, though: unlike the
 sprite-select fields above, `gamepad-select` schemas stay plain objects and
-`ObjectExplorer.tsx`'s `perFormSchema` merges in `gamepadMappings` field-by-field
-at render time (`field.type === 'gamepad-select' ? { ...field, gamepadMappings } : field`)
-rather than going through the schema-factory pattern. It's too narrow either
-way — a **generalized `list` field** is planned to replace it: a
-repeating-rows field type that mounts a full nested per-row `useForm`
-(confirmed: real per-row dirty/touched/validation state, not flat updates),
-with add/remove-row UI built into the field itself (confirmed: not left to
-the schema author). This is **not part of** the schema-factory-function
-migration above — it's its own, not-yet-designed piece of work. Don't build
-new features on `gamepad-select` or invest in improving its validation
-further; a
-`list-schema` skill covering the replacement is coming next.
+`ObjectExplorer.tsx`'s `perFormSchema` merges in `gamepadMappings`
+field-by-field at render time
+(`field.type === 'gamepad-select' ? { ...field, gamepadMappings } : field`)
+rather than going through the schema-factory pattern. Prefer moving it onto
+the `SchemaProps`/`getSchema()` factory route rather than extending the
+type-sniff.
 
 ## Run the validator before calling a schema done
 

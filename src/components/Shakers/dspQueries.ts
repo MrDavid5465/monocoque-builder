@@ -37,6 +37,15 @@ export const ENABLE_SHAKER_DSP = gql`
   }
 `;
 
+/** Rebuilds the running filter-chain in place (no enable/disable flip) —
+ *  needed after a device change, which alters the graph itself rather than a
+ *  parameter on it. Returns false when DSP isn't on. */
+export const RELOAD_SHAKER_DSP = gql`
+  mutation reloadShakerDsp {
+    reloadShakerDsp
+  }
+`;
+
 export const DISABLE_SHAKER_DSP = gql`
   mutation disableShakerDsp {
     disableShakerDsp

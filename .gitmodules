@@ -1,0 +1,6 @@
+[submodule "src/lib/typical-admin-fabric"]
+	path = src/lib/typical-admin-fabric
+	url = https://github.com/MrDavid5465/typical-admin-fabric.git
+[submodule "src/lib/per-form"]
+	path = src/lib/per-form
+	url = https://github.com/MrDavid5465/per-form.git

@@ -5,6 +5,7 @@ pub mod clients;
 pub mod dashboard_entry;
 pub mod dashboard_files;
 pub mod gamepad;
+pub mod huenicorn;
 pub mod night_clock;
 pub mod recording;
 pub mod shaker_dsp;
@@ -13,20 +14,32 @@ pub mod track_geocode;
 pub use car::{CarFileMutation, CarPhotoSyncQuery};
 pub use dashboard_entry::DashboardMutation;
 pub use gamepad::GamepadMutation;
+pub use huenicorn::HuenicornMutation;
 pub use night_clock::NightClockMutation;
 pub use recording::RecordingControlMutation;
 pub use shaker_dsp::{ShakerDspMutation, ShakerDspQuery};
 pub use templates::DashTemplateThumbnailMutation;
 pub use track_geocode::TrackGeocodeQuery;
 
+use crate::huenicorn::{
+    current_channel_colors, display_info, entertainment_configs, huenicorn_status,
+    interpolation_info, list_channels, AmbientColorChanged, ChannelColor, ChannelInfo,
+    HuenicornDisplayInfo, HuenicornEntertainmentConfigs, HuenicornInterpolationInfo,
+    HuenicornSettingsChanged, HuenicornStatus,
+};
+// Aliased: this module already has its own `gamepad` submodule (the
+// GraphQL resolvers), distinct from the device layer being called here.
+use crate::gamepad as gamepad_device;
+use crate::service_watchdogs::{self, MonocoqueStatus, SimdStatus};
 use crate::telemetry::recording as telemetry_recording;
 use crate::telemetry::{build_frame, read_simdata, types::TelemetryFrame};
 use crate::typiql_types::{
     CarDashPanChanged, DashTemplateChanged, DashboardEntryChanged, DeviceDefaultChanged,
-    NightModeChanged, PreviewCarChanged,
+    LfeChannelChanged, MonocoqueSoundDeviceChanged, NightModeChanged, PreviewCarChanged,
+    ShakerChannelChanged, ShakerDspChannelChanged,
 };
 use async_graphql::{Context, Object, SimpleObject, Subscription};
-use futures_util::stream::{select, Stream, StreamExt};
+use futures_util::stream::{select, select_all, Stream, StreamExt};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio_stream::wrappers::IntervalStream;
@@ -77,6 +90,14 @@ enum DashboardUpdateEvent {
     // publish_recording_status' own doc comment for where this gets
     // published from.
     Recording(RecordingStatus),
+    // Per-channel Huenicorn colors, published from huenicorn.rs's color
+    // poller loop (not a mutation-triggered event like the others above —
+    // see AmbientColorChanged's own doc comment).
+    AmbientColor(AmbientColorChanged),
+    // Huenicorn-relevant settings (enabled/intensity/primary channel),
+    // published from update_settings — see HuenicornSettingsChanged's own
+    // doc comment.
+    HuenicornSettings(HuenicornSettingsChanged),
 }
 
 /// One tick of the server-authoritative simulated in-game clock (see
@@ -108,6 +129,15 @@ pub struct NightClockTick {
 enum NightModeUpdateEvent {
     Changed(NightModeChanged),
     Clock(NightClockTick),
+}
+
+/// See `shaker_updates`' own doc comment for why this merge exists.
+#[derive(async_graphql::Union, Clone)]
+enum ShakerUpdateEvent {
+    Device(MonocoqueSoundDeviceChanged),
+    Channel(ShakerChannelChanged),
+    Dsp(ShakerDspChannelChanged),
+    Lfe(LfeChannelChanged),
 }
 
 /// Computes one `NightClockTick` from the current persisted anchor. Reads
@@ -184,6 +214,60 @@ impl QueryRoot {
 
     async fn recording_status(&self) -> RecordingStatus {
         RecordingStatus::current()
+    }
+
+    async fn huenicorn_status(&self) -> HuenicornStatus {
+        huenicorn_status().await
+    }
+
+    async fn simd_status(&self) -> SimdStatus {
+        service_watchdogs::simd_status()
+    }
+
+    async fn monocoque_status(&self) -> MonocoqueStatus {
+        service_watchdogs::monocoque_status()
+    }
+
+    /// Whether this backend can create the virtual gamepad — see
+    /// `gamepad::gamepad_udev_status`. A query rather than a Tauri command
+    /// so the browser build gets the same answer as the desktop one; the
+    /// backend is the process that would actually open `/dev/uinput`, so it
+    /// is also the only one that can answer honestly.
+    async fn gamepad_udev_status(&self) -> bool {
+        gamepad_device::gamepad_udev_status()
+    }
+
+    /// Channel list for the "which channel drives the 360° tint" picker in
+    /// AmbientLights/index.tsx.
+    async fn huenicorn_channels(&self) -> Vec<ChannelInfo> {
+        list_channels().await
+    }
+
+    /// Display resolution, subsample candidates, and refresh-rate/
+    /// transition-smoothing info for AdvancedHuenicornSettings.tsx and for
+    /// ChannelMapper.tsx's aspect-ratio-locked mapping canvas.
+    async fn huenicorn_display_info(&self) -> Option<HuenicornDisplayInfo> {
+        display_info().await
+    }
+
+    /// Available color-interpolation modes, for AdvancedHuenicornSettings.tsx.
+    async fn huenicorn_interpolation_info(&self) -> Option<HuenicornInterpolationInfo> {
+        interpolation_info().await
+    }
+
+    /// Hue entertainment configurations (bridge-side light groupings), for
+    /// AdvancedHuenicornSettings.tsx's picker — only rendered client-side
+    /// when there's more than one, mirroring Huenicorn's own web UI.
+    async fn huenicorn_entertainment_configs(&self) -> Option<HuenicornEntertainmentConfigs> {
+        entertainment_configs().await
+    }
+
+    /// One-shot current colors, for the live swatch next to that picker —
+    /// distinct from the ~30Hz `AmbientColor` subscription event, which only
+    /// a kiosk 360 dashboard subscribes to (see `dashboard_updates`'s own
+    /// `include_ambient_color` gating).
+    async fn huenicorn_current_colors(&self) -> Vec<ChannelColor> {
+        current_channel_colors().await
     }
 
     /// One-shot read of the current simulated-clock tick — same rationale
@@ -263,6 +347,38 @@ impl SubscriptionRoot {
         Ok(select(s1, s2))
     }
 
+    /// Replaces the 4 separate `useSubscription`s ShakerMatrix.tsx used to
+    /// hold open (monocoqueSoundDeviceChanged, shakerChannelChanged,
+    /// shakerDspChannelChanged, lfeChannelChanged) — those, plus the always-on
+    /// `dashboardUpdates` subscription mounted globally, put the page one
+    /// HTTP/1.1 connection away from Chromium's ~6-per-origin ceiling.
+    /// Confirmed live as the cause of "Enable DSP" (and really any mutation
+    /// on that page) hanging with no error: the backend answered
+    /// `enableShakerDsp` in under 100ms via a bare `curl` issued *while* the
+    /// browser's own request for the same mutation was still stuck — the
+    /// server was never blocked, only the browser's own connection queue
+    /// was. Same class of bug already fixed once for Dashboard Designer
+    /// (`liveUpdatesHub.tsx`, commit `ebe3c44`) by merging several
+    /// independent subscriptions into one; this does the same merge for
+    /// Shakers. The individual auto-generated subscriptions
+    /// (`shakerChannelChanged`/etc.) still exist, untouched — this just adds
+    /// one more way to reach the same broker-published events.
+    async fn shaker_updates(&self) -> impl Stream<Item = ShakerUpdateEvent> {
+        let s1 = TypiQLBroker::<MonocoqueSoundDeviceChanged>::subscribe()
+            .map(ShakerUpdateEvent::Device)
+            .boxed();
+        let s2 = TypiQLBroker::<ShakerChannelChanged>::subscribe()
+            .map(ShakerUpdateEvent::Channel)
+            .boxed();
+        let s3 = TypiQLBroker::<ShakerDspChannelChanged>::subscribe()
+            .map(ShakerUpdateEvent::Dsp)
+            .boxed();
+        let s4 = TypiQLBroker::<LfeChannelChanged>::subscribe()
+            .map(ShakerUpdateEvent::Lfe)
+            .boxed();
+        select_all([s1, s2, s3, s4])
+    }
+
     /// `includeTelemetry` defaults to true (unchanged behavior for kiosk/
     /// live view). The dashboard designer passes false while editing — it
     /// has no use for a live telemetry frame there (its preview data comes
@@ -291,6 +407,7 @@ impl SubscriptionRoot {
         ctx: &Context<'_>,
         #[graphql(default = true)] include_telemetry: bool,
         #[graphql(default = true)] include_night_clock: bool,
+        #[graphql(default = true)] include_ambient_color: bool,
     ) -> async_graphql::Result<impl Stream<Item = DashboardUpdateEvent>> {
         let adapter = default_adapter(ctx)?;
 
@@ -344,9 +461,20 @@ impl SubscriptionRoot {
         let s9 = TypiQLBroker::<RecordingStatus>::subscribe()
             .map(DashboardUpdateEvent::Recording)
             .boxed();
+        let s10: std::pin::Pin<Box<dyn Stream<Item = DashboardUpdateEvent> + Send>> =
+            if include_ambient_color {
+                TypiQLBroker::<AmbientColorChanged>::subscribe()
+                    .map(DashboardUpdateEvent::AmbientColor)
+                    .boxed()
+            } else {
+                futures_util::stream::empty().boxed()
+            };
+        let s11 = TypiQLBroker::<HuenicornSettingsChanged>::subscribe()
+            .map(DashboardUpdateEvent::HuenicornSettings)
+            .boxed();
 
         Ok(futures_util::stream::select_all([
-            s1, s2, s3, s4, s5, s6, s7, s8, s9,
+            s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11,
         ]))
     }
 }
