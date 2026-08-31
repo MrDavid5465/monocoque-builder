@@ -30,9 +30,29 @@ fn default_dir() -> PathBuf {
 /// Where captured car-card thumbnails live. Unlike the 360° photos themselves
 /// (user data, follows the configurable typiql_data_dir), thumbnails are a
 /// disposable derived cache — default XDG cache location, not configurable.
+/// The host's ~/.cache/dashboard-designer, not the sandbox's private one.
+///
+/// "Cache" undersells what lives here. Car thumbnails are captures the
+/// frontend uploads as base64 -- there is no source on disk to regenerate them
+/// from -- so a fresh directory is not a cold cache, it is data loss. Flatpak
+/// redirects XDG_CACHE_HOME to ~/.var/app/<app-id>/cache, which left the
+/// packaged build with 0 thumbnails against the 28 sitting in the host's cache,
+/// and every car card broken. $HOME is not redirected, and the manifest's
+/// --filesystem=xdg-cache/dashboard-designer:create grant makes the real
+/// directory visible, so both builds share one cache exactly as they share one
+/// config. Same reasoning as config_manager::monocoque_config_dir().
+fn cache_root() -> Option<PathBuf> {
+    if crate::host_command::in_flatpak() {
+        if let Some(home) = dirs::home_dir() {
+            return Some(home.join(".cache").join("dashboard-designer"));
+        }
+    }
+    dirs::cache_dir().map(|p| p.join("dashboard-designer"))
+}
+
 pub fn thumbnails_dir() -> PathBuf {
-    dirs::cache_dir()
-        .map(|p| p.join("dashboard-designer").join("thumbnails"))
+    cache_root()
+        .map(|p| p.join("thumbnails"))
         .unwrap_or_else(|| PathBuf::from("data/thumbnails"))
 }
 
@@ -41,8 +61,8 @@ pub fn thumbnails_dir() -> PathBuf {
 /// thumbnails_dir(). Each real 360 photo file (in car_photos_dir()) gets one
 /// symlink here per distinct content it has ever had.
 pub fn car_photo_links_dir() -> PathBuf {
-    dirs::cache_dir()
-        .map(|p| p.join("dashboard-designer").join("car-photo-links"))
+    cache_root()
+        .map(|p| p.join("car-photo-links"))
         .unwrap_or_else(|| PathBuf::from("data/car-photo-links"))
 }
 

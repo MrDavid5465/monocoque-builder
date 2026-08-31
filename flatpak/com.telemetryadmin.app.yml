@@ -78,6 +78,11 @@ finish-args:
   - --env=WEBKIT_DISABLE_DMABUF_RENDERER=1
   - --filesystem=xdg-config/dashboard-designer:create
   - --filesystem=xdg-data/dashboard-designer:create
+  # The host's cache, not the sandbox's. Car thumbnails are frontend captures
+  # with no regenerable source, so a private XDG_CACHE_HOME is not a cold cache
+  # but a missing one -- 0 thumbnails here against 28 on the host, and every car
+  # card broken. See graphql::car::cache_root().
+  - --filesystem=xdg-cache/dashboard-designer:create
   # The real ~/.config/monocoque, not the sandbox-private XDG_CONFIG_HOME.
   # This app exists to configure monocoque, and monocoque reads its config
   # from the host path -- without this grant the app would edit a private
