@@ -25,12 +25,21 @@ use typiql_adapter_json::JsonAdapter;
 /// heuristic freshness (typically ~10% of the file's age since upload), which
 /// for a just-uploaded multi-MB photo is a window of minutes — short enough
 /// that it was being fully re-requested on almost every load anyway.
+/// Only successful responses are cached this way. A 404 marked immutable for a
+/// year is a trap that has already sprung once: when the 360-photo symlinks
+/// were missing (see relink_existing_photos), every photo 404'd, browsers
+/// cached those 404s permanently, and restoring the links server-side changed
+/// nothing on the dashboards until each client was hard-reloaded. An error is
+/// never the thing this comment above is describing -- a URL whose bytes
+/// cannot change -- so it must stay revalidatable.
 async fn long_cache(request: Request, next: Next) -> axum::response::Response {
     let mut response = next.run(request).await;
-    response.headers_mut().insert(
-        header::CACHE_CONTROL,
-        header::HeaderValue::from_static("public, max-age=31536000, immutable"),
-    );
+    if response.status().is_success() {
+        response.headers_mut().insert(
+            header::CACHE_CONTROL,
+            header::HeaderValue::from_static("public, max-age=31536000, immutable"),
+        );
+    }
     response
 }
 
@@ -172,6 +181,10 @@ pub async fn build_router() -> Router {
     // real files directly — see graphql::car::link_photo/car_photo_links_dir.
     let car_photo_links_dir = crate::graphql::car::car_photo_links_dir();
     std::fs::create_dir_all(&car_photo_links_dir).ok();
+    // The links are written when a photo is uploaded and never again, so a
+    // cache directory that starts empty leaves every 360 photo 404ing. Rebuild
+    // whatever is missing from the File rows -- see relink_existing_photos.
+    crate::graphql::car::relink_existing_photos(&data_dir);
 
     let thumbnails_dir = crate::graphql::car::thumbnails_dir();
     std::fs::create_dir_all(&thumbnails_dir).ok();

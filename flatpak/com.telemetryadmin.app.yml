@@ -45,7 +45,12 @@ finish-args:
   - --share=ipc
   - --socket=fallback-x11
   - --socket=wayland
-  - --device=dri
+  # dri alone is not enough: the virtual controller this app creates for
+  # dashboards is a uinput device, and /dev/uinput is only reachable with
+  # --device=all -- Flatpak has no finer-grained option for it. Without this the
+  # controller silently never appears and the app's own udev rule (installed via
+  # pkexec, see gamepad.rs) has nothing to grant access to inside the sandbox.
+  - --device=all
   - --socket=pulseaudio
   # This app's own Rust backend serves the GraphQL API on 0.0.0.0:9000
   # (src-tauri/src/main.rs) -- monocoque does not, contrary to what this

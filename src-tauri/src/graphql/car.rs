@@ -74,6 +74,72 @@ fn ext_of(filename: &str) -> String {
         .unwrap_or_default()
 }
 
+/// Recreates the `/360-photos/*` symlinks from the File rows that already
+/// exist, for links that are missing.
+///
+/// These links live in the cache directory, which is derived data and can be
+/// thrown away -- except that nothing recreated them. They are written once,
+/// when a photo is uploaded, so a cache that starts out empty stays empty and
+/// every 360 photo 404s while thumbnails (regenerated on demand) load fine.
+/// That is exactly what the Flatpak build hit: Flatpak redirects XDG_CACHE_HOME
+/// to ~/.var/app/<app-id>/cache, so the sandbox had none of the ten links the
+/// host's ~/.cache/dashboard-designer/car-photo-links held.
+///
+/// Runs at startup, is idempotent, and skips files that are already linked or
+/// whose source has gone missing -- a photo that disappeared is not a reason to
+/// refuse to start.
+pub fn relink_existing_photos(data_dir: &Path) {
+    let Ok(raw) = std::fs::read_to_string(data_dir.join("data.json")) else {
+        return;
+    };
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        return;
+    };
+    let Some(files) = json.get("files").and_then(|f| f.as_array()) else {
+        return;
+    };
+
+    let links_dir = car_photo_links_dir();
+    if std::fs::create_dir_all(&links_dir).is_err() {
+        return;
+    }
+
+    let mut relinked = 0usize;
+    for file in files {
+        let (Some(url), Some(path)) = (
+            file.get("url").and_then(|u| u.as_str()),
+            file.get("path").and_then(|p| p.as_str()),
+        ) else {
+            continue;
+        };
+
+        // The link name is the last segment of the URL this row already
+        // advertises, so the rebuilt link answers exactly the request the
+        // frontend will make.
+        let Some(link_name) = url.rsplit('/').next().filter(|n| !n.is_empty()) else {
+            continue;
+        };
+        let link_path = links_dir.join(link_name);
+        if link_path.exists() || link_path.is_symlink() {
+            continue;
+        }
+
+        let real_path = expand_tilde(path);
+        if !real_path.is_file() {
+            continue;
+        }
+
+        #[cfg(unix)]
+        if std::os::unix::fs::symlink(&real_path, &link_path).is_ok() {
+            relinked += 1;
+        }
+    }
+
+    if relinked > 0 {
+        eprintln!("relink_existing_photos: restored {relinked} 360-photo link(s) in {}", links_dir.display());
+    }
+}
+
 /// Hashes `real_path`'s current bytes and ensures a symlink named
 /// `{hash}{ext}` exists in car_photo_links_dir() pointing at it. Returns
 /// `(content_hash, servable_url)` — the two File fields that change whenever
