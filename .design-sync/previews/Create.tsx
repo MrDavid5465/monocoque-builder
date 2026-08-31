@@ -29,7 +29,7 @@ const GET_CAR = gql`
     }
   }
 `;
-const car = { id: '1', name: 'Porsche 963', class: 'LMDh', year: 2023 };
+const _car = { id: '1', name: 'Porsche 963', class: 'LMDh', year: 2023 };
 const name = { singular: 'Car', plural: 'Cars' };
 
 const ADD_CAR = gql`

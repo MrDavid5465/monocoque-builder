@@ -261,7 +261,10 @@ fn kill_orphaned_simd_bridge() -> bool {
         }
 
         eprintln!("run_simd_watchdog: killing orphaned bridge pid {pid} ({needle})");
-        if let Err(e) = crate::host_command::host_command("kill").arg(pid.to_string()).output() {
+        if let Err(e) = crate::host_command::host_command("kill")
+            .arg(pid.to_string())
+            .output()
+        {
             eprintln!("run_simd_watchdog: failed to kill bridge pid {pid}: {e}");
         } else {
             killed = true;
@@ -539,7 +542,10 @@ mod tests {
         // would eventually stop being retried at all.
         assert_eq!(monocoque_start_backoff(6), MONOCOQUE_START_BACKOFF_MAX);
         assert_eq!(monocoque_start_backoff(50), MONOCOQUE_START_BACKOFF_MAX);
-        assert_eq!(monocoque_start_backoff(u32::MAX), MONOCOQUE_START_BACKOFF_MAX);
+        assert_eq!(
+            monocoque_start_backoff(u32::MAX),
+            MONOCOQUE_START_BACKOFF_MAX
+        );
     }
 
     fn scratch_pidfile(name: &str) -> std::path::PathBuf {

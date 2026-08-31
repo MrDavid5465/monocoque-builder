@@ -71,7 +71,9 @@ impl HuenicornMutation {
     /// Persists Huenicorn's current live config to its own profile.json —
     /// see `huenicorn::save_profile`.
     async fn save_huenicorn_profile(&self, _ctx: &Context<'_>) -> GqlResult<bool> {
-        huenicorn::save_profile().await.map_err(async_graphql::Error::new)?;
+        huenicorn::save_profile()
+            .await
+            .map_err(async_graphql::Error::new)?;
         Ok(true)
     }
 

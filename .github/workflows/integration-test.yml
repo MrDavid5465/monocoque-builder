@@ -65,6 +65,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           path: typiql-tauri/typiql
+          # Needed for the frontend half of `tauri build` (its
+          # beforeBuildCommand runs `npm run build`): per-form and
+          # typical-admin-fabric are submodules, and without them the build
+          # dies with TS2307 "Cannot find module '../per-form'".
+          submodules: recursive
       - uses: actions/checkout@v4
         with:
           repository: MrDavid5465/typiql-rs
@@ -160,6 +165,12 @@ jobs:
       - uses: actions/checkout@v4
         with:
           path: typiql-tauri/typiql
+          # This job does more than run the prebuilt binary: Playwright's
+          # webServer boots `npm run dev`, so it needs the two submodules
+          # like any other frontend build. Without them vite cannot resolve
+          # typical-admin-fabric/per-form, the app renders blank, and every
+          # spec fails as a locator timeout rather than a module error.
+          submodules: recursive
 
       - name: Download the built binary
         uses: actions/download-artifact@v4

@@ -1,7 +1,7 @@
+use crate::host_command::host_command;
 use async_graphql::SimpleObject;
 use serde::Serialize;
 use serde_json::Value;
-use crate::host_command::host_command;
 use std::sync::Mutex;
 
 #[derive(Debug, Clone, Serialize, SimpleObject)]

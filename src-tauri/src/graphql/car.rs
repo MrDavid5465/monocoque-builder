@@ -156,7 +156,10 @@ pub fn relink_existing_photos(data_dir: &Path) {
     }
 
     if relinked > 0 {
-        eprintln!("relink_existing_photos: restored {relinked} 360-photo link(s) in {}", links_dir.display());
+        eprintln!(
+            "relink_existing_photos: restored {relinked} 360-photo link(s) in {}",
+            links_dir.display()
+        );
     }
 }
 

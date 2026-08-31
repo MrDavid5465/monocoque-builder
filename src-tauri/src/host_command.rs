@@ -52,7 +52,9 @@ pub fn host_shared_dir() -> std::path::PathBuf {
             std::env::var("XDG_RUNTIME_DIR"),
             std::env::var("FLATPAK_ID"),
         ) {
-            let dir = std::path::PathBuf::from(runtime_dir).join("app").join(app_id);
+            let dir = std::path::PathBuf::from(runtime_dir)
+                .join("app")
+                .join(app_id);
             // Flatpak creates this itself, but create_dir_all keeps the
             // failure mode a fall-back rather than a panic if it ever moves.
             if std::fs::create_dir_all(&dir).is_ok() {
@@ -116,7 +118,10 @@ mod tests {
     fn args_are_passed_through_unchanged() {
         let mut cmd = host_command("pw-dump");
         cmd.arg("--no-colors");
-        let args: Vec<_> = cmd.get_args().map(|a| a.to_string_lossy().into_owned()).collect();
+        let args: Vec<_> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
         assert_eq!(args.last().unwrap(), "--no-colors");
         if in_flatpak() {
             assert_eq!(cmd.get_program(), "flatpak-spawn");

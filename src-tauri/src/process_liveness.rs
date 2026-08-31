@@ -31,10 +31,13 @@
 //! new zombies stop appearing; this filter handles the ones already there,
 //! including any inherited from before a rebuild.
 
-
 /// PIDs of live (non-zombie) processes named exactly `process_name`.
 pub fn live_pids(process_name: &str) -> Vec<u32> {
-    let Ok(out) = crate::host_command::host_command("pgrep").arg("-x").arg(process_name).output() else {
+    let Ok(out) = crate::host_command::host_command("pgrep")
+        .arg("-x")
+        .arg(process_name)
+        .output()
+    else {
         return Vec::new();
     };
 
