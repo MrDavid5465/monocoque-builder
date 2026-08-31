@@ -42,7 +42,27 @@ fn typiql_data_dir() -> std::path::PathBuf {
             return p;
         }
     }
-    // Fallback: ~/.config/dashboard-designer
+    // Fallback: ~/.config/dashboard-designer -- the host's, not the sandbox's.
+    //
+    // Flatpak redirects XDG_CONFIG_HOME to ~/.var/app/<app-id>/config, so
+    // dirs::config_dir() inside one resolves to a private directory that
+    // starts out empty. Everything this app owns lives here -- data.json, the
+    // DuckDB recordings, the 360 photos, the dashboards -- so the Flatpak
+    // build silently ran against a blank database while the real data sat in
+    // ~/.config/dashboard-designer. It surfaced as a DuckDB lock error naming
+    // the private path outright:
+    //   Could not set lock on file ".../.var/app/com.telemetryadmin.app/
+    //   config/dashboard-designer/recordings.duckdb"
+    // $HOME is not redirected, and the manifest's
+    // --filesystem=xdg-config/dashboard-designer:create grant is what makes
+    // the real directory visible -- a grant that did nothing until now.
+    // Same reasoning, and same shape, as config_manager::monocoque_config_dir().
+    if crate::host_command::in_flatpak() {
+        if let Some(home) = dirs::home_dir() {
+            return home.join(".config").join("dashboard-designer");
+        }
+    }
+
     dirs::config_dir()
         .map(|p| p.join("dashboard-designer"))
         .unwrap_or_else(|| std::path::PathBuf::from("data/typiql"))
@@ -78,9 +98,25 @@ pub async fn build_router() -> Router {
     // #[typiql_type(adapter = "duckdb")]. See build_typiql_schema, which
     // wires each registered type's DataLoader/CRUD against whichever entry
     // here matches its own T::adapter_name().
-    let duckdb_adapter =
-        typiql_adapter_duckdb::DuckDbAdapter::new(data_dir.join("recordings.duckdb"))
-            .expect("failed to open duckdb database");
+    // A lock conflict here means another copy of this app is already running:
+    // DuckDB allows a single writer. That used to abort this task alone, which
+    // left the window up with no backend behind it and the UI reporting
+    // nothing but "connection refused" -- the failure reads as a broken app
+    // rather than a second instance. Say which it is, and go, rather than
+    // leaving a window that cannot work.
+    let duckdb_path = data_dir.join("recordings.duckdb");
+    let duckdb_adapter = match typiql_adapter_duckdb::DuckDbAdapter::new(duckdb_path.clone()) {
+        Ok(adapter) => adapter,
+        Err(e) => {
+            eprintln!(
+                "Could not open {}: {e}\n\
+                 typiql is probably already running -- only one copy at a time can \
+                 hold the recordings database. Close the other window and start again.",
+                duckdb_path.display()
+            );
+            std::process::exit(1);
+        }
+    };
     let mut adapters: typiql::AdapterMap = std::collections::HashMap::new();
     adapters.insert("default", Arc::new(adapter) as Arc<dyn TypiQLAdapter>);
     adapters.insert("duckdb", Arc::new(duckdb_adapter) as Arc<dyn TypiQLAdapter>);

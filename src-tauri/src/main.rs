@@ -43,7 +43,21 @@ fn main() {
                     let app = api::build_router().await;
 
                     println!("Starting API on http://0.0.0.0:9000");
-                    let listener = tokio::net::TcpListener::bind("0.0.0.0:9000").await.unwrap();
+                    // Same reasoning as the DuckDB open in api.rs: a port
+                    // already in use means another copy is running, and
+                    // unwrapping here killed only this task -- leaving a
+                    // window whose UI could only report "connection refused".
+                    let listener = match tokio::net::TcpListener::bind("0.0.0.0:9000").await {
+                        Ok(listener) => listener,
+                        Err(e) => {
+                            eprintln!(
+                                "Could not bind 0.0.0.0:9000: {e}\n\
+                                 typiql is probably already running. Close the other \
+                                 window and start again."
+                            );
+                            std::process::exit(1);
+                        }
+                    };
 
                     if let Err(e) = serve(
                         listener,
