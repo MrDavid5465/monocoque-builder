@@ -23,9 +23,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-# devtools: enables the WebKit inspector in a release build (right-click ->
-# Inspect). Diagnostic builds want it; it costs a little binary size.
-tauri = { version = "2", features = ["devtools"] }
+tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -53,6 +51,12 @@ evdev = "0.12"
 nusb = "0.2.7"
 
 [features]
+# Opt-in, not shipped: `cargo build --features devtools` enables the WebKit
+# inspector in a release build. Left off by default because on this hardware
+# opening it wedges the render process and then crashes the window to a blank
+# grey -- the same NVIDIA/WebKitGTK territory as WEBKIT_DISABLE_DMABUF_RENDERER
+# in the Flatpak manifest.
+devtools = ["tauri/devtools"]
 # On by default so `cargo build` and the deb/rpm/AppImage builds keep
 # compiling DuckDB from source exactly as before. The Flatpak build passes
 # --no-default-features and supplies a prebuilt libduckdb instead, which cuts
