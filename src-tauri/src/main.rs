@@ -34,8 +34,13 @@ fn main() {
     // window.location.hostname -- and then reports whether that URL works,
     // straight to the backend's log. 127.0.0.1 is used for the report itself
     // precisely because it cannot depend on the thing being diagnosed.
+    // The leading semicolon is load-bearing. This is appended to Tauri's own
+    // IPC bootstrap, which ends in `})()`; without a separator JavaScript reads
+    // `})()` followed by `(function...` as a *call*, so the IPC init's return
+    // value gets invoked and throws at global scope before any app code runs --
+    // which looks exactly like the bug being investigated.
     const ORIGIN_DIAG: &str = r#"
-      (function () {
+      ;(function () {
         var report = function (stage, detail) {
           try {
             new Image().src = "http://127.0.0.1:9000/diag?stage=" + encodeURIComponent(stage) +
