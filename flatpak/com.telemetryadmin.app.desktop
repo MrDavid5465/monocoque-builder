@@ -1,5 +1,5 @@
 [Desktop Entry]
-Name=typiql
+Name=Telemetry Admin
 Comment=Telemetry dashboard designer and recorder for sim racing rigs
 Exec=typiql
 Icon=com.telemetryadmin.app

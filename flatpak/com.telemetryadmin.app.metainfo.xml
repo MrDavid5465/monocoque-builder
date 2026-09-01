@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
   <id>com.telemetryadmin.app</id>
-  <name>typiql</name>
+  <name>Telemetry Admin</name>
   <summary>Telemetry dashboard designer and recorder for sim racing rigs</summary>
   <metadata_license>MIT</metadata_license>
   <project_license>MIT</project_license>
