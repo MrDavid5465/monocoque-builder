@@ -34,34 +34,7 @@ fn main() {
     // window.location.hostname -- and then reports whether that URL works,
     // straight to the backend's log. 127.0.0.1 is used for the report itself
     // precisely because it cannot depend on the thing being diagnosed.
-    // The leading semicolon is load-bearing. This is appended to Tauri's own
-    // IPC bootstrap, which ends in `})()`; without a separator JavaScript reads
-    // `})()` followed by `(function...` as a *call*, so the IPC init's return
-    // value gets invoked and throws at global scope before any app code runs --
-    // which looks exactly like the bug being investigated.
-    const ORIGIN_DIAG: &str = r#"
-      ;(function () {
-        var report = function (stage, detail) {
-          try {
-            new Image().src = "http://127.0.0.1:9000/diag?stage=" + encodeURIComponent(stage) +
-              "&href=" + encodeURIComponent(String(location.href)) +
-              "&hostname=" + encodeURIComponent(String(location.hostname)) +
-              "&detail=" + encodeURIComponent(String(detail));
-          } catch (e) {}
-        };
-        report("origin", "");
-        var url = "http://" + window.location.hostname + ":9000/typiql/graphql";
-        fetch(url, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ query: "{ simdStatus { running } }" }),
-        }).then(function (r) { report("fetch-ok", url + " status=" + r.status); },
-                function (e) { report("fetch-failed", url + " error=" + e); });
-      })();
-    "#;
-
     tauri::Builder::default()
-        .append_invoke_initialization_script(ORIGIN_DIAG)
         .setup(|_app| {
             std::thread::spawn(|| {
                 let rt = Runtime::new().unwrap();

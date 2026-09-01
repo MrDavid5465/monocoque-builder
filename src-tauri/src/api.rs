@@ -199,17 +199,6 @@ pub async fn build_router() -> Router {
         ]);
 
     let router = Router::new()
-        // Diagnostic: the webview reports its own origin here at load, so a
-        // packaged build can be debugged without attaching an inspector. It
-        // answers 200 for anything and only logs, so it is harmless to leave
-        // in; the interesting part is whether it is reached at all.
-        .route(
-            "/diag",
-            get(|axum::extract::RawQuery(q): axum::extract::RawQuery| async move {
-                eprintln!("webview diag: {}", q.unwrap_or_else(|| "(none)".into()));
-                "ok"
-            }),
-        )
         .route("/file-proxy", get(file_proxy))
         .route("/list-files", get(list_files))
         .nest(
