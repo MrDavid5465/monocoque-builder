@@ -154,7 +154,7 @@ modules:
       # with "cannot update the lock file... because --locked was passed" --
       # confirmed locally that plain --offline resolves the same drift fine,
       # using only what's already cached, and still makes zero network calls.
-      - cd src/typiql-tauri/typiql/src-tauri && cargo build --release --offline --no-default-features
+      - cd src/typiql-tauri/typiql/src-tauri && cargo build --release --offline --no-default-features --features custom-protocol
       # Dynamically linked now rather than statically embedded, so the library
       # has to ship inside the bundle.
       - install -Dm755 duckdb-prebuilt/libduckdb.so /app/lib/libduckdb.so
