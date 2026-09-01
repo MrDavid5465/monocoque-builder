@@ -29,7 +29,34 @@ fn main() {
         eprintln!("BACKEND PANIC: {info}\n{bt}");
     }));
 
+    // Runs in the webview before the app's own code. It reports the origin the
+    // page actually got -- which decides the API URL the frontend builds from
+    // window.location.hostname -- and then reports whether that URL works,
+    // straight to the backend's log. 127.0.0.1 is used for the report itself
+    // precisely because it cannot depend on the thing being diagnosed.
+    const ORIGIN_DIAG: &str = r#"
+      (function () {
+        var report = function (stage, detail) {
+          try {
+            new Image().src = "http://127.0.0.1:9000/diag?stage=" + encodeURIComponent(stage) +
+              "&href=" + encodeURIComponent(String(location.href)) +
+              "&hostname=" + encodeURIComponent(String(location.hostname)) +
+              "&detail=" + encodeURIComponent(String(detail));
+          } catch (e) {}
+        };
+        report("origin", "");
+        var url = "http://" + window.location.hostname + ":9000/typiql/graphql";
+        fetch(url, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ query: "{ simdStatus { running } }" }),
+        }).then(function (r) { report("fetch-ok", url + " status=" + r.status); },
+                function (e) { report("fetch-failed", url + " error=" + e); });
+      })();
+    "#;
+
     tauri::Builder::default()
+        .append_invoke_initialization_script(ORIGIN_DIAG)
         .setup(|_app| {
             std::thread::spawn(|| {
                 let rt = Runtime::new().unwrap();
