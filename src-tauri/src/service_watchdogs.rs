@@ -3,7 +3,7 @@ use crate::process_liveness;
 use crate::service_commands;
 use crate::telemetry::{build_frame, read_simdata, types::SimStatus};
 use async_graphql::SimpleObject;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::time::{Duration, Instant};
 
 /// Home for watchdogs over external services this app depends on but
@@ -46,13 +46,20 @@ const WATCHDOG_POLL_INTERVAL: Duration = Duration::from_secs(5);
 /// the liveness checks below report a corpse as running and stopped the
 /// watchdog from ever restarting it. See `process_liveness`.
 fn spawn_command_line(service: &str, command_line: &str) -> std::io::Result<()> {
-    let fifo = std::env::temp_dir().join(format!("typiql-{service}-stdin"));
+    // host_shared_dir(), not temp_dir(): `mkfifo` and the `sh` that opens the
+    // FIFO both run on the host, while the `remove_file` below runs in the
+    // sandbox. On the sandbox's private /tmp those two halves address
+    // different files -- the stale-FIFO cleanup would quietly delete nothing,
+    // the host `mkfifo` would then fail because the path already exists, and
+    // every spawn after the first would fall into the no-pollable-stdin path
+    // that makes monocoque's game loop exit immediately with code 1.
+    let fifo = crate::host_command::host_shared_dir().join(format!("typiql-{service}-stdin"));
     // Recreated per spawn: a stale FIFO from a previous run is harmless, but
     // a stale *regular* file at that path (or a leftover of the wrong type)
     // would silently put us back on an unpollable stdin.
     std::fs::remove_file(&fifo).ok();
     let fifo_arg = fifo.display().to_string();
-    let made_fifo = Command::new("mkfifo")
+    let made_fifo = crate::host_command::host_command("mkfifo")
         .arg(&fifo_arg)
         .status()
         .map(|s| s.success())
@@ -68,7 +75,7 @@ fn spawn_command_line(service: &str, command_line: &str) -> std::io::Result<()> 
         command_line.to_string()
     };
 
-    let mut child = Command::new("sh")
+    let mut child = crate::host_command::host_command("sh")
         .arg("-c")
         .arg(&line)
         .stdin(Stdio::inherit())
@@ -254,7 +261,10 @@ fn kill_orphaned_simd_bridge() -> bool {
         }
 
         eprintln!("run_simd_watchdog: killing orphaned bridge pid {pid} ({needle})");
-        if let Err(e) = Command::new("kill").arg(pid.to_string()).output() {
+        if let Err(e) = crate::host_command::host_command("kill")
+            .arg(pid.to_string())
+            .output()
+        {
             eprintln!("run_simd_watchdog: failed to kill bridge pid {pid}: {e}");
         } else {
             killed = true;
@@ -309,6 +319,10 @@ pub async fn run_simd_watchdog() {
             continue;
         };
 
+        // Under Flatpak the spawn lands on the host, which may not have the
+        // configured binary at all -- see service_commands::resolve_for_host.
+        let command = service_commands::resolve_for_host(&command);
+
         eprintln!("run_simd_watchdog: simd not running, starting it via `{command}`");
         if let Err(e) = spawn_command_line("simd", &command) {
             eprintln!("run_simd_watchdog: failed to spawn simd: {e}");
@@ -357,7 +371,7 @@ pub fn monocoque_status() -> MonocoqueStatus {
 fn stop_boxflat_if_running() -> bool {
     const BOXFLAT_APP_ID: &str = "io.github.lawstorant.boxflat";
 
-    let running = Command::new("flatpak")
+    let running = crate::host_command::host_command("flatpak")
         .arg("ps")
         .output()
         .map(|out| {
@@ -372,7 +386,7 @@ fn stop_boxflat_if_running() -> bool {
     }
 
     eprintln!("run_monocoque_watchdog: Boxflat is running, stopping it to free the serial port");
-    if let Err(e) = Command::new("flatpak")
+    if let Err(e) = crate::host_command::host_command("flatpak")
         .args(["kill", BOXFLAT_APP_ID])
         .output()
     {
@@ -453,6 +467,8 @@ pub async fn run_monocoque_watchdog() {
             }
             continue;
         };
+
+        let command = service_commands::resolve_for_host(&command);
 
         eprintln!(
             "run_monocoque_watchdog: sim active but monocoque not running, starting it via `{command}`"

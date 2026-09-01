@@ -9,13 +9,34 @@ use types::{
 
 use std::fs;
 use std::path::PathBuf;
-use std::process::Command;
+
+/// Resolves the real `~/.config/monocoque` — the directory monocoque itself
+/// reads its configuration from.
+///
+/// Inside a Flatpak this deliberately bypasses `dirs::config_dir()`. Flatpak
+/// redirects `XDG_CONFIG_HOME` to the app's private
+/// `~/.var/app/<app-id>/config`, so `dirs::config_dir()` there points at a
+/// sandbox-local directory. Writing `monocoque.config` into it would silently
+/// produce a private copy that the real monocoque never reads — which would
+/// make this app's whole purpose (configuring monocoque) a no-op under Flatpak.
+/// `$HOME` is *not* redirected, so `$HOME/.config/monocoque` is the host's real
+/// directory; the manifest's `--filesystem=xdg-config/monocoque:create` grant
+/// is what makes it visible inside the sandbox.
+///
+/// Outside a sandbox both paths are the same thing, so behaviour is unchanged.
+pub fn monocoque_config_dir() -> PathBuf {
+    if crate::host_command::in_flatpak() {
+        if let Some(home) = dirs::home_dir() {
+            return home.join(".config").join("monocoque");
+        }
+    }
+    dirs::config_dir()
+        .expect("no XDG config dir available")
+        .join("monocoque")
+}
 
 fn config_path() -> PathBuf {
-    dirs::config_dir()
-        .unwrap()
-        .join("monocoque")
-        .join("monocoque.config")
+    monocoque_config_dir().join("monocoque.config")
 }
 pub fn read_monocoque_config() -> Result<String, String> {
     let path = config_path();
@@ -24,10 +45,14 @@ pub fn read_monocoque_config() -> Result<String, String> {
 
 pub fn write_monocoque_config(new_config: String) -> Result<(), String> {
     let path = config_path();
+    // Same missing-parent bug as write_app_config -- see the note there.
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
     fs::write(path, new_config).map_err(|e| e.to_string())
 }
 pub fn reload_monocoque() -> Result<(), String> {
-    Command::new("pkill")
+    crate::host_command::host_command("pkill")
         .arg("-HUP")
         .arg("monocoque")
         .output()

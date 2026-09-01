@@ -30,9 +30,29 @@ fn default_dir() -> PathBuf {
 /// Where captured car-card thumbnails live. Unlike the 360° photos themselves
 /// (user data, follows the configurable typiql_data_dir), thumbnails are a
 /// disposable derived cache — default XDG cache location, not configurable.
+/// The host's ~/.cache/dashboard-designer, not the sandbox's private one.
+///
+/// "Cache" undersells what lives here. Car thumbnails are captures the
+/// frontend uploads as base64 -- there is no source on disk to regenerate them
+/// from -- so a fresh directory is not a cold cache, it is data loss. Flatpak
+/// redirects XDG_CACHE_HOME to ~/.var/app/<app-id>/cache, which left the
+/// packaged build with 0 thumbnails against the 28 sitting in the host's cache,
+/// and every car card broken. $HOME is not redirected, and the manifest's
+/// --filesystem=xdg-cache/dashboard-designer:create grant makes the real
+/// directory visible, so both builds share one cache exactly as they share one
+/// config. Same reasoning as config_manager::monocoque_config_dir().
+fn cache_root() -> Option<PathBuf> {
+    if crate::host_command::in_flatpak() {
+        if let Some(home) = dirs::home_dir() {
+            return Some(home.join(".cache").join("dashboard-designer"));
+        }
+    }
+    dirs::cache_dir().map(|p| p.join("dashboard-designer"))
+}
+
 pub fn thumbnails_dir() -> PathBuf {
-    dirs::cache_dir()
-        .map(|p| p.join("dashboard-designer").join("thumbnails"))
+    cache_root()
+        .map(|p| p.join("thumbnails"))
         .unwrap_or_else(|| PathBuf::from("data/thumbnails"))
 }
 
@@ -41,8 +61,8 @@ pub fn thumbnails_dir() -> PathBuf {
 /// thumbnails_dir(). Each real 360 photo file (in car_photos_dir()) gets one
 /// symlink here per distinct content it has ever had.
 pub fn car_photo_links_dir() -> PathBuf {
-    dirs::cache_dir()
-        .map(|p| p.join("dashboard-designer").join("car-photo-links"))
+    cache_root()
+        .map(|p| p.join("car-photo-links"))
         .unwrap_or_else(|| PathBuf::from("data/car-photo-links"))
 }
 
@@ -72,6 +92,75 @@ fn ext_of(filename: &str) -> String {
         .and_then(|e| e.to_str())
         .map(|e| format!(".{e}"))
         .unwrap_or_default()
+}
+
+/// Recreates the `/360-photos/*` symlinks from the File rows that already
+/// exist, for links that are missing.
+///
+/// These links live in the cache directory, which is derived data and can be
+/// thrown away -- except that nothing recreated them. They are written once,
+/// when a photo is uploaded, so a cache that starts out empty stays empty and
+/// every 360 photo 404s while thumbnails (regenerated on demand) load fine.
+/// That is exactly what the Flatpak build hit: Flatpak redirects XDG_CACHE_HOME
+/// to ~/.var/app/<app-id>/cache, so the sandbox had none of the ten links the
+/// host's ~/.cache/dashboard-designer/car-photo-links held.
+///
+/// Runs at startup, is idempotent, and skips files that are already linked or
+/// whose source has gone missing -- a photo that disappeared is not a reason to
+/// refuse to start.
+pub fn relink_existing_photos(data_dir: &Path) {
+    let Ok(raw) = std::fs::read_to_string(data_dir.join("data.json")) else {
+        return;
+    };
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        return;
+    };
+    let Some(files) = json.get("files").and_then(|f| f.as_array()) else {
+        return;
+    };
+
+    let links_dir = car_photo_links_dir();
+    if std::fs::create_dir_all(&links_dir).is_err() {
+        return;
+    }
+
+    let mut relinked = 0usize;
+    for file in files {
+        let (Some(url), Some(path)) = (
+            file.get("url").and_then(|u| u.as_str()),
+            file.get("path").and_then(|p| p.as_str()),
+        ) else {
+            continue;
+        };
+
+        // The link name is the last segment of the URL this row already
+        // advertises, so the rebuilt link answers exactly the request the
+        // frontend will make.
+        let Some(link_name) = url.rsplit('/').next().filter(|n| !n.is_empty()) else {
+            continue;
+        };
+        let link_path = links_dir.join(link_name);
+        if link_path.exists() || link_path.is_symlink() {
+            continue;
+        }
+
+        let real_path = expand_tilde(path);
+        if !real_path.is_file() {
+            continue;
+        }
+
+        #[cfg(unix)]
+        if std::os::unix::fs::symlink(&real_path, &link_path).is_ok() {
+            relinked += 1;
+        }
+    }
+
+    if relinked > 0 {
+        eprintln!(
+            "relink_existing_photos: restored {relinked} 360-photo link(s) in {}",
+            links_dir.display()
+        );
+    }
 }
 
 /// Hashes `real_path`'s current bytes and ensures a symlink named

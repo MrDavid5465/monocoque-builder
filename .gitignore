@@ -40,6 +40,13 @@ src-tauri/.claude/settings.local.json
 *.sln
 *.sw?
 
+# flatpak.yml regenerates these from package-lock.json/Cargo.lock on every run
+/flatpak/generated-node-sources.json
+/flatpak/generated-cargo-sources.json
+/flatpak/.flatpak-builder/
+/flatpak/build-dir/
+/flatpak/repo/
+
 # design-sync: generated build output, staged converter scripts, and machine
 # state. The durable inputs under .design-sync/ (config.json, NOTES.md,
 # conventions.md, ds-entry.tsx, previews/) ARE committed — they're what makes

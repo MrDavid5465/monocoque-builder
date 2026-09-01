@@ -25,13 +25,67 @@ use typiql_adapter_json::JsonAdapter;
 /// heuristic freshness (typically ~10% of the file's age since upload), which
 /// for a just-uploaded multi-MB photo is a window of minutes — short enough
 /// that it was being fully re-requested on almost every load anyway.
+/// Only successful responses are cached this way. A 404 marked immutable for a
+/// year is a trap that has already sprung once: when the 360-photo symlinks
+/// were missing (see relink_existing_photos), every photo 404'd, browsers
+/// cached those 404s permanently, and restoring the links server-side changed
+/// nothing on the dashboards until each client was hard-reloaded. An error is
+/// never the thing this comment above is describing -- a URL whose bytes
+/// cannot change -- so it must stay revalidatable.
 async fn long_cache(request: Request, next: Next) -> axum::response::Response {
     let mut response = next.run(request).await;
-    response.headers_mut().insert(
-        header::CACHE_CONTROL,
-        header::HeaderValue::from_static("public, max-age=31536000, immutable"),
-    );
+    if response.status().is_success() {
+        response.headers_mut().insert(
+            header::CACHE_CONTROL,
+            header::HeaderValue::from_static("public, max-age=31536000, immutable"),
+        );
+    }
     response
+}
+
+/// Where the built frontend lives, for the browsers on other devices that load
+/// their dashboards over HTTP (the Tauri window itself uses the copy embedded
+/// in the binary and never comes here).
+///
+/// This used to be the relative path "dist", resolved against the working
+/// directory, which is only ever right when the app is started from the source
+/// tree. In a packaged build it silently isn't: measured in the Flatpak, cwd is
+/// /home/david, so every request -- including / -- returned 404 and a browser
+/// could not load anything at all. The same is true of any .deb/.rpm/AppImage
+/// install launched from a desktop file.
+///
+/// Looked up next to the executable rather than hardcoded, so /app/bin/typiql
+/// finds /app/share/typiql/dist and /usr/bin/typiql finds
+/// /usr/share/typiql/dist without either build knowing about the other.
+/// TYPIQL_DIST_DIR overrides for anyone with a different layout, and "dist"
+/// remains the last resort so running from the source tree behaves as before.
+#[cfg(not(debug_assertions))]
+fn frontend_dist_dir() -> std::path::PathBuf {
+    if let Ok(dir) = std::env::var("TYPIQL_DIST_DIR") {
+        if !dir.is_empty() {
+            return std::path::PathBuf::from(dir);
+        }
+    }
+
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(bin_dir) = exe.parent() {
+            // One destination for every package: the Flatpak manifest
+            // installs it to /app/share/typiql/dist, and tauri.conf.json's
+            // per-bundle `files` maps put it at /usr/share/typiql/dist in the
+            // .deb, .rpm and AppImage. `bundle.resources` would have been the
+            // obvious way to carry it, but it makes the build script fail
+            // ("resource path `../dist` doesn't exist") before Vite has ever
+            // run, which breaks a bare `cargo test`.
+            for candidate in ["../share/typiql/dist", "dist"] {
+                let dir = bin_dir.join(candidate);
+                if dir.join("index.html").is_file() {
+                    return dir;
+                }
+            }
+        }
+    }
+
+    std::path::PathBuf::from("dist")
 }
 
 fn typiql_data_dir() -> std::path::PathBuf {
@@ -42,7 +96,27 @@ fn typiql_data_dir() -> std::path::PathBuf {
             return p;
         }
     }
-    // Fallback: ~/.config/dashboard-designer
+    // Fallback: ~/.config/dashboard-designer -- the host's, not the sandbox's.
+    //
+    // Flatpak redirects XDG_CONFIG_HOME to ~/.var/app/<app-id>/config, so
+    // dirs::config_dir() inside one resolves to a private directory that
+    // starts out empty. Everything this app owns lives here -- data.json, the
+    // DuckDB recordings, the 360 photos, the dashboards -- so the Flatpak
+    // build silently ran against a blank database while the real data sat in
+    // ~/.config/dashboard-designer. It surfaced as a DuckDB lock error naming
+    // the private path outright:
+    //   Could not set lock on file ".../.var/app/com.telemetryadmin.app/
+    //   config/dashboard-designer/recordings.duckdb"
+    // $HOME is not redirected, and the manifest's
+    // --filesystem=xdg-config/dashboard-designer:create grant is what makes
+    // the real directory visible -- a grant that did nothing until now.
+    // Same reasoning, and same shape, as config_manager::monocoque_config_dir().
+    if crate::host_command::in_flatpak() {
+        if let Some(home) = dirs::home_dir() {
+            return home.join(".config").join("dashboard-designer");
+        }
+    }
+
     dirs::config_dir()
         .map(|p| p.join("dashboard-designer"))
         .unwrap_or_else(|| std::path::PathBuf::from("data/typiql"))
@@ -78,9 +152,25 @@ pub async fn build_router() -> Router {
     // #[typiql_type(adapter = "duckdb")]. See build_typiql_schema, which
     // wires each registered type's DataLoader/CRUD against whichever entry
     // here matches its own T::adapter_name().
-    let duckdb_adapter =
-        typiql_adapter_duckdb::DuckDbAdapter::new(data_dir.join("recordings.duckdb"))
-            .expect("failed to open duckdb database");
+    // A lock conflict here means another copy of this app is already running:
+    // DuckDB allows a single writer. That used to abort this task alone, which
+    // left the window up with no backend behind it and the UI reporting
+    // nothing but "connection refused" -- the failure reads as a broken app
+    // rather than a second instance. Say which it is, and go, rather than
+    // leaving a window that cannot work.
+    let duckdb_path = data_dir.join("recordings.duckdb");
+    let duckdb_adapter = match typiql_adapter_duckdb::DuckDbAdapter::new(duckdb_path.clone()) {
+        Ok(adapter) => adapter,
+        Err(e) => {
+            eprintln!(
+                "Could not open {}: {e}\n\
+                 typiql is probably already running -- only one copy at a time can \
+                 hold the recordings database. Close the other window and start again.",
+                duckdb_path.display()
+            );
+            std::process::exit(1);
+        }
+    };
     let mut adapters: typiql::AdapterMap = std::collections::HashMap::new();
     adapters.insert("default", Arc::new(adapter) as Arc<dyn TypiQLAdapter>);
     adapters.insert("duckdb", Arc::new(duckdb_adapter) as Arc<dyn TypiQLAdapter>);
@@ -91,6 +181,10 @@ pub async fn build_router() -> Router {
     // real files directly — see graphql::car::link_photo/car_photo_links_dir.
     let car_photo_links_dir = crate::graphql::car::car_photo_links_dir();
     std::fs::create_dir_all(&car_photo_links_dir).ok();
+    // The links are written when a photo is uploaded and never again, so a
+    // cache directory that starts empty leaves every 360 photo 404ing. Rebuild
+    // whatever is missing from the File rows -- see relink_existing_photos.
+    crate::graphql::car::relink_existing_photos(&data_dir);
 
     let thumbnails_dir = crate::graphql::car::thumbnails_dir();
     std::fs::create_dir_all(&thumbnails_dir).ok();
@@ -166,10 +260,22 @@ pub async fn build_router() -> Router {
     );
 
     #[cfg(not(debug_assertions))]
-    let router = router.fallback_service(
-        tower_http::services::ServeDir::new("dist")
-            .not_found_service(tower_http::services::ServeFile::new("dist/index.html")),
-    );
+    let router = {
+        let dist = frontend_dist_dir();
+        if !dist.join("index.html").is_file() {
+            eprintln!(
+                "No frontend at {} -- the API will answer but browsers on other \
+                 devices will get 404 for every page. Set TYPIQL_DIST_DIR if this \
+                 build keeps it somewhere else.",
+                dist.display()
+            );
+        }
+        let index = dist.join("index.html");
+        router.fallback_service(
+            tower_http::services::ServeDir::new(&dist)
+                .not_found_service(tower_http::services::ServeFile::new(index)),
+        )
+    };
 
     router.layer(cors)
 }

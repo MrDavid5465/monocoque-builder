@@ -9,6 +9,10 @@
 //! sibling container it was started in, since this distrobox shares the host
 //! PID namespace.
 //!
+//! A Flatpak build does **not** share it: the sandbox gets its own PID
+//! namespace, so both the `pgrep` and the `/proc` read below have to happen on
+//! the host or they disagree with each other. See `is_live`.
+//!
 //! The catch, and the reason this module exists instead of a bare `pgrep`
 //! exit-status check: **`pgrep` matches zombies**. A `<defunct>` process has
 //! already exited — its parent simply hasn't reaped it — but it still has a
@@ -27,11 +31,13 @@
 //! new zombies stop appearing; this filter handles the ones already there,
 //! including any inherited from before a rebuild.
 
-use std::process::Command;
-
 /// PIDs of live (non-zombie) processes named exactly `process_name`.
 pub fn live_pids(process_name: &str) -> Vec<u32> {
-    let Ok(out) = Command::new("pgrep").arg("-x").arg(process_name).output() else {
+    let Ok(out) = crate::host_command::host_command("pgrep")
+        .arg("-x")
+        .arg(process_name)
+        .output()
+    else {
         return Vec::new();
     };
 
@@ -51,8 +57,29 @@ pub fn is_running(process_name: &str) -> bool {
 /// that fails means the process is already gone between the `pgrep` and this
 /// check, which counts as not-live for the same reason a zombie does.
 fn is_live(pid: u32) -> bool {
-    let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
-        return false;
+    // Read /proc on the host when sandboxed. Flatpak gives the sandbox its own
+    // PID namespace -- measured: 4 entries in the sandbox's /proc against 668
+    // on the host -- so the pids pgrep returns (it runs on the host, via
+    // host_command) don't exist in the sandbox's /proc at all. Reading locally
+    // would make every pid look dead, live_pids() would always come back
+    // empty, and the watchdogs would restart services forever while believing
+    // nothing was running: silent misbehaviour rather than a visible error.
+    let stat = if crate::host_command::in_flatpak() {
+        let Ok(out) = crate::host_command::host_command("cat")
+            .arg(format!("/proc/{pid}/stat"))
+            .output()
+        else {
+            return false;
+        };
+        if !out.status.success() {
+            return false;
+        }
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    } else {
+        let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+            return false;
+        };
+        stat
     };
 
     // `pid (comm) state ...` — `comm` is unquoted and may itself contain
@@ -67,6 +94,9 @@ fn is_live(pid: u32) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Only the zombie test spawns a real child; everything else goes
+    // through host_command.
+    use std::process::Command;
 
     #[test]
     fn this_process_is_live() {

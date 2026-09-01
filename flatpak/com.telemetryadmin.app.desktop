@@ -1,8 +1,13 @@
 [Desktop Entry]
-Name=typiql
+Name=Telemetry Admin
 Comment=Telemetry dashboard designer and recorder for sim racing rigs
 Exec=typiql
 Icon=com.telemetryadmin.app
 Terminal=false
 Type=Application
 Categories=Utility;Game;
+# The window's Wayland app_id / X11 WM_CLASS is the program name -- typiql --
+# while this file is named for the app id, so the compositor cannot match the
+# two and falls back to a generic icon on the running window (the menu entry
+# was always fine). StartupWMClass tells it they are the same application.
+StartupWMClass=typiql

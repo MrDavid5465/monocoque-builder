@@ -1,9 +1,11 @@
 # Best-effort Flatpak manifest — NOT submitted anywhere (Flathub or
 # otherwise), built in CI purely so a .flatpak bundle exists as a release
-# asset. This is the least-verified part of the whole CI/CD setup: nothing
-# here has been exercised against a real flatpak-builder run yet (no way to
-# do that in this environment). Treat the first several CI runs as
-# genuinely experimental.
+# asset. Verified end-to-end (2026-08-30): a real workflow_dispatch run
+# produced a working com.telemetryadmin.app .flatpak bundle for the first
+# time — see .github/workflows/flatpak.yml's header for the full list of
+# real bugs that took ten iterations against real CI to find and fix. Not
+# yet covered: this repo's own git submodules under src/lib/, added on a
+# branch not yet merged to master.
 #
 # Builds via `cargo build --release` + a plain Vite build directly, not
 # through Tauri's own bundler — the bundler's .deb/AppImage/rpm targets
@@ -18,30 +20,85 @@
 # bare freedesktop one.
 app-id: com.telemetryadmin.app
 runtime: org.gnome.Platform
-runtime-version: '46'
+runtime-version: '49'
 sdk: org.gnome.Sdk
 sdk-extensions:
   - org.freedesktop.Sdk.Extension.rust-stable
   - org.freedesktop.Sdk.Extension.node20
 command: typiql
+#
+# NOTE ON SANDBOXING: this app is a host-orchestration tool, not a
+# self-contained one. It drives host audio (pactl, pw-dump, pw-cli,
+# pipewire), signals host processes (pkill), and installs a udev rule via
+# pkexec. None of those binaries exist in the runtime, and even bundled they
+# would act on the sandbox's own namespaces rather than the host's. So the
+# Rust side routes every such call through `flatpak-spawn --host` (see
+# src-tauri/src/host_command.rs), which requires --talk-name below.
+#
+# The practical consequence is that this Flatpak's sandbox is largely
+# decorative: an app that can spawn arbitrary host commands can do anything
+# the user can. It is packaged this way because Flatpak is a convenient
+# delivery mechanism on immutable distros, not because it isolates anything.
+# The .deb/.rpm/AppImage builds from release-please.yml are the same program
+# with the same reach and no such pretence.
 finish-args:
   - --share=ipc
   - --socket=fallback-x11
   - --socket=wayland
-  - --device=dri
+  # dri alone is not enough: the virtual controller this app creates for
+  # dashboards is a uinput device, and /dev/uinput is only reachable with
+  # --device=all -- Flatpak has no finer-grained option for it. Without this the
+  # controller silently never appears and the app's own udev rule (installed via
+  # pkexec, see gamepad.rs) has nothing to grant access to inside the sandbox.
+  - --device=all
   - --socket=pulseaudio
+  # This app's own Rust backend serves the GraphQL API on 0.0.0.0:9000
+  # (src-tauri/src/main.rs) -- monocoque does not, contrary to what this
+  # comment claimed before it was checked against the source. The webview
+  # would reach it over loopback even inside an isolated network namespace,
+  # but the dashboard clients on other devices (phones, tablets, the rig's
+  # second screen -- "connected_clients" in the app's own data) could not,
+  # so the namespace has to be shared.
+  - --share=network
+  # Host /dev/shm. Flatpak hands the sandbox a private one -- measured with
+  # simd running: 0 entries inside this sandbox against 18 on the host --
+  # and it is its own device option, NOT covered by --device=dri or even
+  # --device=all. Every telemetry frame this app reads comes from simd's
+  # POSIX shared memory at /dev/shm/SIMAPI.DAT (telemetry/mod.rs), so
+  # without this the Flatpak build launches, serves its UI, and reports a
+  # sim that is never running.
+  - --device=shm
+  # Lets flatpak-spawn --host run commands outside the sandbox. Without it
+  # the spawn is refused and every host command silently fails.
+  - --talk-name=org.freedesktop.Flatpak
+  # WebKitGTK crashes on this hardware with `Error 71 (Protocol error)
+  # dispatching to Wayland display` -- the known DMABUF-renderer failure on
+  # NVIDIA. Confirmed fixed by this env var on a real launch, so it is baked
+  # in rather than left for users to discover.
+  - --env=WEBKIT_DISABLE_DMABUF_RENDERER=1
   - --filesystem=xdg-config/dashboard-designer:create
   - --filesystem=xdg-data/dashboard-designer:create
-  # 360° capture reads and rewrites Assetto Corsa's own config (race.ini,
-  # video.ini, the CSP overrides under cfg/extension) and installs a small
-  # CSP Lua app into the game folder, so it needs to reach the Steam tree.
-  # Both a native Steam and a Flatpak Steam are covered.
+  # The host's cache, not the sandbox's. Car thumbnails are frontend captures
+  # with no regenerable source, so a private XDG_CACHE_HOME is not a cold cache
+  # but a missing one -- 0 thumbnails here against 28 on the host, and every car
+  # card broken. See graphql::car::cache_root().
+  - --filesystem=xdg-cache/dashboard-designer:create
+  # The real ~/.config/monocoque, not the sandbox-private XDG_CONFIG_HOME.
+  # This app exists to configure monocoque, and monocoque reads its config
+  # from the host path -- without this grant the app would edit a private
+  # copy nothing ever reads. See config_manager::monocoque_config_dir().
+  - --filesystem=xdg-config/monocoque:create
+  # 360° capture and the AC telemetry app both read and rewrite Assetto
+  # Corsa's own config (race.ini, video.ini, the CSP overrides under
+  # cfg/extension) and install CSP Lua apps into the game folder, so they
+  # need to reach the Steam tree. Both a native Steam and a Flatpak Steam
+  # are covered.
   - --filesystem=xdg-data/Steam
   - --filesystem=~/.steam
   - --filesystem=~/.var/app/com.valvesoftware.Steam
   # Steam libraries on other drives. Bazzite and SteamOS mount these under
   # /var/mnt and /run/media respectively; a library can sit anywhere, so a
-  # folder picker is still the fallback for unusual layouts.
+  # folder picker remains the fallback for unusual layouts.
   - --filesystem=/var/mnt
   - --filesystem=/run/media
   - --filesystem=/media
@@ -51,6 +108,14 @@ build-options:
   append-path: /usr/lib/sdk/rust-stable/bin:/usr/lib/sdk/node20/bin
   env:
     CARGO_HOME: /run/build/typiql/cargo
+    XDG_CACHE_HOME: /run/build/typiql/flatpak-node/cache
+    npm_config_cache: /run/build/typiql/flatpak-node/npm-cache
+    # Link DuckDB's official prebuilt library rather than compiling its C++
+    # amalgamation. Building from source (the `bundled` feature) took ~22 min
+    # of a ~42 min build; this makes it seconds. libduckdb-sys only honours
+    # these when `bundled` is off, hence --no-default-features below.
+    DUCKDB_LIB_DIR: /run/build/typiql/duckdb-prebuilt
+    DUCKDB_INCLUDE_DIR: /run/build/typiql/duckdb-prebuilt
 
 modules:
   - name: typiql
@@ -63,10 +128,35 @@ modules:
       # crates) resolve locally and need no generated source entries;
       # only registry/git deps do.
       - type: dir
-        path: ../..
+        path: ../../..
         dest: src
       - generated-node-sources.json
       - generated-cargo-sources.json
+      # DuckDB's official prebuilt Linux x86_64 library. The version must match
+      # what libduckdb-sys generated its bindings against: that crate encodes it
+      # as 1.MAJOR_MINOR_PATCH.x, so 1.10505.0 => DuckDB 1.5.5. If the crate is
+      # bumped, this URL and checksum must move with it or the build will fail
+      # to link -- or worse, link against a mismatched ABI.
+      # The two git submodules, pinned to the commits the tree records. The
+      # checkout step deliberately omits `submodules: recursive` -- doing that
+      # writes a real .git file at each submodule path, which then collides
+      # with flatpak-builder's own git source ("cannot overwrite non-directory
+      # .git with directory"), a failure already hit on the sibling monocoque
+      # manifest. Fetching them here instead keeps the checkout clean and
+      # pins them reproducibly. Without these the frontend build fails with
+      # TS2307 "Cannot find module '../per-form'" and friends.
+      - type: git
+        url: https://github.com/MrDavid5465/per-form.git
+        commit: 1bbbf36ffbecab67ddd1375b4d9b35f2b6cd6a3f
+        dest: src/typiql-tauri/typiql/src/lib/per-form
+      - type: git
+        url: https://github.com/MrDavid5465/typical-admin-fabric.git
+        commit: e99b6f06edfdf1480c558927028d8c718ac8cf16
+        dest: src/typiql-tauri/typiql/src/lib/typical-admin-fabric
+      - type: archive
+        url: https://github.com/duckdb/duckdb/releases/download/v1.5.5/libduckdb-linux-amd64.zip
+        sha256: 1fb8ce388157d84a25abe685a8a2520bf00c00321821968e4bb398fd766e7abb
+        dest: duckdb-prebuilt
       - type: file
         path: com.telemetryadmin.app.desktop
       - type: file
@@ -74,8 +164,23 @@ modules:
     build-commands:
       - cd src/typiql-tauri/typiql && npm ci --offline
       - cd src/typiql-tauri/typiql && npm run build
-      - cd src/typiql-tauri/typiql/src-tauri && cargo build --release --offline --locked
+      # --locked (without --offline's own tolerance for reconciling a small
+      # Cargo.lock drift using only already-vendored crates) hard-fails here
+      # with "cannot update the lock file... because --locked was passed" --
+      # confirmed locally that plain --offline resolves the same drift fine,
+      # using only what's already cached, and still makes zero network calls.
+      - cd src/typiql-tauri/typiql/src-tauri && cargo build --release --offline --no-default-features --features custom-protocol
+      # Dynamically linked now rather than statically embedded, so the library
+      # has to ship inside the bundle.
+      - install -Dm755 duckdb-prebuilt/libduckdb.so /app/lib/libduckdb.so
       - install -Dm755 src/typiql-tauri/typiql/src-tauri/target/release/typiql /app/bin/typiql
+      # The Vite build, for the browsers on other devices that load their
+      # dashboards over HTTP. The window itself uses the copy embedded in the
+      # binary, so this is easy to forget -- and its absence is silent: the API
+      # answers normally while every page request 404s. api.rs looks for it
+      # next to the executable, hence /app/share/typiql/dist.
+      - mkdir -p /app/share/typiql
+      - cp -r src/typiql-tauri/typiql/dist /app/share/typiql/dist
       - install -Dm644 com.telemetryadmin.app.desktop /app/share/applications/com.telemetryadmin.app.desktop
       - install -Dm644 com.telemetryadmin.app.metainfo.xml /app/share/metainfo/com.telemetryadmin.app.metainfo.xml
       - install -Dm644 src/typiql-tauri/typiql/src-tauri/icons/128x128.png /app/share/icons/hicolor/128x128/apps/com.telemetryadmin.app.png

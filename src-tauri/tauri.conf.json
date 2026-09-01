@@ -32,6 +32,23 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "linux": {
+      "deb": {
+        "files": {
+          "/usr/share/typiql/dist": "../dist"
+        }
+      },
+      "rpm": {
+        "files": {
+          "/usr/share/typiql/dist": "../dist"
+        }
+      },
+      "appimage": {
+        "files": {
+          "/usr/share/typiql/dist": "../dist"
+        }
+      }
+    }
   }
 }
