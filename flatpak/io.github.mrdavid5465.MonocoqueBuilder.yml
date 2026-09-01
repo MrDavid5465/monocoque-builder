@@ -1,7 +1,7 @@
 # Best-effort Flatpak manifest — NOT submitted anywhere (Flathub or
 # otherwise), built in CI purely so a .flatpak bundle exists as a release
 # asset. Verified end-to-end (2026-08-30): a real workflow_dispatch run
-# produced a working com.telemetryadmin.app .flatpak bundle for the first
+# produced a working io.github.mrdavid5465.MonocoqueBuilder .flatpak bundle for the first
 # time — see .github/workflows/flatpak.yml's header for the full list of
 # real bugs that took ten iterations against real CI to find and fix. Not
 # yet covered: this repo's own git submodules under src/lib/, added on a
@@ -12,20 +12,20 @@
 # invoke external packaging tools (dpkg-deb, linuxdeploy, appimagetool)
 # that don't belong in a Flatpak sandbox and aren't needed here. Flatpak
 # just wants the raw binary, an icon, a .desktop file, and a metainfo.xml,
-# which this manifest supplies by hand (com.telemetryadmin.app.desktop /
+# which this manifest supplies by hand (io.github.mrdavid5465.MonocoqueBuilder.desktop /
 # .metainfo.xml, alongside this file).
 #
 # org.gnome.Platform, not org.freedesktop.Platform: WebKitGTK (which this
 # app's webview depends on) ships as part of the GNOME runtime, not the
 # bare freedesktop one.
-app-id: com.telemetryadmin.app
+app-id: io.github.mrdavid5465.MonocoqueBuilder
 runtime: org.gnome.Platform
 runtime-version: '49'
 sdk: org.gnome.Sdk
 sdk-extensions:
   - org.freedesktop.Sdk.Extension.rust-stable
   - org.freedesktop.Sdk.Extension.node20
-command: typiql
+command: monocoque-builder
 #
 # NOTE ON SANDBOXING: this app is a host-orchestration tool, not a
 # self-contained one. It drives host audio (pactl, pw-dump, pw-cli,
@@ -92,18 +92,18 @@ finish-args:
 build-options:
   append-path: /usr/lib/sdk/rust-stable/bin:/usr/lib/sdk/node20/bin
   env:
-    CARGO_HOME: /run/build/typiql/cargo
-    XDG_CACHE_HOME: /run/build/typiql/flatpak-node/cache
-    npm_config_cache: /run/build/typiql/flatpak-node/npm-cache
+    CARGO_HOME: /run/build/monocoque-builder/cargo
+    XDG_CACHE_HOME: /run/build/monocoque-builder/flatpak-node/cache
+    npm_config_cache: /run/build/monocoque-builder/flatpak-node/npm-cache
     # Link DuckDB's official prebuilt library rather than compiling its C++
     # amalgamation. Building from source (the `bundled` feature) took ~22 min
     # of a ~42 min build; this makes it seconds. libduckdb-sys only honours
     # these when `bundled` is off, hence --no-default-features below.
-    DUCKDB_LIB_DIR: /run/build/typiql/duckdb-prebuilt
-    DUCKDB_INCLUDE_DIR: /run/build/typiql/duckdb-prebuilt
+    DUCKDB_LIB_DIR: /run/build/monocoque-builder/duckdb-prebuilt
+    DUCKDB_INCLUDE_DIR: /run/build/monocoque-builder/duckdb-prebuilt
 
 modules:
-  - name: typiql
+  - name: monocoque-builder
     buildsystem: simple
     sources:
       # Populated at CI-generation time from the two sibling checkouts
@@ -143,9 +143,9 @@ modules:
         sha256: 1fb8ce388157d84a25abe685a8a2520bf00c00321821968e4bb398fd766e7abb
         dest: duckdb-prebuilt
       - type: file
-        path: com.telemetryadmin.app.desktop
+        path: io.github.mrdavid5465.MonocoqueBuilder.desktop
       - type: file
-        path: com.telemetryadmin.app.metainfo.xml
+        path: io.github.mrdavid5465.MonocoqueBuilder.metainfo.xml
     build-commands:
       - cd src/typiql-tauri/typiql && npm ci --offline
       - cd src/typiql-tauri/typiql && npm run build
@@ -158,15 +158,15 @@ modules:
       # Dynamically linked now rather than statically embedded, so the library
       # has to ship inside the bundle.
       - install -Dm755 duckdb-prebuilt/libduckdb.so /app/lib/libduckdb.so
-      - install -Dm755 src/typiql-tauri/typiql/src-tauri/target/release/typiql /app/bin/typiql
+      - install -Dm755 src/typiql-tauri/typiql/src-tauri/target/release/monocoque-builder /app/bin/monocoque-builder
       # The Vite build, for the browsers on other devices that load their
       # dashboards over HTTP. The window itself uses the copy embedded in the
       # binary, so this is easy to forget -- and its absence is silent: the API
       # answers normally while every page request 404s. api.rs looks for it
-      # next to the executable, hence /app/share/typiql/dist.
-      - mkdir -p /app/share/typiql
-      - cp -r src/typiql-tauri/typiql/dist /app/share/typiql/dist
-      - install -Dm644 com.telemetryadmin.app.desktop /app/share/applications/com.telemetryadmin.app.desktop
-      - install -Dm644 com.telemetryadmin.app.metainfo.xml /app/share/metainfo/com.telemetryadmin.app.metainfo.xml
-      - install -Dm644 src/typiql-tauri/typiql/src-tauri/icons/128x128.png /app/share/icons/hicolor/128x128/apps/com.telemetryadmin.app.png
-      - install -Dm644 src/typiql-tauri/typiql/src-tauri/icons/128x128@2x.png /app/share/icons/hicolor/256x256/apps/com.telemetryadmin.app.png
+      # next to the executable, hence /app/share/monocoque-builder/dist.
+      - mkdir -p /app/share/monocoque-builder
+      - cp -r src/typiql-tauri/typiql/dist /app/share/monocoque-builder/dist
+      - install -Dm644 io.github.mrdavid5465.MonocoqueBuilder.desktop /app/share/applications/io.github.mrdavid5465.MonocoqueBuilder.desktop
+      - install -Dm644 io.github.mrdavid5465.MonocoqueBuilder.metainfo.xml /app/share/metainfo/io.github.mrdavid5465.MonocoqueBuilder.metainfo.xml
+      - install -Dm644 src/typiql-tauri/typiql/src-tauri/icons/128x128.png /app/share/icons/hicolor/128x128/apps/io.github.mrdavid5465.MonocoqueBuilder.png
+      - install -Dm644 src/typiql-tauri/typiql/src-tauri/icons/128x128@2x.png /app/share/icons/hicolor/256x256/apps/io.github.mrdavid5465.MonocoqueBuilder.png

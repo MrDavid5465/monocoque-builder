@@ -40,15 +40,13 @@ impl Default for AppConfig {
 pub fn applications() -> Vec<AppEntry> {
     vec![
         AppEntry {
-            name: "Telemetry Admin".into(),
-            path: "telemetryadmin".into(),
-            front_end: "TelemetryAdmin".into(),
-            default_route: "".into(),
+            name: "Dashboards".into(),
+            path: "dashboards".into(),
+            front_end: "Dashboards".into(),
+            // The app is the dashboards list, so it opens straight onto it and
+            // no longer carries a sub-nav link that repeats its own name.
+            default_route: "dashboards".into(),
             links: vec![
-                AppLink {
-                    path: "dashboards".into(),
-                    text: "Dashboards".into(),
-                },
                 AppLink {
                     path: "cars".into(),
                     text: "Cars".into(),
@@ -129,11 +127,39 @@ fn config_path() -> PathBuf {
     // under Flatpak rather than the sandbox-private one -- see
     // super::monocoque_config_dir(). Keeping both files together also means a
     // Flatpak install and a native install see the same settings.
-    super::monocoque_config_dir().join("typiql.json")
+    super::monocoque_config_dir().join("monocoque-builder.json")
+}
+
+/// The settings file was named for the app back when the app was called
+/// typiql. Nothing else moved in the rename -- the data directory, the DuckDB
+/// recordings and the photo cache all live under ~/.config/dashboard-designer
+/// and are untouched -- but leaving this one file behind would silently reset
+/// the theme, the launch page and every monocoque/simd/huenicorn command line
+/// back to defaults on first launch after upgrading.
+///
+/// Moves rather than copies, so there is exactly one file of record. An older
+/// build run afterwards would seed itself fresh defaults rather than quietly
+/// diverge from a stale copy.
+fn migrate_legacy_config(path: &PathBuf) {
+    if path.exists() {
+        return;
+    }
+    let legacy = super::monocoque_config_dir().join("typiql.json");
+    if !legacy.is_file() {
+        return;
+    }
+    if let Err(e) = fs::rename(&legacy, path) {
+        eprintln!(
+            "could not move {} to {}: {e} -- starting from defaults",
+            legacy.display(),
+            path.display()
+        );
+    }
 }
 
 pub fn read_app_config() -> Result<AppConfig, String> {
     let path = config_path();
+    migrate_legacy_config(&path);
     if !path.exists() {
         // First run — write defaults and return them
         let default = AppConfig::default();

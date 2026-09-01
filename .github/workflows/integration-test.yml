@@ -102,13 +102,13 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: typiql-binary
-          path: typiql-tauri/typiql/src-tauri/target/release/typiql
+          name: monocoque-builder-binary
+          path: typiql-tauri/typiql/src-tauri/target/release/monocoque-builder
           if-no-files-found: error
 
       - uses: actions/upload-artifact@v4
         with:
-          name: typiql-deb
+          name: monocoque-builder-deb
           path: typiql-tauri/typiql/src-tauri/target/release/bundle/deb/*.deb
           if-no-files-found: error
 
@@ -118,7 +118,7 @@ jobs:
     container:
       image: archlinux:latest
     env:
-      # The built `typiql` binary is a real native GTK/webkit2gtk window, not
+      # The built `monocoque-builder` binary is a real native GTK/webkit2gtk window, not
       # just the embedded axum API — this container has no display server at
       # all, so it panics on startup ("Failed to initialize GTK") before the
       # API ever starts listening. Xvfb (started below) gives it one; DISPLAY
@@ -175,20 +175,20 @@ jobs:
       - name: Download the built binary
         uses: actions/download-artifact@v4
         with:
-          name: typiql-binary
-          path: /tmp/typiql-binary
+          name: monocoque-builder-binary
+          path: /tmp/monocoque-builder-binary
 
       - name: Download the built .deb (for PKGBUILD validation)
         uses: actions/download-artifact@v4
         with:
-          name: typiql-deb
-          path: /tmp/typiql-deb
+          name: monocoque-builder-deb
+          path: /tmp/monocoque-builder-deb
 
       - name: Stage the downloaded binary where the smoke test expects it
         run: |
           mkdir -p "$GITHUB_WORKSPACE/typiql-tauri/typiql/src-tauri/target/release"
-          cp /tmp/typiql-binary/typiql "$GITHUB_WORKSPACE/typiql-tauri/typiql/src-tauri/target/release/typiql"
-          chmod +x "$GITHUB_WORKSPACE/typiql-tauri/typiql/src-tauri/target/release/typiql"
+          cp /tmp/monocoque-builder-binary/typiql "$GITHUB_WORKSPACE/typiql-tauri/typiql/src-tauri/target/release/monocoque-builder"
+          chmod +x "$GITHUB_WORKSPACE/typiql-tauri/typiql/src-tauri/target/release/monocoque-builder"
 
       - name: Stage the downloaded .deb where the PKGBUILD expects it
         # Pre-seeding makepkg's local source cache with a file matching the
@@ -200,7 +200,7 @@ jobs:
         run: |
           cd "$GITHUB_WORKSPACE/typiql-tauri/typiql/pkg/aur"
           pkgver=$(grep -oP '^pkgver=\K.*' PKGBUILD)
-          cp /tmp/typiql-deb/*.deb "./typiql_${pkgver}_amd64.deb"
+          cp /tmp/monocoque-builder-deb/*.deb "./monocoque-builder_${pkgver}_amd64.deb"
 
       - name: Hand the checked-out workspace to the non-root build user
         run: chown -R builder:builder "$GITHUB_WORKSPACE"
@@ -237,7 +237,7 @@ jobs:
           export DISPLAY=:99
           cd "$1/typiql-tauri/typiql/src-tauri"
 
-          ./target/release/typiql &
+          ./target/release/monocoque-builder &
           app_pid=$!
           sleep 5
 
@@ -307,5 +307,5 @@ jobs:
             cd '$GITHUB_WORKSPACE/typiql-tauri/typiql/pkg/aur'
             makepkg --printsrcinfo > .SRCINFO
             makepkg -si --noconfirm
-            command -v typiql
+            command -v monocoque-builder
           "

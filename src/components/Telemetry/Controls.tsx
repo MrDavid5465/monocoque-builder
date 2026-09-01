@@ -63,7 +63,7 @@ const StatusDot: React.FC<{ mode: DotMode }> = ({ mode }) => (
 );
 
 const TelemetryControls: React.FC = () => {
-  const onDashRoute = !!useMatch('/telemetryadmin/dashboards/:name/show');
+  const onDashRoute = !!useMatch('/dashboards/dashboards/:name/show');
   const { car, track, simStatus } = useLiveTelemetry(onDashRoute);
   const isActive = simStatus === 'Active';
 
