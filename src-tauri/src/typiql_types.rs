@@ -11,9 +11,10 @@ use crate::graphql::builtin_templates::BuiltinTemplatesQuery;
 use crate::graphql::clients::ClientsMutation;
 use crate::graphql::dashboard_files::{DashboardFileSyncQuery, DashboardFileUploadMutation};
 use crate::graphql::{
-    CarFileMutation, CarPhotoSyncQuery, DashTemplateThumbnailMutation, DashboardMutation,
-    GamepadMutation, HuenicornMutation, NightClockMutation, RecordingControlMutation,
-    ShakerDspMutation, ShakerDspQuery, TrackGeocodeQuery,
+    AcTelemetryMutation, AcTelemetryQuery, CarCaptureMutation, CarCaptureQuery, CarFileMutation,
+    CarPhotoSyncQuery, DashTemplateThumbnailMutation, DashboardMutation, GamepadMutation,
+    HuenicornMutation, NightClockMutation, RecordingControlMutation, ShakerDspMutation,
+    ShakerDspQuery, TrackGeocodeQuery,
 };
 use crate::graphql::{QueryRoot, SubscriptionRoot};
 use crate::telemetry::types::{CourseFlag, SimStatus};
@@ -407,6 +408,16 @@ pub struct Car {
     /// storing that inline would bloat the JSON store. Out of scope for the
     /// File-relation migration — stays a plain filename for now.
     pub thumbnail: Option<String>,
+    /// Which installed Assetto Corsa car the 360° capture should load for
+    /// this record.
+    ///
+    /// Separate from `car_ids` because the two answer different questions:
+    /// `car_ids` is every raw id this record represents (a record can stand
+    /// for several, and they arrive from telemetry), while this is the one
+    /// specific car to put on track when taking its photo. Left unset it
+    /// falls back to the first `car_ids` entry, which is right whenever a
+    /// record maps to exactly one car — so most records never need it.
+    pub capture_car_id: Option<String>,
 }
 
 /// Global day/night state, shared live across every dashboard and kiosk display
@@ -727,7 +738,7 @@ typiql_schema!(
     MonocoqueSimWindDevice, SimWindDeviceProfile,
     DashTemplate, ConnectedClient, DashGroup, KnownCar, KnownTrack, DeviceDefault,
     Car, File, NightMode, CarDashPan, PreviewCar, DashboardEntry, Recording, RecordingFrame, TrackLocation;
-    AppConfigQuery, DashboardFileSyncQuery, BuiltinTemplatesQuery, CarPhotoSyncQuery, ShakerDspQuery, TrackGeocodeQuery, QueryRoot;
-    AppConfigMutation, DashboardFileUploadMutation, ClientsMutation, CarFileMutation, DashTemplateThumbnailMutation, DashboardMutation, GamepadMutation, NightClockMutation, ShakerDspMutation, RecordingControlMutation, HuenicornMutation;
+    AppConfigQuery, DashboardFileSyncQuery, BuiltinTemplatesQuery, CarPhotoSyncQuery, CarCaptureQuery, AcTelemetryQuery, ShakerDspQuery, TrackGeocodeQuery, QueryRoot;
+    AppConfigMutation, DashboardFileUploadMutation, ClientsMutation, CarFileMutation, CarCaptureMutation, AcTelemetryMutation, DashTemplateThumbnailMutation, DashboardMutation, GamepadMutation, NightClockMutation, ShakerDspMutation, RecordingControlMutation, HuenicornMutation;
     SubscriptionRoot
 );

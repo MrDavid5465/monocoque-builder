@@ -1,9 +1,9 @@
-use crate::typiql_types::{Car, File};
+use crate::typiql_types::{Car, CarChanged, File};
 use async_graphql::{Context, Object, Result as GqlResult};
 use serde_json::json;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use typiql::TypiQLAdapter;
+use typiql::{TypiQLAdapter, TypiQLBroker};
 
 /// Returns the directory where centralized 360° photos are stored.
 /// Mirrors the `typiql_data_dir()` logic from `api.rs`.
@@ -169,6 +169,74 @@ async fn store_uploaded_photo(
     Ok(path_str)
 }
 
+/// Stores one photo against a Car and points the matching slot at it.
+///
+/// `slot` is `"day"` or `"night"`, naming both the file on disk
+/// (`{car_id}-{slot}{ext}`) and the Car field that references it
+/// (`{slot}_photo_path`). Shared by the two upload mutations below and by
+/// the automated capture (`graphql/capture.rs`) so every route to a car
+/// photo goes through identical storage, hashing and File-record handling —
+/// an automated capture is not a second, subtly different way to save a
+/// photo, it's the same one with the bytes coming from elsewhere.
+pub(crate) async fn set_car_photo(
+    adapter: &Arc<dyn TypiQLAdapter>,
+    id: &str,
+    slot: &str,
+    filename: &str,
+    data: &str,
+) -> GqlResult<Car> {
+    let existing: Car = adapter
+        .get_one("cars".into(), "id", id)
+        .await
+        .ok_or_else(|| async_graphql::Error::new("Car not found"))
+        .and_then(|v| {
+            serde_json::from_value(v).map_err(|e| async_graphql::Error::new(e.to_string()))
+        })?;
+
+    let path_field = format!("{slot}_photo_path");
+    let previous_path = match slot {
+        "night" => existing.night_photo_path.as_ref(),
+        _ => existing.day_photo_path.as_ref(),
+    };
+
+    let new_path = store_uploaded_photo(adapter, id, slot, filename, data, previous_path).await?;
+
+    // The Car row only needs touching the first time a slot is filled — the
+    // path is deterministic, so on every later replace it's already correct
+    // and only the File record's hash/url move.
+    let result_val = if previous_path.map(String::as_str) == Some(new_path.as_str()) {
+        adapter
+            .get_one("cars".into(), "id", id)
+            .await
+            .ok_or_else(|| async_graphql::Error::new("Car not found"))?
+    } else {
+        adapter
+            .update("cars".into(), "id", id, json!({ path_field: new_path }))
+            .await
+            .ok_or_else(|| async_graphql::Error::new("Update failed"))?
+    };
+
+    let car: Car =
+        serde_json::from_value(result_val).map_err(|e| async_graphql::Error::new(e.to_string()))?;
+
+    // Published by hand because this writes through the adapter directly
+    // rather than `resolve_update`, so nothing else announces the change —
+    // the same manual-publish requirement `night_clock.rs` documents.
+    //
+    // It matters most for automated capture, which runs detached from any
+    // request: there's no mutation response for the page to update from, so
+    // without this the photos only appear on a manual refresh. Published
+    // unconditionally, including when the Car row itself didn't change —
+    // re-photographing a car leaves `{slot}_photo_path` identical and only
+    // moves the File it points at, which subscribers still need to know about.
+    TypiQLBroker::publish(CarChanged {
+        operation_name: "update".to_string(),
+        value: car.clone(),
+    });
+
+    Ok(car)
+}
+
 #[derive(Default)]
 pub struct CarFileMutation;
 
@@ -184,43 +252,7 @@ impl CarFileMutation {
         data: String,
     ) -> GqlResult<Car> {
         let adapter = crate::graphql::default_adapter(ctx)?;
-
-        let existing: Car = adapter
-            .get_one("cars".into(), "id", &id)
-            .await
-            .ok_or_else(|| async_graphql::Error::new("Car not found"))
-            .and_then(|v| {
-                serde_json::from_value(v).map_err(|e| async_graphql::Error::new(e.to_string()))
-            })?;
-
-        let new_path = store_uploaded_photo(
-            &adapter,
-            &id,
-            "day",
-            &filename,
-            &data,
-            existing.day_photo_path.as_ref(),
-        )
-        .await?;
-
-        let result_val = if existing.day_photo_path.as_deref() == Some(new_path.as_str()) {
-            adapter
-                .get_one("cars".into(), "id", &id)
-                .await
-                .ok_or_else(|| async_graphql::Error::new("Car not found"))?
-        } else {
-            adapter
-                .update(
-                    "cars".into(),
-                    "id",
-                    &id,
-                    json!({ "day_photo_path": new_path }),
-                )
-                .await
-                .ok_or_else(|| async_graphql::Error::new("Update failed"))?
-        };
-
-        serde_json::from_value(result_val).map_err(|e| async_graphql::Error::new(e.to_string()))
+        set_car_photo(&adapter, &id, "day", &filename, &data).await
     }
 
     /// Upload the night variant of a car's 360° photo — same camera position,
@@ -233,43 +265,7 @@ impl CarFileMutation {
         data: String,
     ) -> GqlResult<Car> {
         let adapter = crate::graphql::default_adapter(ctx)?;
-
-        let existing: Car = adapter
-            .get_one("cars".into(), "id", &id)
-            .await
-            .ok_or_else(|| async_graphql::Error::new("Car not found"))
-            .and_then(|v| {
-                serde_json::from_value(v).map_err(|e| async_graphql::Error::new(e.to_string()))
-            })?;
-
-        let new_path = store_uploaded_photo(
-            &adapter,
-            &id,
-            "night",
-            &filename,
-            &data,
-            existing.night_photo_path.as_ref(),
-        )
-        .await?;
-
-        let result_val = if existing.night_photo_path.as_deref() == Some(new_path.as_str()) {
-            adapter
-                .get_one("cars".into(), "id", &id)
-                .await
-                .ok_or_else(|| async_graphql::Error::new("Car not found"))?
-        } else {
-            adapter
-                .update(
-                    "cars".into(),
-                    "id",
-                    &id,
-                    json!({ "night_photo_path": new_path }),
-                )
-                .await
-                .ok_or_else(|| async_graphql::Error::new("Update failed"))?
-        };
-
-        serde_json::from_value(result_val).map_err(|e| async_graphql::Error::new(e.to_string()))
+        set_car_photo(&adapter, &id, "night", &filename, &data).await
     }
 
     /// Remove a car's night photo (file + File record), keeping the day photo intact.

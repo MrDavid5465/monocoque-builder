@@ -29,7 +29,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 dirs = "6.0.0"
 regex = "1.12.3"
-axum = "0.8.9"
+# `ws` is not a default feature: the AC telemetry Lua app streams frames in
+# over a plain WebSocket (see ac_telemetry::ingest).
+axum = { version = "0.8.9", features = ["ws"] }
 tokio = "1.52.3"
 async-graphql = "7.2.1"
 async-graphql-axum = "7.2.1"

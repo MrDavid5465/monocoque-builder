@@ -4,11 +4,13 @@ import { Stack, IconButton, Form, FormCard } from '../../../lib/denim/lib';
 import { GET_KNOWN_CARS } from '../Groups/queries';
 import {
   GET_CARS, UPDATE_CAR, DELETE_CAR, UPLOAD_CAR_PHOTO, UPLOAD_CAR_PHOTO_NIGHT, DELETE_CAR_PHOTO_NIGHT,
-  SYNC_CAR_PHOTOS, CarRecord, CarPhotoRef, parseCarIds,
+  SYNC_CAR_PHOTOS, CAR_CHANGED, CarRecord, CarPhotoRef, parseCarIds,
 } from '../carQueries';
+import Subscriber from '../../../lib/typical-admin/Subscriber';
 import { useGlobalPreviewCar } from '../useGlobalPreviewCar';
 import { LiveUpdatesContext, useLiveUpdatesHub } from '../liveUpdatesHub';
 import DashPanEditor from './DashPanEditor';
+import Car360Capture from './Car360Capture';
 import { confirmAsync } from '../../../lib/denim/components/ConfirmDialog';
 import { GET_PROFILES as GET_SHAKER_PROFILES, UPDATE_PROFILE as UPDATE_SHAKER_PROFILE } from '../../Shakers/Profiles/queries';
 import { GET_PROFILES as GET_LEDS_PROFILES, UPDATE_PROFILE as UPDATE_LEDS_PROFILE, profileResultKey as ledsProfileResultKey } from '../../LedsDevices/Profiles/queries';
@@ -231,6 +233,14 @@ const CarDetail: React.FC<Props> = ({ carRecordId, onBack }) => {
   return (
     <LiveUpdatesContext.Provider value={liveUpdatesHub}>
     {liveUpdatesHubSubscriber}
+    {/* subscribeToOne, as typical-admin-fabric's Update.tsx does it: react to
+        writes this page didn't make. An automated 360° capture runs detached
+        from any request, so there's no mutation response to update the cache
+        from — without this its photos only appear on a manual refresh. */}
+    <Subscriber
+      document={CAR_CHANGED}
+      options={{ variables: { id: carRecordId }, onSubscriptionData: () => refetch() }}
+    />
     <div style={{ padding: '1.2em 1.5em' }}>
       <Stack horizontal verticalAlign="center" horizontalAlign="space-between" style={{ marginBottom: '1em' }}>
         <Stack horizontal verticalAlign="center" tokens={{ childrenGap: 8 }}>
@@ -280,6 +290,14 @@ const CarDetail: React.FC<Props> = ({ carRecordId, onBack }) => {
               name={`car-photos-${car.id}`}
               initialValues={{ dayPhoto, nightPhoto }}
               onChange={handlePhotoChange}
+            />
+            {/* Sits with the manual upload fields deliberately: capturing
+                from the game and uploading a file by hand fill the same two
+                slots, so they belong in the same card. */}
+            <Car360Capture
+              carId={car.id}
+              gameCarIds={rawIds}
+              captureCarId={car.captureCarId}
             />
           </FormCard>
         </div>

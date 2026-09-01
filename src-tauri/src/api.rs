@@ -107,6 +107,12 @@ pub async fn build_router() -> Router {
     let router = Router::new()
         .route("/file-proxy", get(file_proxy))
         .route("/list-files", get(list_files))
+        // Where the in-game Lua app pushes extended AC telemetry. A plain
+        // WebSocket rather than part of the GraphQL schema: the producer is a
+        // Lua script, and making it speak `graphql-ws` by hand would be a lot
+        // of fragile work for nothing. The frontend still reads the result
+        // through the `acTelemetry` GraphQL subscription.
+        .route("/ac-telemetry", get(crate::ac_telemetry::ingest::handler))
         .nest(
             "/360-photos",
             Router::new()

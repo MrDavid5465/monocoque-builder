@@ -1,5 +1,7 @@
+pub mod ac_telemetry;
 pub mod app_config;
 pub mod builtin_templates;
+pub mod capture;
 pub mod car;
 pub mod clients;
 pub mod dashboard_entry;
@@ -11,6 +13,8 @@ pub mod recording;
 pub mod shaker_dsp;
 pub mod templates;
 pub mod track_geocode;
+pub use ac_telemetry::{AcTelemetryMutation, AcTelemetryQuery};
+pub use capture::{CarCaptureMutation, CarCaptureQuery};
 pub use car::{CarFileMutation, CarPhotoSyncQuery};
 pub use dashboard_entry::DashboardMutation;
 pub use gamepad::GamepadMutation;
@@ -312,6 +316,21 @@ impl SubscriptionRoot {
             .enumerate()
             .map(|(i, _)| i as i32)
     }
+    /// Extended, Assetto-Corsa-only telemetry from the in-game Lua app.
+    ///
+    /// Deliberately separate from `telemetry` above rather than folded into
+    /// it: that one is cross-sim and comes from the shared-memory bridge,
+    /// while this exists only when AC is running with the TyPiQL app
+    /// installed. Merging them would mean a dashboard couldn't tell which
+    /// fields it could actually count on. Query `acTelemetrySupport` first to
+    /// decide whether to subscribe at all.
+    async fn ac_telemetry(
+        &self,
+        #[graphql(default = 30)] rate_hz: u32,
+    ) -> impl Stream<Item = Option<ac_telemetry::AcTelemetry>> {
+        ac_telemetry::stream(rate_hz)
+    }
+
     async fn telemetry(&self) -> impl Stream<Item = Option<TelemetryFrame>> {
         IntervalStream::new(tokio::time::interval(Duration::from_millis(33)))
             .map(|_| current_frame())
