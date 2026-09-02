@@ -134,18 +134,6 @@ impl AppConfigMutation {
                     s.huenicorn_command,
                     existing.settings.huenicorn_command,
                 ),
-                simd_debug_command: merge_optional(
-                    s.simd_debug_command,
-                    existing.settings.simd_debug_command,
-                ),
-                monocoque_debug_command: merge_optional(
-                    s.monocoque_debug_command,
-                    existing.settings.monocoque_debug_command,
-                ),
-                huenicorn_debug_command: merge_optional(
-                    s.huenicorn_debug_command,
-                    existing.settings.huenicorn_debug_command,
-                ),
             }
         } else {
             existing.settings

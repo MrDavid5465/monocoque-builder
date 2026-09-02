@@ -70,32 +70,136 @@ fn live_track() -> Option<String> {
         .filter(|t| !t.is_empty())
 }
 
+/// How far the internal clock may drift from the game's before it's rebased.
+///
+/// This is a correction threshold, not a poll interval. Once the anchor is set
+/// and the rate matches, the two clocks track each other and no further write
+/// happens — so the steady state costs one DB write when the game starts, not
+/// one per tick at 60Hz. A second is well below anything visible on a clock
+/// face reading to the minute, and comfortably above the jitter between a
+/// 60Hz tick and a 60Hz telemetry frame.
+const CLOCK_DRIFT_TOLERANCE_MS: f64 = 1000.0;
+
+/// Smallest change in rate worth rebasing for, as a percentage.
+const SPEED_EPSILON_PERCENT: f64 = 0.5;
+
+/// Writes the game's time, date and rate into the simulated clock's anchor.
+///
+/// Returns the updated record when it rebased, `None` when it left things
+/// alone — which is the common case, and also what happens whenever the game
+/// isn't reporting. That last part is the point: with no frames arriving this
+/// does nothing at all, so the clock simply keeps running from the last anchor
+/// the game gave it. Entering the setup menus (which kills the Lua app) then
+/// costs nothing more than the clock free-running at the rate it was already
+/// going, instead of snapping to a different time.
+///
+/// Goes straight through the adapter, like `maybe_auto_recompute_sun_times`
+/// and for the same reason: the caller is the subscription's per-tick closure,
+/// which has outlived any request-scoped `Context`.
+pub async fn sync_clock_from_game(
+    adapter: &Arc<dyn TypiQLAdapter>,
+    record: &NightMode,
+) -> Option<NightMode> {
+    let frame = crate::ac_telemetry::latest()?;
+    let now = now_ms();
+    // Not `session_timestamp` directly: this keeps the time-of-day fallback
+    // for a CSP old enough not to populate the timestamp, where the date is
+    // unknown but the clock is still worth following.
+    let game_ms = super::sim_ms_from_game(&frame, now);
+
+    // AC's race time multiplier: 1 = real time. Documented as possibly 0
+    // (paused) or negative (online), neither of which is a rate this clock
+    // should adopt — keep whatever it was using and just correct the time.
+    let game_speed_percent = (frame.time_multiplier as f64 * 100.0)
+        .is_finite()
+        .then(|| frame.time_multiplier as f64 * 100.0)
+        .filter(|p| *p > 0.0);
+    let current_speed = record.sim_speed_percent.unwrap_or(100.0);
+    let speed_changed =
+        game_speed_percent.is_some_and(|p| (p - current_speed).abs() > SPEED_EPSILON_PERCENT);
+
+    let drifted = match current_sim_ms(record, now) {
+        Some(sim_ms) => (game_ms - sim_ms).abs() > CLOCK_DRIFT_TOLERANCE_MS,
+        // No usable anchor yet — the first frame establishes one.
+        None => true,
+    };
+    if !drifted && !speed_changed {
+        return None;
+    }
+
+    let mut patch = json!({
+        "sim_base_sim_time_ms": game_ms,
+        "sim_base_real_time": now,
+    });
+    if let Some(speed) = game_speed_percent {
+        patch["sim_speed_percent"] = json!(speed);
+    }
+    let updated_val = adapter
+        .update(
+            NightMode::collection_name().into(),
+            NightMode::key_field(),
+            &record.id,
+            patch,
+        )
+        .await?;
+    let updated: NightMode = serde_json::from_value(updated_val).ok()?;
+    TypiQLBroker::publish(NightModeChanged {
+        operation_name: "update".to_string(),
+        value: updated.clone(),
+    });
+    Some(updated)
+}
+
+/// The in-game calendar date ("YYYY-MM-DD"), read off the internal clock.
+///
+/// Deliberately the clock rather than the telemetry frame directly. The clock
+/// is disciplined from the game (see `sync_clock_from_game`), so this IS the
+/// game's date whenever the game is running — and it stays the game's date
+/// through a telemetry gap, which the frame cannot. Without that, entering
+/// the setup menus would drop sunrise/sunset back to whatever date was last
+/// picked by hand, and a session running past midnight would stop advancing.
+fn clock_date(record: &NightMode) -> Option<String> {
+    let sim_ms = current_sim_ms(record, now_ms())?;
+    Some(crate::sun_position::iso_date_from_epoch_seconds(
+        (sim_ms / 1000.0).floor() as i64,
+    ))
+}
+
+/// Recomputes sunrise/sunset (and the dawn/dusk transition width) whenever
+/// the location or the date they were computed for goes stale.
+///
+/// The date comes from the internal clock, which the game disciplines while
+/// it's running — so a session set in June gets June's sunrise rather than
+/// today's, and keeps it while the telemetry app is away. The manually-picked
+/// date (`sim_sunrise_sunset_date`, set via `setSunriseSunsetFromDate`) is the
+/// fallback for a clock with no anchor at all.
+///
 /// Reacts to the live track changing the same way the 360° photo viewer
-/// reacts to the car changing — but sunrise/sunset need a calendar date as
-/// well as a location, and telemetry has no "what date is it in-game"
-/// signal to react to. So this reuses whichever date was last picked via
-/// `setSunriseSunsetFromDate` (`sim_sunrise_sunset_date`) rather than asking
-/// again: if the live track differs from `sim_last_computed_track` and
-/// resolves to a known `TrackLocation`, recompute and persist
-/// sunrise/sunset for that same remembered date. No-ops quietly (leaving
-/// whatever sunrise/sunset are already set) if there's no remembered date
-/// yet (nothing manually computed before), no live track, or the live track
-/// isn't linked to a location — this runs on every clock tick, so it must
-/// stay silent rather than erroring like the mutation does.
+/// reacts to the car changing. No-ops quietly (leaving whatever
+/// sunrise/sunset are already set) if there's no date from either source, no
+/// live track, or the live track isn't linked to a location — this runs on
+/// every clock tick, so it must stay silent rather than erroring like the
+/// mutation does.
 ///
 /// Read/write here goes straight through the adapter (`TypiQLAdapter::update`
 /// takes no `Context`) since this is called from the `nightClock`
 /// subscription's per-tick closure, which has outlived any request-scoped
 /// `Context` by the time it runs.
 pub async fn maybe_auto_recompute_sun_times(adapter: &Arc<dyn TypiQLAdapter>, record: &NightMode) {
-    let Some(last_date) = record.sim_sunrise_sunset_date.as_deref() else {
+    let Some(date) = clock_date(record).or_else(|| record.sim_sunrise_sunset_date.clone()) else {
         return;
     };
-    let Some((year, month, day)) = crate::sun_position::parse_iso_date(last_date) else {
+    let Some((year, month, day)) = crate::sun_position::parse_iso_date(&date) else {
         return;
     };
     let Some(track) = live_track() else { return };
-    if record.sim_last_computed_track.as_deref() == Some(track.as_str()) {
+    // Nothing to redo while both inputs still match what's already stored.
+    // The date is part of the guard, not just the track: with the game
+    // supplying it, it changes on its own as the in-game clock rolls past
+    // midnight (or the user loads a session set on another day).
+    if record.sim_last_computed_track.as_deref() == Some(track.as_str())
+        && record.sim_sunrise_sunset_date.as_deref() == Some(date.as_str())
+    {
         return;
     }
     let Some(location) = find_track_location(adapter, &track).await else {
@@ -111,11 +215,22 @@ pub async fn maybe_auto_recompute_sun_times(adapter: &Arc<dyn TypiQLAdapter>, re
         return;
     };
 
-    let patch = json!({
+    let mut patch = json!({
         "sim_sunrise": crate::sun_position::format_hhmm(sunrise_min),
         "sim_sunset": crate::sun_position::format_hhmm(sunset_min),
+        "sim_sunrise_sunset_date": date,
         "sim_last_computed_track": track,
     });
+    if let Some(minutes) = crate::sun_position::compute_transition_minutes(
+        year,
+        month,
+        day,
+        location.latitude,
+        location.longitude,
+    ) {
+        patch["sim_transition_minutes"] =
+            json!(crate::sun_position::quantize_transition_minutes(minutes));
+    }
     let Some(updated_val) = adapter
         .update(
             NightMode::collection_name().into(),
@@ -232,10 +347,14 @@ impl NightClockMutation {
         save_anchor(ctx, &record.id, sim_ms, now, Some(speed_percent)).await
     }
 
-    /// Computes real sunrise/sunset for the given calendar date ("YYYY-MM-DD")
-    /// at whatever real-world circuit the CURRENT live telemetry track
-    /// matches (via `TrackLocation.raw_track_ids`), and saves them as
-    /// `simSunrise`/`simSunset`. Errors with a clear, specific reason at each
+    /// Computes real sunrise/sunset — and the civil-twilight dawn/dusk
+    /// width — for the given calendar date ("YYYY-MM-DD") at whatever
+    /// real-world circuit the CURRENT live telemetry track matches (via
+    /// `TrackLocation.raw_track_ids`), and saves them as
+    /// `simSunrise`/`simSunset`/`simTransitionMinutes`. Note that while AC is
+    /// running, `maybe_auto_recompute_sun_times` will subsequently redo this
+    /// for the game's own in-game date; this mutation is what drives it when
+    /// nothing is live. Errors with a clear, specific reason at each
     /// step (no live track, unrecognized track id, track known but no
     /// location set yet) rather than silently no-op-ing, since the frontend
     /// surfaces these directly to the user as the next action to take.
@@ -278,13 +397,26 @@ impl NightClockMutation {
         // Remembers `date` and `track` so the background tick can
         // automatically redo this same computation later if the live track
         // changes — see `maybe_auto_recompute_sun_times`.
-        let patch: NightModeInput = serde_json::from_value(json!({
+        let mut patch_value = json!({
             "sim_sunrise": crate::sun_position::format_hhmm(sunrise_min),
             "sim_sunset": crate::sun_position::format_hhmm(sunset_min),
             "sim_sunrise_sunset_date": date,
             "sim_last_computed_track": track,
-        }))
-        .map_err(to_gql_err)?;
+        });
+        // The dawn/dusk width is as much a property of the date and latitude
+        // as the two times themselves are, so it's computed alongside them
+        // rather than left at a fixed default that only suits one latitude.
+        if let Some(minutes) = crate::sun_position::compute_transition_minutes(
+            year,
+            month,
+            day,
+            location.latitude,
+            location.longitude,
+        ) {
+            patch_value["sim_transition_minutes"] =
+                json!(crate::sun_position::quantize_transition_minutes(minutes));
+        }
+        let patch: NightModeInput = serde_json::from_value(patch_value).map_err(to_gql_err)?;
         let updated = resolve_update::<NightMode>(ctx, record.id, patch)
             .await?
             .ok_or_else(|| async_graphql::Error::new("NightMode record disappeared mid-update"))?;

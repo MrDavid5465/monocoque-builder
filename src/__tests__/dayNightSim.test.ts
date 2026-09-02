@@ -137,6 +137,10 @@ describe('computeEffectiveNightState', () => {
     expect(state.nightAmount).toBe(1);
   });
 
+
+
+
+
   it('falls back to manual if simEnabled is true but sunrise/sunset are not configured', () => {
     const noon = Date.UTC(2026, 0, 1, 12, 0, 0);
     const state = computeEffectiveNightState({ isNight: true, simEnabled: true, simSunrise: null }, noon);

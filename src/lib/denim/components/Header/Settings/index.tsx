@@ -17,6 +17,7 @@ import {
   DeviceDefault,
 } from '../../../../../components/Telemetry/deviceDefaultsQueries';
 import DayNightSimPanel from '../../../../../components/Telemetry/DayNightSimPanel';
+import GameConfigPanel from '../../../../../components/Telemetry/GameConfigPanel';
 
 const AXIS_LABELS = ['X', 'Y', 'Z', 'RX', 'RY', 'RZ'];
 
@@ -63,13 +64,6 @@ const Index: React.FC<Props> = ({ isOpen, dismissModal, settings }) => {
   const [simdCommand, setSimdCommand] = useState<string>(settings.simdCommand ?? 'simd');
   const [monocoqueCommand, setMonocoqueCommand] = useState<string>(settings.monocoqueCommand ?? 'monocoque play');
   const [huenicornCommand, setHuenicornCommand] = useState<string>(settings.huenicornCommand ?? 'huenicorn');
-  // Dev-build overrides. Empty is meaningful: in a debug build the watchdog
-  // refuses to start a service with no dev command rather than falling back
-  // to the installed one (see service_commands.rs), so these save as null
-  // rather than '' to keep "unset" distinct from "set to empty".
-  const [simdDebugCommand, setSimdDebugCommand] = useState<string>(settings.simdDebugCommand ?? '');
-  const [monocoqueDebugCommand, setMonocoqueDebugCommand] = useState<string>(settings.monocoqueDebugCommand ?? '');
-  const [huenicornDebugCommand, setHuenicornDebugCommand] = useState<string>(settings.huenicornDebugCommand ?? '');
   const debugBuild: boolean = settings.debugBuild ?? false;
   const [udevWorking, setUdevWorking] = useState(false);
   const [udevMsg, setUdevMsg] = useState<string | null>(null);
@@ -152,15 +146,6 @@ const Index: React.FC<Props> = ({ isOpen, dismissModal, settings }) => {
   useEffect(() => {
     if (settings.huenicornCommand != null) setHuenicornCommand(settings.huenicornCommand);
   }, [settings.huenicornCommand]);
-  useEffect(() => {
-    setSimdDebugCommand(settings.simdDebugCommand ?? '');
-  }, [settings.simdDebugCommand]);
-  useEffect(() => {
-    setMonocoqueDebugCommand(settings.monocoqueDebugCommand ?? '');
-  }, [settings.monocoqueDebugCommand]);
-  useEffect(() => {
-    setHuenicornDebugCommand(settings.huenicornDebugCommand ?? '');
-  }, [settings.huenicornDebugCommand]);
 
   // Backend query, not a Tauri command — the backend is the process that
   // would actually open /dev/uinput, and this way the browser build can ask
@@ -366,9 +351,6 @@ const Index: React.FC<Props> = ({ isOpen, dismissModal, settings }) => {
             // Explicit null (not '') clears back to unset — omitting the
             // field would mean "leave unchanged" per AppSettingsInput's
             // MaybeUndefined convention.
-            simdDebugCommand: simdDebugCommand.trim() || null,
-            monocoqueDebugCommand: monocoqueDebugCommand.trim() || null,
-            huenicornDebugCommand: huenicornDebugCommand.trim() || null,
           },
         },
       });
@@ -574,47 +556,28 @@ const Index: React.FC<Props> = ({ isOpen, dismissModal, settings }) => {
                 }}
               >
                 {debugBuild
-                  ? 'Development build — the dev commands below are in use. A service with no dev command set will not be started.'
-                  : 'Release build — the production commands below are in use. Dev commands are ignored.'}
+                  ? 'Development build — these commands are ignored. Each service is launched from '
+                    + 'TYPIQL_<SERVICE>_DEV_COMMAND in the environment, and one with no variable set '
+                    + 'is not started at all.'
+                  : 'Release build — the commands below are in use.'}
               </span>
               <Form
-                key={`services-${simdCommand}-${monocoqueCommand}-${huenicornCommand}-${simdDebugCommand}-${monocoqueDebugCommand}-${huenicornDebugCommand}`}
+                key={`services-${simdCommand}-${monocoqueCommand}-${huenicornCommand}`}
                 form={{
                   simdCommand: { type: 'text', label: 'simd command', placeholder: 'simd' },
-                  simdDebugCommand: {
-                    type: 'text',
-                    label: 'simd command (dev build)',
-                    placeholder: '/path/to/simapi/build/simd/simd',
-                  },
                   monocoqueCommand: { type: 'text', label: 'monocoque command', placeholder: 'monocoque play' },
-                  monocoqueDebugCommand: {
-                    type: 'text',
-                    label: 'monocoque command (dev build)',
-                    placeholder: '/path/to/monocoque/build/monocoque play',
-                  },
                   huenicornCommand: { type: 'text', label: 'huenicorn command', placeholder: 'huenicorn' },
-                  huenicornDebugCommand: {
-                    type: 'text',
-                    label: 'huenicorn command (dev build)',
-                    placeholder: '/path/to/huenicorn/build/huenicorn',
-                  },
                 }}
                 name="servicesSettings"
                 initialValues={{
                   simdCommand,
-                  simdDebugCommand,
                   monocoqueCommand,
-                  monocoqueDebugCommand,
                   huenicornCommand,
-                  huenicornDebugCommand,
                 }}
                 onChange={(_n: string, { clean }: any) => {
                   setSimdCommand(clean.simdCommand);
                   setMonocoqueCommand(clean.monocoqueCommand);
                   setHuenicornCommand(clean.huenicornCommand);
-                  setSimdDebugCommand(clean.simdDebugCommand ?? '');
-                  setMonocoqueDebugCommand(clean.monocoqueDebugCommand ?? '');
-                  setHuenicornDebugCommand(clean.huenicornDebugCommand ?? '');
                 }}
               />
             </Stack>
@@ -623,6 +586,15 @@ const Index: React.FC<Props> = ({ isOpen, dismissModal, settings }) => {
           <PivotItem headerText="Day/Night">
             <Stack style={{ paddingTop: '0.77em' }}>
               <DayNightSimPanel />
+            </Stack>
+          </PivotItem>
+
+          {/* Sits next to Services because it answers the same kind of
+              question — is the thing this app depends on actually there —
+              just for the game rather than for a companion process. */}
+          <PivotItem headerText="Game">
+            <Stack style={{ paddingTop: '0.77em' }}>
+              <GameConfigPanel />
             </Stack>
           </PivotItem>
 

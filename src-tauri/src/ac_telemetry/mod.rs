@@ -105,6 +105,21 @@ pub struct AcTelemetryFrame {
     pub physics_available: bool,
 }
 
+impl AcTelemetryFrame {
+    /// `timestamp`, but only when it actually carries a session date rather
+    /// than a placeholder — an older CSP, or a frame that arrived before the
+    /// field was populated, reports something near zero. Anything before 2000
+    /// isn't a date a session could plausibly be set in.
+    ///
+    /// Shared by every consumer that wants the in-game date (the night clock
+    /// override in `graphql/mod.rs`, and sunrise/sunset in
+    /// `graphql/night_clock.rs`) so the plausibility rule stays in one place.
+    pub fn session_timestamp(&self) -> Option<i64> {
+        const EARLIEST_PLAUSIBLE: i64 = 946_684_800;
+        (self.timestamp > EARLIEST_PLAUSIBLE).then_some(self.timestamp)
+    }
+}
+
 /// The most recent frame, plus when it arrived.
 ///
 /// Held in process rather than persisted — it's a live signal with no

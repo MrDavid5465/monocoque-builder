@@ -124,12 +124,44 @@ const DayNightSimPanel: React.FC = () => {
   const [setSunriseSunsetFromDate, { loading: computingSunTimes }] = useMutation(SET_SUNRISE_SUNSET_FROM_DATE);
   const current = ((data as any)?.getNightModes ?? [])[0] as NightModeRecord | undefined;
 
-  // Defaults to today — pick a different date to get that day's real
-  // sunrise/sunset instead (e.g. simulating a summer day while actually
-  // playing in winter). Uses whatever track live telemetry currently
-  // reports (see graphql/night_clock.rs); errors (no live track, track not
-  // linked to a Track Location yet) are shown here directly.
-  const [computeDate, setComputeDate] = useState(() => new Date().toISOString().slice(0, 10));
+  // Reuses useGlobalNightMode's subscription for the live clock tick rather
+  // than opening a second one — see NIGHT_MODE_UPDATES's doc comment for why
+  // that's not just a style preference (a second always-on subscription on
+  // top of this one starved the browser's connection pool and hung
+  // unrelated mutations).
+  //
+  // tickThrottleMs: 1000 — this panel only ever displays simTimeMs as a
+  // "HH:MM" label and a "YYYY-MM-DD" date (see below), so sub-second
+  // precision is thrown away anyway. Left unthrottled, the raw ~60Hz tick
+  // re-rendered this whole panel — including its two per-form <Form>s and
+  // their Fluent ComboBoxes — 60x/sec whenever the popup was open, which
+  // reproduced a real "Maximum update depth exceeded" warning (see
+  // useGlobalNightMode's own doc comment on tickThrottleMs for the live
+  // repro).
+  const { simTimeMs, fromGame, hubSubscriber } = useGlobalNightMode(undefined, { tickThrottleMs: 1000 });
+
+  // Shows the in-game date while Assetto Corsa is running, falling back to
+  // today's — pick a different date to get that day's real sunrise/sunset
+  // instead (e.g. simulating a summer day while actually playing in winter).
+  // Uses whatever track live telemetry currently reports (see
+  // graphql/night_clock.rs); errors (no live track, track not linked to a
+  // Track Location yet) are shown here directly.
+  //
+  // Held as an *override* rather than state synced from the game via an
+  // effect: the displayed value is derived fresh every render, so the field
+  // follows the game's date as the session's clock rolls over without any
+  // sync effect to get out of step (and without this panel — memoized
+  // precisely because it sits in a ~60Hz render tree — gaining a new
+  // state-update-on-tick path).
+  const [computeDateOverride, setComputeDateOverride] = useState<string | null>(null);
+  // getUTC*, matching dayNightSim.ts's deliberate UTC-only treatment of
+  // simTimeMs — and matching the backend, which reads the same in-game
+  // timestamp as a track-local date (graphql/night_clock.rs's `game_date`).
+  // Gated on `fromGame`: without it simTimeMs is the server's own simulated
+  // clock, whose date is an artifact of however far it's been nudged rather
+  // than anything the user would recognise.
+  const gameDate = fromGame && simTimeMs != null ? new Date(simTimeMs).toISOString().slice(0, 10) : null;
+  const computeDate = computeDateOverride ?? gameDate ?? new Date().toISOString().slice(0, 10);
   const [computeError, setComputeError] = useState<string | null>(null);
   // Set (opening TrackLinkDialog) when the compute call fails specifically
   // because the live track isn't linked to a Track Location yet — see
@@ -147,6 +179,14 @@ const DayNightSimPanel: React.FC = () => {
   // directly — only this specific external, discrete action forces a fresh
   // snapshot.
   const [computeNonce, setComputeNonce] = useState(0);
+  // Same problem, other trigger: the backend also recomputes sunrise/sunset
+  // on its own while the game is running (whenever the in-game date or the
+  // live track changes — graphql/night_clock.rs's
+  // maybe_auto_recompute_sun_times), with no click here to bump the nonce.
+  // Those two fields move only on a recompute, never on a hand-edit of
+  // sunrise/sunset, so folding them into the key refreshes the ComboBoxes
+  // for a server-side recompute without remounting mid-edit.
+  const computedFor = `${current?.simSunriseSunsetDate ?? ''}@${current?.simLastComputedTrack ?? ''}`;
   const handleComputeFromDate = () => {
     setComputeError(null);
     setSunriseSunsetFromDate({ variables: { date: computeDate } })
@@ -170,21 +210,6 @@ const DayNightSimPanel: React.FC = () => {
     setUnlinkedTrack(null);
     handleComputeFromDate();
   };
-
-  // Reuses useGlobalNightMode's subscription for the live clock tick rather
-  // than opening a second one — see NIGHT_MODE_UPDATES's doc comment for why
-  // that's not just a style preference (a second always-on subscription on
-  // top of this one starved the browser's connection pool and hung
-  // unrelated mutations).
-  //
-  // tickThrottleMs: 1000 — this panel only ever displays simTimeMs as a
-  // "HH:MM" label (see below), so sub-second precision is thrown away
-  // anyway. Left unthrottled, the raw ~60Hz tick re-rendered this whole
-  // panel — including its two per-form <Form>s and their Fluent ComboBoxes
-  // — 60x/sec whenever the popup was open, which reproduced a real
-  // "Maximum update depth exceeded" warning (see useGlobalNightMode's own
-  // doc comment on tickThrottleMs for the live repro).
-  const { simTimeMs, hubSubscriber } = useGlobalNightMode(undefined, { tickThrottleMs: 1000 });
 
   const save = (update: Partial<NightModeRecord>) => {
     if (current?.id) {
@@ -327,7 +352,7 @@ const DayNightSimPanel: React.FC = () => {
       <Separator />
 
       <Form
-        key={current ? `loaded-config-${current.id}-${computeNonce}` : 'loading-config'}
+        key={current ? `loaded-config-${current.id}-${computeNonce}-${computedFor}` : 'loading-config'}
         form={configSchema}
         name="dayNightSimConfig"
         initialValues={configInitialValues}
@@ -336,13 +361,15 @@ const DayNightSimPanel: React.FC = () => {
 
       <Stack tokens={{ childrenGap: 4 }}>
         <span style={{ fontSize: '0.78em', opacity: 0.65 }}>
-          Or compute real sunrise/sunset for a date, at whatever track is currently live
+          {gameDate && computeDateOverride == null
+            ? "Sunrise, sunset and the dawn/dusk width follow the game's own date and track"
+            : 'Or compute real sunrise/sunset for a date, at whatever track is currently live'}
         </span>
         <Stack horizontal verticalAlign="end" tokens={{ childrenGap: 8 }}>
           <TextField
             type="date"
             value={computeDate}
-            onChange={(_e, v) => setComputeDate(v ?? '')}
+            onChange={(_e, v) => setComputeDateOverride(v ?? '')}
             styles={{ root: { flex: 1 } }}
           />
           <DefaultButton

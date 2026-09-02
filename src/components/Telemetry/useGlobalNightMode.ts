@@ -9,7 +9,7 @@ import {
   UPDATE_NIGHT_MODE,
 } from './nightModeQueries';
 import { computeEffectiveNightState, computeToggleDeltaMinutes } from './dayNightSim';
-import { LiveUpdatesContext, LiveUpdatesHub, useHubListener, useLiveUpdatesHub } from './liveUpdatesHub';
+import { LiveUpdatesContext, LiveUpdatesHub, useHubListener, useLiveUpdatesDemand, useLiveUpdatesHub } from './liveUpdatesHub';
 
 export interface NightModeLiveFeed {
   record: NightModeRecord | undefined;
@@ -53,6 +53,9 @@ export function useGlobalNightMode(externalHub?: LiveUpdatesHub, opts?: { liveCl
   nightAmount: number;
   simEnabled: boolean;
   simTimeMs: number | null;
+  /** True when `simTimeMs` is Assetto Corsa's own clock rather than the
+   *  server's simulated one — so its calendar date is the in-game date. */
+  fromGame: boolean;
   toggleNightMode: () => void;
   setSimActive: (active: boolean) => void;
   feed: NightModeLiveFeed;
@@ -113,13 +116,22 @@ export function useGlobalNightMode(externalHub?: LiveUpdatesHub, opts?: { liveCl
   // whenever an ambient hub (explicit or context) is already available.
   const [ownHub, ownHubSubscriber] = useLiveUpdatesHub({
     includeTelemetry: false,
-    includeNightClock: liveClock,
+    includeNightClock: false,
     skip: !!externalHub || !!contextHub,
   });
   const hub = externalHub ?? contextHub ?? ownHub;
+  // Asked for as a demand rather than as an option on the private hub above,
+  // so it reaches whichever hub is actually in use — including a shared one
+  // this hook didn't open. Withdrawn when this consumer unmounts, so the
+  // clock stops being streamed once nothing is displaying it.
+  useLiveUpdatesDemand(hub, { includeNightClock: liveClock });
 
   const [ownLive, setOwnLive] = useState<NightModeRecord | undefined>(undefined);
   const [ownSimTimeMs, setOwnSimTimeMs] = useState<number | null>(null);
+  // Whether `simTimeMs` is the game's own clock rather than the server's
+  // simulated one — which also makes it the game's own calendar DATE, the
+  // part DayNightSimPanel needs for its compute-from-date field.
+  const [ownFromGame, setOwnFromGame] = useState<boolean | null>(null);
 
   // One-shot preload so a freshly-mounted popup shows the real current time
   // immediately instead of "—" until the subscription's first push arrives.
@@ -146,10 +158,14 @@ export function useGlobalNightMode(externalHub?: LiveUpdatesHub, opts?: { liveCl
       lastTickAtRef.current = now;
     }
     setOwnSimTimeMs(event.simTimeMs);
+    // Carried on the same tick as the clock, so it needs no separate
+    // subscription and can never disagree with the time it arrived beside.
+    setOwnFromGame(!!event.fromGame);
   }, [tickThrottleMs]);
   useHubListener(hub, 'NightClockTick', liveClock ? onNightClockTick : undefined);
 
   const ownSimTimeMsPreloaded = ownSimTimeMs ?? (snapshotData as any)?.nightClockSnapshot?.simTimeMs ?? null;
+  const fromGame = ownFromGame ?? !!(snapshotData as any)?.nightClockSnapshot?.fromGame;
   // `ownLive`, not `queried` — mirrors the old `live`/`current` split: stays
   // undefined until the first NightModeChanged event even though `queried`
   // (GET_NIGHT_MODES) already has the record, but every consumer of this
@@ -214,6 +230,7 @@ export function useGlobalNightMode(externalHub?: LiveUpdatesHub, opts?: { liveCl
     nightAmount: effective.nightAmount,
     simEnabled: !!current?.simEnabled,
     simTimeMs,
+    fromGame,
     toggleNightMode,
     setSimActive,
     feed: resolvedFeed,

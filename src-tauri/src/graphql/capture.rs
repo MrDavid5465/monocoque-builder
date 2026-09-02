@@ -54,11 +54,84 @@ pub struct AcCaptureSupport {
     pub cars: Vec<AcCarOption>,
 }
 
+/// Everything the Game Config settings panel checks, in one query.
+///
+/// One request rather than several because the panel shows them together and
+/// they share the same path resolution — asking separately would repeat that
+/// work and let the rows disagree with each other mid-refresh.
+#[derive(SimpleObject, Default)]
+pub struct GameConfig {
+    /// Resolved Assetto Corsa install, if one was found.
+    pub install_path: Option<String>,
+    /// Whether that path was auto-detected rather than configured by hand.
+    pub install_detected: bool,
+    /// Whether Custom Shaders Patch is present. Everything this app does
+    /// inside the game is CSP Lua, so without it neither capture nor the
+    /// telemetry app can work at all.
+    pub csp_installed: bool,
+    /// Whether the extended-telemetry Lua app is installed in the game.
+    pub telemetry_app_installed: bool,
+    /// The game's current Steam launch options, verbatim.
+    pub launch_options: Option<String>,
+    /// Whether those launch options set `SIMD_BRIDGE_EXE`, which is what
+    /// simd's automatic bridging needs — it reads the variable from the
+    /// *game's* environment, so it has to be set where Steam starts the game.
+    pub bridge_configured: bool,
+    /// Launch options with the bridge variable added, ready to paste into
+    /// Steam. Offered as text rather than written directly: Steam keeps this
+    /// config in memory and rewrites the file on exit, so an edit made while
+    /// it's running is silently discarded.
+    pub recommended_launch_options: Option<String>,
+}
+
+/// Variable simd reads from the game's environment to find its bridge.
+const BRIDGE_ENV: &str = "SIMD_BRIDGE_EXE";
+
+/// Where simshmbridge's AC bridge usually lands.
+const DEFAULT_BRIDGE_EXE: &str = "~/.local/share/simracing/simshmbridge/assets/acbridge.exe";
+
 #[derive(Default)]
 pub struct CarCaptureQuery;
 
 #[Object]
 impl CarCaptureQuery {
+    /// State of the Assetto Corsa integration, for the Game Config settings.
+    async fn game_config(&self) -> GameConfig {
+        let Ok(paths) = ac_capture::paths::CapturePaths::resolve(None, None) else {
+            return GameConfig::default();
+        };
+
+        let launch_options = ac_capture::paths::steam_launch_options(ac_capture::AC_STEAM_APP_ID);
+        let bridge_configured = launch_options.as_deref().is_some_and(|options| {
+            ac_capture::paths::env_assignments(options)
+                .iter()
+                .any(|(key, _)| key == BRIDGE_ENV)
+        });
+
+        // Built by prepending the assignment to whatever is already there,
+        // so a user's other variables and any wrapper survive rather than
+        // being replaced by a canned string.
+        let recommended = (!bridge_configured).then(|| {
+            let existing = launch_options.as_deref().unwrap_or("%command%").trim();
+            let existing = if existing.is_empty() {
+                "%command%"
+            } else {
+                existing
+            };
+            format!("{BRIDGE_ENV}={DEFAULT_BRIDGE_EXE} {existing}")
+        });
+
+        GameConfig {
+            install_path: Some(paths.install_dir.display().to_string()),
+            install_detected: true,
+            csp_installed: paths.install_dir.join("extension").is_dir(),
+            telemetry_app_installed: crate::ac_telemetry::install::is_installed(&paths),
+            launch_options,
+            bridge_configured,
+            recommended_launch_options: recommended,
+        }
+    }
+
     /// Whether 360° capture is usable here, and which cars are installed.
     ///
     /// Also backfills `KnownCar` with anything installed that isn't already
@@ -204,7 +277,7 @@ impl CarCaptureMutation {
         if !existing_ids.iter().any(|id| id == &ac_car_id) {
             let mut ids = existing_ids.clone();
             ids.push(ac_car_id.clone());
-            let _ = adapter
+            let updated = adapter
                 .update(
                     "cars".into(),
                     "id",
@@ -212,6 +285,18 @@ impl CarCaptureMutation {
                     serde_json::json!({ "car_ids": serde_json::to_string(&ids).unwrap_or_default() }),
                 )
                 .await;
+            // The photos this capture files are announced by `set_car_photo`,
+            // but this registration was not — so a car list open elsewhere
+            // kept showing the old id set, and per-registration pan lookups
+            // (which key off car_ids) missed the id that was just added.
+            if let Some(updated) =
+                updated.and_then(|v| serde_json::from_value::<crate::typiql_types::Car>(v).ok())
+            {
+                typiql::TypiQLBroker::publish(crate::typiql_types::CarChanged {
+                    operation_name: "update".to_string(),
+                    value: updated,
+                });
+            }
         }
         if adapter
             .get_one("known_cars".into(), "id", &ac_car_id)

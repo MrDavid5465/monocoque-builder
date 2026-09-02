@@ -22,6 +22,9 @@ pub struct AcTelemetry {
     /// server-side simulation in `night_clock.rs`.
     pub time_total_seconds: f64,
     pub day_of_year: i32,
+    /// Seconds since the epoch in the *track's* local timezone, not UTC.
+    /// Carries the in-game date as well as the time.
+    pub timestamp: i64,
     pub time_multiplier: f32,
 
     pub sun_angle_deg: f32,
@@ -70,6 +73,7 @@ impl From<AcTelemetryFrame> for AcTelemetry {
         Self {
             time_total_seconds: frame.time_total_seconds,
             day_of_year: frame.day_of_year,
+            timestamp: frame.timestamp,
             time_multiplier: frame.time_multiplier,
             sun_angle_deg: frame.sun_angle_deg,
             sun_pitch_deg: frame.sun_pitch_deg,

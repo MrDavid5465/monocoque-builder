@@ -388,7 +388,17 @@ impl CarFileMutation {
             .await
             .ok_or_else(|| async_graphql::Error::new("Update failed"))?;
 
-        serde_json::from_value(result_val).map_err(|e| async_graphql::Error::new(e.to_string()))
+        let updated: Car = serde_json::from_value(result_val)
+            .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        // Written through the adapter, so nothing announces it on its own —
+        // see `set_car_photo` for the same manual-publish requirement.
+        // Without it a dashboard kept crossfading toward a night photo
+        // that had just been deleted, until the page was reloaded.
+        TypiQLBroker::publish(CarChanged {
+            operation_name: "update".to_string(),
+            value: updated.clone(),
+        });
+        Ok(updated)
     }
 
     /// Capture a car-card thumbnail for this car's freelook viewer. `data` is
@@ -445,7 +455,80 @@ impl CarFileMutation {
             .await
             .ok_or_else(|| async_graphql::Error::new("Update failed"))?;
 
-        serde_json::from_value(result_val).map_err(|e| async_graphql::Error::new(e.to_string()))
+        let updated: Car = serde_json::from_value(result_val)
+            .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        // Written through the adapter, so nothing announces it on its own —
+        // see `set_car_photo` for the same manual-publish requirement.
+        // Without it car lists elsewhere kept showing the old thumbnail.
+        TypiQLBroker::publish(CarChanged {
+            operation_name: "update".to_string(),
+            value: updated.clone(),
+        });
+        Ok(updated)
+    }
+
+    /// Marks one car as the favourite, or clears it.
+    ///
+    /// Clears the flag from every other car rather than trusting callers to
+    /// do it, because "favourite" only means anything if exactly one holds
+    /// it — the same 1:1 invariant, and the same clear-then-set approach,
+    /// that `CarDetail` uses for shaker/LED profile links.
+    ///
+    /// Sweeping every row is fine at this scale: a car list is tens of
+    /// records, not thousands, and this runs on an explicit click.
+    async fn set_favorite_car(
+        &self,
+        ctx: &Context<'_>,
+        id: String,
+        #[graphql(default = true)] favorite: bool,
+    ) -> GqlResult<Car> {
+        let adapter = crate::graphql::default_adapter(ctx)?;
+
+        let all = adapter.get_many("cars".into(), vec![]).await;
+        for value in all {
+            let Ok(existing) = serde_json::from_value::<Car>(value) else {
+                continue;
+            };
+            // Only written where it actually differs, so untouched cars
+            // don't each emit a change event to every subscriber.
+            let should_be = favorite && existing.id == id;
+            if existing.favorite != should_be {
+                let updated = adapter
+                    .update(
+                        "cars".into(),
+                        "id",
+                        &existing.id,
+                        json!({ "favorite": should_be }),
+                    )
+                    .await;
+                // Announce EVERY car whose flag actually moved, not just the
+                // new favourite below. Promoting one car demotes another, and
+                // a consumer holding that other car had no way to hear about
+                // it — it would keep showing a star that is no longer set.
+                if let Some(updated) = updated.and_then(|v| serde_json::from_value::<Car>(v).ok()) {
+                    TypiQLBroker::publish(CarChanged {
+                        operation_name: "update".to_string(),
+                        value: updated,
+                    });
+                }
+            }
+        }
+
+        let updated: Car = adapter
+            .get_one("cars".into(), "id", &id)
+            .await
+            .ok_or_else(|| async_graphql::Error::new("Car not found"))
+            .and_then(|value| {
+                serde_json::from_value(value).map_err(|e| async_graphql::Error::new(e.to_string()))
+            })?;
+
+        // Written through the adapter, so nothing announces it on its own —
+        // see `set_car_photo` for the same manual-publish requirement.
+        TypiQLBroker::publish(CarChanged {
+            operation_name: "update".to_string(),
+            value: updated.clone(),
+        });
+        Ok(updated)
     }
 
     /// Delete a car record and remove its file(s)/File record(s) from disk/store.
@@ -478,6 +561,19 @@ impl CarFileMutation {
         }
 
         adapter.remove("cars".into(), "id", &id).await;
+
+        // Removed through the adapter, which bypasses the macro's own
+        // announcement — same manual-publish requirement as `set_car_photo`
+        // and `set_favorite_car` above. Without this a deleted car stayed on
+        // screen in every other window until it was reloaded, and a dashboard
+        // could go on rendering the photos of a car that no longer exists.
+        //
+        // Carries the record as it was, since consumers keyed by id need to
+        // know WHICH car went; `operation_name` is what marks it as gone.
+        TypiQLBroker::publish(CarChanged {
+            operation_name: "remove".to_string(),
+            value: rec,
+        });
         Ok(true)
     }
 }
@@ -506,6 +602,7 @@ impl CarPhotoSyncQuery {
                 serde_json::from_value(v).map_err(|e| async_graphql::Error::new(e.to_string()))
             })?;
 
+        let mut rehashed = false;
         for path in [&existing.day_photo_path, &existing.night_photo_path]
             .into_iter()
             .flatten()
@@ -526,7 +623,25 @@ impl CarPhotoSyncQuery {
             };
             if new_hash != file_rec.id {
                 upsert_file(&adapter, path, &file_rec.filename, &new_hash, &new_url).await?;
+                rehashed = true;
             }
+        }
+
+        // A photo replaced on disk keeps its path but gets a new content-hash
+        // URL, and that URL is what every viewer loads the image from — so
+        // without announcing it, other windows go on displaying the previous
+        // image from cache. Only when something actually changed: this runs on
+        // every Car page mount, and an unconditional publish would wake every
+        // dashboard each time somebody opened one.
+        //
+        // The Car row itself is untouched here (only the File it points at),
+        // so this re-publishes the same record purely as a "re-read your
+        // photos" signal.
+        if rehashed {
+            TypiQLBroker::publish(CarChanged {
+                operation_name: "update".to_string(),
+                value: existing.clone(),
+            });
         }
 
         Ok(existing)

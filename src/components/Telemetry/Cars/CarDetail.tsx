@@ -1,14 +1,14 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useContext } from 'react';
 import { useQuery, useMutation } from '@apollo/client/react';
 import { Stack, IconButton, Form, FormCard } from '../../../lib/denim/lib';
 import { GET_KNOWN_CARS } from '../Groups/queries';
 import {
   GET_CARS, UPDATE_CAR, DELETE_CAR, UPLOAD_CAR_PHOTO, UPLOAD_CAR_PHOTO_NIGHT, DELETE_CAR_PHOTO_NIGHT,
-  SYNC_CAR_PHOTOS, CAR_CHANGED, CarRecord, CarPhotoRef, parseCarIds,
+  SYNC_CAR_PHOTOS, CAR_CHANGED, SET_FAVORITE_CAR, CarRecord, CarPhotoRef, parseCarIds,
 } from '../carQueries';
 import Subscriber from '../../../lib/typical-admin/Subscriber';
 import { useGlobalPreviewCar } from '../useGlobalPreviewCar';
-import { LiveUpdatesContext, useLiveUpdatesHub } from '../liveUpdatesHub';
+import { LiveUpdatesContext, useLiveUpdatesDemand, useLiveUpdatesHub } from '../liveUpdatesHub';
 import DashPanEditor from './DashPanEditor';
 import Car360Capture from './Car360Capture';
 import { confirmAsync } from '../../../lib/denim/components/ConfirmDialog';
@@ -46,6 +46,9 @@ const CarDetail: React.FC<Props> = ({ carRecordId, onBack }) => {
   const [uploadCarPhoto] = useMutation(UPLOAD_CAR_PHOTO);
   const [uploadCarPhotoNight] = useMutation(UPLOAD_CAR_PHOTO_NIGHT);
   const [deleteCarPhotoNight] = useMutation(DELETE_CAR_PHOTO_NIGHT);
+  // Refetches because promoting one car clears the flag on every other,
+  // which the mutation's own response doesn't describe.
+  const [setFavoriteCar] = useMutation(SET_FAVORITE_CAR, { refetchQueries: [{ query: GET_CARS }] });
 
   // Wires this Car to a Shaker/LED/Shift Light/SimWind device profile for
   // per-car fine-tuning (see SoundDeviceProfile.carId's backend doc comment)
@@ -99,12 +102,34 @@ const CarDetail: React.FC<Props> = ({ carRecordId, onBack }) => {
   // ones — see liveUpdatesHub.tsx's own doc comment. includeNightClock:true
   // for DashPanEditor's day/night preview toggle; includeTelemetry stays
   // false, neither this page nor DashPanEditor renders live telemetry.
-  const [liveUpdatesHub, liveUpdatesHubSubscriber] = useLiveUpdatesHub({ includeTelemetry: false, includeNightClock: true });
+  // Prefers the app-root provider; the own hub is the fallback for being
+  // rendered outside it (same pattern as useGlobalNightMode/Controls).
+  const ambientHub = useContext(LiveUpdatesContext);
+  const [ownHub, liveUpdatesHubSubscriber] = useLiveUpdatesHub({
+    includeNightClock: false,
+    skip: !!ambientHub,
+  });
+  const liveUpdatesHub = ambientHub ?? ownHub;
+  // The night clock drives this page's 360 preview, so ask for it explicitly
+  // rather than relying on a private hub's defaults.
+  useLiveUpdatesDemand(liveUpdatesHub, { includeNightClock: true });
   const { setPreviewCarId, ready: previewCarReady } = useGlobalPreviewCar(liveUpdatesHub);
   useEffect(() => {
     if (primaryRawId && car?.dayPhoto && previewCarReady) {
       setPreviewCarId(primaryRawId);
-      return () => setPreviewCarId('');
+      // Keeps saying it. The unmount cleanup below is still the normal way
+      // this ends, but it only runs on a clean React unmount — closing the
+      // tab, killing the app or a crash all skip it, and this pin is global
+      // and persisted, so skipping it used to leave every dashboard in the
+      // house showing this car indefinitely. Re-confirming lets the backend
+      // expire an abandoned pin without ever dropping one still in use
+      // (PIN_TTL is 15 minutes against this 60s interval — see
+      // preview_car.rs).
+      const keepAlive = setInterval(() => setPreviewCarId(primaryRawId), 60_000);
+      return () => {
+        clearInterval(keepAlive);
+        setPreviewCarId('');
+      };
     }
     // Depend on dayPhoto's id (a primitive), not the dayPhoto object itself —
     // a fresh object reference on every render would otherwise risk an
@@ -247,7 +272,20 @@ const CarDetail: React.FC<Props> = ({ carRecordId, onBack }) => {
           {onBack && <IconButton iconProps={{ iconName: 'Back' }} onClick={onBack} title="Back" />}
           <span style={{ fontSize: '1.2em', fontWeight: 700 }}>Car Configuration</span>
         </Stack>
-        <IconButton iconProps={{ iconName: 'Delete' }} title="Delete car" onClick={handleDeleteCar} />
+        <Stack horizontal verticalAlign="center" tokens={{ childrenGap: 4 }}>
+          {/* The default car dashboards fall back to when they have no car of
+              their own — replaces the per-dashboard photo360File sprite. */}
+          <IconButton
+            iconProps={{ iconName: car.favorite ? 'FavoriteStarFill' : 'FavoriteStar' }}
+            title={car.favorite
+              ? 'This is the default car — click to clear'
+              : 'Set as the default car'}
+            onClick={() => setFavoriteCar({
+              variables: { id: car.id, favorite: !car.favorite },
+            })}
+          />
+          <IconButton iconProps={{ iconName: 'Delete' }} title="Delete car" onClick={handleDeleteCar} />
+        </Stack>
       </Stack>
 
       <Stack tokens={{ childrenGap: 16 }}>
@@ -305,6 +343,7 @@ const CarDetail: React.FC<Props> = ({ carRecordId, onBack }) => {
         <FormCard>
           <DashPanEditor
             carId={car.id}
+            carIds={parseCarIds(car)}
             photoId={car.id}
             photoUrl={dayPhoto ? `${apiBase()}${dayPhoto.url}` : undefined}
             nightPhotoUrl={nightPhoto ? `${apiBase()}${nightPhoto.url}` : undefined}

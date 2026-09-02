@@ -15,6 +15,9 @@ export interface CarRecord {
   thumbnail?: string;
   /** Which installed AC car the 360° capture loads. Falls back to carIds[0]. */
   captureCarId?: string | null;
+  /** The stand-in car dashboards fall back to when they have no car of their
+   *  own. Exactly one car carries this. */
+  favorite?: boolean;
 }
 
 export function parseCarIds(car: { carIds?: string } | undefined | null): string[] {
@@ -26,7 +29,15 @@ export function parseCarIds(car: { carIds?: string } | undefined | null): string
   }
 }
 
-const CAR_FIELDS = `id name carIds captureCarId dayPhoto { id filename url } nightPhoto { id filename url } thumbnail`;
+const CAR_FIELDS = `id name carIds captureCarId favorite dayPhoto { id filename url } nightPhoto { id filename url } thumbnail`;
+
+/// Makes one car the favourite, clearing the flag from all others. Pass
+/// `favorite: false` to clear it without promoting another.
+export const SET_FAVORITE_CAR = gql`
+  mutation setFavoriteCar($id: String!, $favorite: Boolean) {
+    setFavoriteCar(id: $id, favorite: $favorite) { ${'id name favorite'} }
+  }
+`;
 
 export const GET_CARS = gql`
   query getCars {

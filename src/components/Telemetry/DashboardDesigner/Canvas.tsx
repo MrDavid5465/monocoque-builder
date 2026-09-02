@@ -10,6 +10,7 @@ import ClockSpriteNode from './ClockSpriteNode';
 import TransformOverlay from './TransformOverlay';
 import CropOverlay from './CropOverlay';
 import DayNightSimPanel from '../DayNightSimPanel';
+import { NeckFxSample, neckFxIsLive } from '../useAcNeckFx';
 import { useGamepadIO, useHeldGamepadButton } from './useGamepadIO';
 
 interface SpriteFile { file: string; thumbnail: string; }
@@ -47,6 +48,12 @@ interface Props {
   forceNightPreview?: boolean;
   skipTransition?: boolean;
   telemetryData?: Record<string, number>;
+  // Assetto Corsa's applied head movement, off the shared live-updates hub
+  // (useAcNeckFx), preferred by the sway loop over the g-derived
+  // approximation in `telemetryData`. A ref, not a value: it updates at 60Hz
+  // and is read inside a requestAnimationFrame loop, so it must never
+  // re-render this component.
+  neckFxSampleRef?: React.RefObject<NeckFxSample>;
   // True only while the kiosk boot-up sweep animation is actively running —
   // used to hold nodes with `binding.startupSweep === false` at their rest
   // value even though `telemetryData` may hold a swept value for their field
@@ -97,6 +104,17 @@ export interface CanvasHandle {
 
 
 const NIGHT_OVERLAY_Z = 40;
+
+// NeckFX: pixels (and degrees) per metre of real head movement, used when
+// Assetto Corsa reports the offset it actually applied instead of the
+// g-derived approximation. Sized against the g constants they replace
+// (25px/12px/1.5deg per g, at CSP's few-centimetres-per-g of head travel) so
+// switching source changes the phase and honesty of the motion, not how big it
+// looks. Movement beyond the clamp is a glitch, not a reading.
+const NECK_PX_PER_M_X = 555;
+const NECK_PX_PER_M_Y = 267;
+const NECK_DEG_PER_M = 33;
+const NECK_CLAMP_M = 0.25;
 
 // ---------------------------------------------------------------------------
 // ButtonControlNode — button-control component with state machine
@@ -1202,7 +1220,7 @@ const NodeRenderer: React.FC<NodeRendererProps> = ({
 // index.tsx itself re-rendered from the clock tick, even before any
 // clock-text/clock-sprite node existed to make the resulting jank visible.
 const Canvas = React.memo(forwardRef<CanvasHandle, Props>(({
-  dashboard, sprites, gamepadMappings = [], selectedId, onSelect, onUpdate, onUpdateDashboard, kioskMode, onKioskButton, isNight: isNightProp, nightAmount: nightAmountProp, onToggleNightMode, forceNightPreview, skipTransition, telemetryData,
+  dashboard, sprites, gamepadMappings = [], selectedId, onSelect, onUpdate, onUpdateDashboard, kioskMode, onKioskButton, isNight: isNightProp, nightAmount: nightAmountProp, onToggleNightMode, forceNightPreview, skipTransition, telemetryData, neckFxSampleRef,
   kioskSweepActive = false,
   globalSteerMaxDeg, panBgMode, liveBackground, liveBackgroundInteractive, liveBackgroundHandlesNight, ambientOverlayRef, simStatus = '',
   onDragCommit, activeTool,
@@ -1294,15 +1312,42 @@ const Canvas = React.memo(forwardRef<CanvasHandle, Props>(({
       if (document.hidden) { rafId = requestAnimationFrame(tick); return; }
       const data   = telemetryDataRef.current;
       const active = neckFxRef.current && !hasLiveBackgroundRef.current;
-      const gLat = active ? Math.max(-3, Math.min(3, data['gLat'] ?? 0)) : 0;
-      const gLon = active ? Math.max(-4, Math.min(4, data['gLon'] ?? 0)) : 0;
       const gainX    = neckFxGainXRef.current;
       const gainY    = neckFxGainYRef.current;
       const disableX = neckFxDisableXRef.current;
       const disableY = neckFxDisableYRef.current;
-      sway.x   = lerp(sway.x,   disableX ? 0 : -gLat * 25  * gainX, 0.08);
-      sway.y   = lerp(sway.y,   disableY ? 0 :  gLon * 12  * gainY, 0.08);
-      sway.rot = lerp(sway.rot, disableX ? 0 : -gLat * 1.5 * gainX, 0.08);
+
+      // This loop has always been called "NeckFX" while only approximating it
+      // from g-force. With Assetto Corsa's telemetry app streaming, it can use
+      // the head movement the game actually applied — see telemetry/types.rs
+      // for why the two can't be reconciled by tuning the approximation.
+      let targetX: number;
+      let targetY: number;
+      let targetRot: number;
+      // From its own acTelemetry subscription (useAcNeckFx), not from
+      // `data` — the cross-sim telemetry frame stays free of AC-only fields.
+      const neck = neckFxSampleRef?.current;
+      if (active && neckFxIsLive(neck) && neck) {
+        const clamp = (v: number) => Math.max(-NECK_CLAMP_M, Math.min(NECK_CLAMP_M, v));
+        // A 2D canvas can show translation directly, so the axes map across
+        // literally: sideways head movement shifts the dash sideways, and the
+        // VERTICAL channel finally does something — that's real heave over
+        // kerbs and crests, which the g-derived path could only fake by
+        // reusing longitudinal g for the y axis.
+        targetX   = clamp(neck.x) * NECK_PX_PER_M_X * gainX;
+        targetY   = -clamp(neck.y) * NECK_PX_PER_M_Y * gainY;
+        targetRot = clamp(neck.x) * NECK_DEG_PER_M   * gainX;
+      } else {
+        const gLat = active ? Math.max(-3, Math.min(3, data['gLat'] ?? 0)) : 0;
+        const gLon = active ? Math.max(-4, Math.min(4, data['gLon'] ?? 0)) : 0;
+        targetX   = -gLat * 25  * gainX;
+        targetY   =  gLon * 12  * gainY;
+        targetRot = -gLat * 1.5 * gainX;
+      }
+
+      sway.x   = lerp(sway.x,   disableX ? 0 : targetX,   0.08);
+      sway.y   = lerp(sway.y,   disableY ? 0 : targetY,   0.08);
+      sway.rot = lerp(sway.rot, disableX ? 0 : targetRot, 0.08);
       if (innerRef.current && !hasLiveBackgroundRef.current) {
         innerRef.current.style.transform =
           `translate(${sway.x}px, ${sway.y}px) rotate(${sway.rot}deg)`;
@@ -1334,6 +1379,38 @@ const Canvas = React.memo(forwardRef<CanvasHandle, Props>(({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // While editing a 360, the canvas is CONTINUOUSLY fit to the space actually
+  // available — the same treatment kiosk mode gets below, and for the same
+  // reason: the view is not the user's to move here (pan and zoom are both
+  // disabled while editing), so it should simply always frame the photo.
+  //
+  // Continuous rather than once-on-entry because the properties panel opens in
+  // response to editing starting, i.e. AFTER this turns on. Measuring the
+  // container at that moment caught the pre-panel width, fitted to it, and
+  // left the photo overflowing under the panel — with the canvas still
+  // extending past the viewport, a drag near its edge landed outside the photo
+  // and panned the canvas. Observing the container instead removes the
+  // ordering question altogether: whenever the available space changes, for
+  // any reason, the fit follows it.
+  useEffect(() => {
+    if (kioskMode || !liveBackgroundInteractive || !containerRef.current) return;
+    const compute = () => {
+      if (!containerRef.current) return;
+      const { clientWidth, clientHeight } = containerRef.current;
+      if (!clientWidth || !clientHeight) return;
+      const s = Math.min(clientWidth / dashboard.canvasWidth, clientHeight / dashboard.canvasHeight);
+      setView({
+        scale: s,
+        offsetX: Math.round((clientWidth - dashboard.canvasWidth * s) / 2),
+        offsetY: Math.round((clientHeight - dashboard.canvasHeight * s) / 2),
+      });
+    };
+    compute();
+    const ro = new ResizeObserver(compute);
+    ro.observe(containerRef.current);
+    return () => ro.disconnect();
+  }, [liveBackgroundInteractive, kioskMode, dashboard.canvasWidth, dashboard.canvasHeight]);
+
   // Kiosk mode: no interactive pan/zoom (see wheel/pinch/pan guards below) —
   // instead the canvas is continuously fit to its container, centered, the
   // same as it always displayed pre-pan/zoom. Recomputes on container resize
@@ -1361,7 +1438,8 @@ const Canvas = React.memo(forwardRef<CanvasHandle, Props>(({
   // Edit mode only — kiosk mode stays fixed to its fit-to-container view.
   useEffect(() => {
     const el = containerRef.current;
-    if (!el || kioskMode) return;
+    // Editing a 360 holds the canvas at its fit — see the fit effect above.
+    if (!el || kioskMode || liveBackgroundInteractive) return;
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
       const pixelDelta = e.deltaMode === 0 ? e.deltaY : e.deltaY * 16;
@@ -1376,7 +1454,7 @@ const Canvas = React.memo(forwardRef<CanvasHandle, Props>(({
     };
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
-  }, [kioskMode]);
+  }, [kioskMode, liveBackgroundInteractive]);
 
   // Pinch-to-zoom (mobile) — the touch analogue of the wheel handler above,
   // zooming/panning so the midpoint between the two fingers stays fixed on
@@ -1390,7 +1468,7 @@ const Canvas = React.memo(forwardRef<CanvasHandle, Props>(({
   // value, never a functional updater that would need `view` in its deps.
   useEffect(() => {
     const el = containerRef.current;
-    if (!el || kioskMode) return;
+    if (!el || kioskMode || liveBackgroundInteractive) return;
     const pointers = new Map<number, { x: number; y: number }>();
     let pinch: { startDist: number; startScale: number; startMidCanvasX: number; startMidCanvasY: number } | null = null;
 
@@ -1523,7 +1601,13 @@ const Canvas = React.memo(forwardRef<CanvasHandle, Props>(({
     <div
       ref={containerRef}
       style={{ width: '100%', height: '100%', background: '#111', position: 'relative', overflow: 'hidden', isolation: 'isolate', touchAction: 'none' }}
-      onPointerDown={e => { if (!kioskMode && !panBgMode) startViewPan(e); }}
+      // No canvas panning while a 360 is being aimed: the view is held at
+      // its fit (see the fit effect above), so there is nothing to pan to, and
+      // a press that missed the photo used to drag the canvas out from under
+      // the edit instead of doing nothing.
+      onPointerDown={e => {
+        if (!kioskMode && !panBgMode && !liveBackgroundInteractive) startViewPan(e);
+      }}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
     >
@@ -1595,12 +1679,39 @@ const Canvas = React.memo(forwardRef<CanvasHandle, Props>(({
           </>
         )}
         {liveBackground && (
-          <div style={{
-            position: 'absolute', top: 0, left: 0,
-            width: '100%', height: '100%',
-            zIndex: -1,
-            pointerEvents: liveBackgroundInteractive ? 'all' : 'none',
-          }}>
+          <div
+            style={{
+              position: 'absolute', top: 0, left: 0,
+              width: '100%', height: '100%',
+              // -1 keeps this behind everything as a background. But a
+              // negative z-index paints BELOW the parent's own box, so the
+              // canvas div won the hit test and a press over the photo never
+              // reached this element — confirmed live: the container's
+              // handler fired with liveBackgroundInteractive true while this
+              // one never did.
+              //
+              // 0 while interactive puts it above the parent box (so it can be
+              // hit) and still below the dashboard nodes, which are later
+              // siblings and paint above at the same stacking level. Only
+              // while interactive, so the non-editing background keeps its
+              // existing painting exactly.
+              //
+              // Why it looked navigation-dependent: `zoom` only establishes a
+              // stacking context when it isn't 1, so the old scale-1 default
+              // view resolved -1 against a different ancestor than a fitted,
+              // non-1 scale does. Reloading landed on the first case, editing
+              // after the fit on the second.
+              zIndex: liveBackgroundInteractive ? 0 : -1,
+              pointerEvents: liveBackgroundInteractive ? 'all' : 'none',
+            }}
+            // While the 360 is being panned, a drag belongs to the photo, not
+            // to the canvas. Without this the same press also reached the
+            // viewport's own onPointerDown and started a canvas pan, so
+            // dragging the image moved the canvas instead of the view —
+            // exactly what the background-pan handle below already guards
+            // against with the same stopPropagation.
+            onPointerDown={liveBackgroundInteractive ? (e => e.stopPropagation()) : undefined}
+          >
             {liveBackground}
           </div>
         )}

@@ -1,7 +1,7 @@
 //! Installing the capture app into AC, starting the game, and waiting for
 //! the result.
 
-use super::paths::CapturePaths;
+use super::paths::{self, CapturePaths};
 use super::{CaptureConfig, LUA_APP_NAME};
 use std::path::Path;
 use std::time::Duration;
@@ -177,9 +177,10 @@ fn host_exec_prefix() -> Option<Vec<String>> {
             return Some(parts);
         }
     }
-    // Same detection monocoque uses: this file only exists inside a Flatpak
-    // sandbox, so native builds keep running the game directly.
-    if Path::new("/.flatpak-info").exists() {
+    // Reuses the app's own sandbox detection rather than re-checking
+    // `/.flatpak-info` here — `host_command` already caches that, and every
+    // other host-bound call in this codebase goes through it.
+    if crate::host_command::in_flatpak() {
         return Some(vec!["flatpak-spawn".to_string(), "--host".to_string()]);
     }
     None
@@ -201,17 +202,31 @@ fn launch_via_proton(
     // launched here, and matters for quality — an XWayland window gets
     // scaled by the display's fractional scaling, which resamples the
     // screenshot and visibly softens it.
-    let env: Vec<(&str, String)> = vec![
+    let mut env: Vec<(String, String)> = vec![
         (
-            "STEAM_COMPAT_DATA_PATH",
+            "STEAM_COMPAT_DATA_PATH".to_string(),
             compat_data.to_string_lossy().into_owned(),
         ),
         (
-            "STEAM_COMPAT_CLIENT_INSTALL_PATH",
+            "STEAM_COMPAT_CLIENT_INSTALL_PATH".to_string(),
             steam_client.to_string_lossy().into_owned(),
         ),
-        ("PROTON_ENABLE_WAYLAND", "1".to_string()),
+        ("PROTON_ENABLE_WAYLAND".to_string(), "1".to_string()),
     ];
+
+    // Whatever the user set in Steam's launch options, since starting the
+    // game directly skips them. `SIMD_BRIDGE_EXE` is the one that matters:
+    // simd's automatic bridging reads it from the *game's* environment, so
+    // without it a capture-launched session produces no telemetry at all.
+    // Anything else configured there (`PROTON_ENABLE_WAYLAND`, HDR flags)
+    // comes along too, which is the point — a captured session should behave
+    // like a played one.
+    //
+    // Appended after the defaults above so a user's own value wins on a
+    // clash rather than being silently overridden.
+    if let Some(options) = paths::steam_launch_options(super::AC_STEAM_APP_ID) {
+        env.extend(paths::env_assignments(&options));
+    }
 
     let mut command = match host_exec_prefix() {
         Some(prefix) => {

@@ -53,6 +53,10 @@ interface Props {
   isTemplate?: boolean;
   editing360?: boolean;
   onChange360?: (yaw: number, pitch: number, fov: number, roll: number) => void;
+  /** How many cars currently override this dashboard's pan. */
+  carPanOverrideCount?: number;
+  /** Drops every one of them, so all cars fall back to the dashboard's pan. */
+  onResetAllCarPans?: () => void;
   templates: DashTemplate[];
   onAdd: (element: ComponentNode, parentId: string | null) => void;
   onRemoveTemplate: (id: string) => void;
@@ -74,7 +78,7 @@ const ObjectExplorer: React.FC<Props> = ({
   manualPreviewFraction, onManualPreviewFractionChange,
   forceAllParticipate, onForceAllParticipateChange,
   sequenceConfig, onSequenceConfigChange, playing, onTogglePlay, onPreviewTelemetry,
-  onGenerateThumbnails, isTemplate, editing360, onChange360,
+  onGenerateThumbnails, isTemplate, editing360, onChange360, carPanOverrideCount, onResetAllCarPans,
   templates, onAdd, onRemoveTemplate, onUpload, onDeleteSprite,
   builtInSpriteFiles, onCopyBuiltinSprite, onUploadSpriteData, onReloadSprites,
 }) => {
@@ -448,7 +452,12 @@ const ObjectExplorer: React.FC<Props> = ({
             {/* Scrollable content */}
             <Stack style={{ flex: 1, overflowY: 'auto', minHeight: 0, padding: '0.5em' }} tokens={{ childrenGap: 8 }}>
               {editing360 ? (
-                <Photo360PanForm dashboard={dashboard} onChange={onChange360} />
+                <Photo360PanForm
+                  dashboard={dashboard}
+                  onChange={onChange360}
+                  overrideCount={carPanOverrideCount}
+                  onResetAllCarPans={onResetAllCarPans}
+                />
               ) : selectedNode ? (
                 <ComponentPropertiesPanel
                   node={selectedNode}
@@ -515,7 +524,9 @@ const PHOTO360_PAN_SCHEMA = {
 const Photo360PanForm: React.FC<{
   dashboard: DashboardConfig;
   onChange?: (yaw: number, pitch: number, fov: number, roll: number) => void;
-}> = ({ dashboard, onChange }) => {
+  overrideCount?: number;
+  onResetAllCarPans?: () => void;
+}> = ({ dashboard, onChange, overrideCount = 0, onResetAllCarPans }) => {
   const initial = {
     photo360Yaw:   dashboard.photo360Yaw   ?? 0,
     photo360Pitch: dashboard.photo360Pitch ?? 0,
@@ -526,7 +537,8 @@ const Photo360PanForm: React.FC<{
   return (
     <Stack tokens={{ childrenGap: 4 }}>
       <span style={{ fontSize: '0.78em', opacity: 0.6 }}>
-        Drag the 360° preview to pan, or use these sliders for precise adjustments.
+        Drag the 360° preview to pan, or use these sliders for precise adjustments. Changes save to
+        the car currently shown as well as to this dashboard's own default.
       </span>
       <Form
         key={dashboard.path || dashboard.name}
@@ -540,6 +552,20 @@ const Photo360PanForm: React.FC<{
           Number(raw.photo360Roll ?? 0),
         )}
       />
+      {/* Clears the per-car overrides this dashboard has accumulated, so every
+          car falls back to the pan above. Hidden at zero rather than disabled:
+          with nothing to reset it isn't an action, and the count is the only
+          place the overrides are visible from here at all. */}
+      {overrideCount > 0 && onResetAllCarPans && (
+        <Stack tokens={{ childrenGap: 2 }} style={{ marginTop: 6 }}>
+          <DefaultButton onClick={onResetAllCarPans} styles={{ root: { minWidth: 0 } }}>
+            Reset {overrideCount} car override{overrideCount === 1 ? '' : 's'}
+          </DefaultButton>
+          <span style={{ fontSize: '0.75em', opacity: 0.55 }}>
+            Cars with their own alignment for this dashboard fall back to the pan above.
+          </span>
+        </Stack>
+      )}
     </Stack>
   );
 };
@@ -855,15 +881,10 @@ const DashboardPropertiesPanel: React.FC<{
     },
   }), [sprites]);
 
+  // No per-dashboard fallback photo any more: the stand-in when a car has no
+  // 360° of its own is now the Car marked favourite (see CarsAdmin's star),
+  // which brings a night variant and pan alignment a loose sprite never had.
   const photo360Schema = useMemo(() => ({
-    photo360File: {
-      type: 'select',
-      label: 'Default photo (fallback)',
-      options: [
-        { text: '— none —', value: '' },
-        ...sprites.map(s => ({ text: s.label, value: s.file })),
-      ],
-    },
     intendedScreenWidth: { type: 'slider', label: 'Screen width (px)', min: 320, max: 7680 },
     intendedScreenHeight: { type: 'slider', label: 'Screen height (px)', min: 240, max: 4320 },
     photo360LiveKiosk: { type: 'checkbox', label: 'Always show live 360° (manage + kiosk)' },
@@ -902,11 +923,10 @@ const DashboardPropertiesPanel: React.FC<{
   }), [dashboard.neckFxGainX, dashboard.neckFxGainY, dashboard.neckFxDisableX, dashboard.neckFxDisableY]);
 
   const photo360Initial = useMemo(() => ({
-    photo360File: dashboard.photo360File ?? '',
     intendedScreenWidth: dashboard.intendedScreenWidth ?? 1920,
     intendedScreenHeight: dashboard.intendedScreenHeight ?? 1080,
     photo360LiveKiosk: dashboard.photo360LiveKiosk ?? false,
-  }), [dashboard.photo360File, dashboard.intendedScreenWidth, dashboard.intendedScreenHeight, dashboard.photo360LiveKiosk]);
+  }), [dashboard.intendedScreenWidth, dashboard.intendedScreenHeight, dashboard.photo360LiveKiosk]);
 
   const dayNightInitial = useMemo(() => ({
     nightModeButton: dashboard.nightModeButton ?? false,
@@ -998,7 +1018,6 @@ const DashboardPropertiesPanel: React.FC<{
             name="dash360"
             initialValues={photo360Initial}
             onChange={(_n: string, { raw }: any) => onUpdate({
-              photo360File: (raw.photo360File as string) || undefined,
               intendedScreenWidth: Number(raw.intendedScreenWidth ?? 1920),
               intendedScreenHeight: Number(raw.intendedScreenHeight ?? 1080),
               photo360LiveKiosk: Boolean(raw.photo360LiveKiosk),

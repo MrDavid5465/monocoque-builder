@@ -17,18 +17,43 @@
 
 local ENDPOINT = 'ws://127.0.0.1:9000/ac-telemetry'
 
---- Send rate. 30Hz rather than every frame: the consumers are dashboards
---- refreshing at screen rate, and halving the traffic costs them nothing
---- visible while leaving headroom on the socket.
-local SEND_INTERVAL = 1 / 30
+--- Send rate. Full 60Hz, matching screen rate: the NeckFX sway consumers read
+--- this from inside a requestAnimationFrame loop, so anything slower steps
+--- visibly rather than moving. An earlier 30Hz halved the traffic on the
+--- assumption that dashboards only needed gauge values, which stopped being
+--- true once the cockpit camera offset started driving motion.
+local SEND_INTERVAL = 1 / 60
 
 --- How long to wait before building a new socket if creating one outright
 --- failed. Distinct from CSP's own `reconnect` handling below, which covers
 --- a socket that existed and then dropped.
 local RETRY_INTERVAL = 5
 
+--- How long to accept silence from TyPiQL before assuming the socket is dead.
+--- Several times the server's own ack interval, so ordinary jitter or a
+--- frame-rate stall doesn't trigger a needless reconnect.
+local ACK_TIMEOUT = 6
+
 local socket = nil
 local status = 'connecting'
+--- Sticky: survives the status line being overwritten each send, so the
+--- reason a connection failed is still readable afterwards.
+local lastError = ''
+--- Counts frames actually handed to the socket. A rising count with nothing
+--- arriving server-side means the send is silently going nowhere, which is
+--- exactly the case "streaming" hid.
+local framesSent = 0
+--- Seconds since TyPiQL last acknowledged a frame.
+---
+--- The socket cannot be trusted to report its own death: after a backend
+--- restart this app sent over ten thousand frames into a closed connection
+--- without CSP raising `onError` or `onClose`, so its `reconnect` never fired
+--- and the status line cheerfully read "streaming". Silence from the far end
+--- is the real signal.
+local sinceAck = 0
+--- Whether this socket has *ever* been acked. Until it has, silence means
+--- "still connecting" rather than "connection died".
+local acked = false
 local sendDue = 0
 local retryDue = 0
 
@@ -44,17 +69,69 @@ local retryDue = 0
 --- `reconnect` makes CSP restore a dropped connection on its own — TyPiQL
 --- may not be running when the game starts, and that shouldn't need handling
 --- here.
+--- Incoming-data handler. Nothing is expected back — this is a one-way
+--- stream — but it can't be `nil`: despite the SDK annotating the parameter
+--- as `nil|fun(data: binary)`, CSP rejects a nil one at runtime with
+--- "Callback should be a function", which is what stopped the first build
+--- connecting at all.
+--- Acks from TyPiQL. The payload is irrelevant; what matters is that one
+--- arrived, which is the only proof the far end is still there.
+local function onMessage(_data)
+  sinceAck = 0
+  acked = true
+end
+
+--- Hands the socket back to CSP before dropping the reference.
+---
+--- Not optional, and not merely tidy. Per the SDK: with `reconnect`, "onClose
+--- is only called once connection is closed by calling web.Socket.close()".
+--- So a socket abandoned with `socket = nil` alone is never closed, CSP never
+--- learns it was abandoned, and its retry loop runs for the rest of the
+--- session with nothing able to stop it. Dropping one every ACK_TIMEOUT while
+--- TyPiQL was restarting accumulated dozens of immortal reconnect loops on
+--- the render thread and made the game unplayable — the CPU spike traced back
+--- to exactly this.
+local function closeSocket()
+  if socket ~= nil then
+    -- pcall: a socket that already died can throw here, and failing to close
+    -- it must not take out the update loop.
+    pcall(function() socket.close() end)
+  end
+  socket = nil
+end
+
 local function connect()
   local ok, result = pcall(function()
-    return web.socket(ENDPOINT, nil, nil, {
+    return web.socket(ENDPOINT, nil, onMessage, {
       encoding = 'utf8',
-      reconnect = true,
+      -- CSP's own reconnection is deliberately OFF: this app already decides
+      -- when a socket is dead, using acks, because CSP's view of that proved
+      -- unreliable (see `sinceAck`). Running both means two independent
+      -- authorities on the same connection — ours tears down and rebuilds
+      -- while CSP's silently resurrects what we discarded.
+      reconnect = false,
+      -- Both also go to the CSP log, and `lastError` is deliberately never
+      -- cleared by a successful send.
+      --
+      -- The first version only wrote these to the status line, which the
+      -- send path overwrites with "streaming" every frame — so the app
+      -- cheerfully reported streaming while nothing was connecting, and the
+      -- actual reason was destroyed 30 times a second.
       onError = function(err)
-        status = 'error: ' .. tostring(err)
+        lastError = tostring(err)
+        status = 'error'
+        ac.log('typiql-telemetry: socket error: ' .. lastError)
       end,
-      onClose = function()
+      onClose = function(reason)
+        lastError = 'closed: ' .. tostring(reason)
         status = 'closed'
         socket = nil
+        -- Without this, `retryDue` keeps whatever value it had (0 at startup,
+        -- or already negative), so the update loop below calls connect() on
+        -- EVERY frame until one succeeds — a second way this path could burn
+        -- the CPU while TyPiQL was down.
+        retryDue = RETRY_INTERVAL
+        ac.log('typiql-telemetry: socket closed: ' .. tostring(reason))
       end,
     })
   end)
@@ -62,6 +139,8 @@ local function connect()
   if ok and result ~= nil then
     socket = result
     status = 'connected'
+    sinceAck = 0
+    acked = false
   else
     socket = nil
     -- The error is reported, not swallowed. Discarding it here cost a
@@ -146,6 +225,28 @@ function script.update(dt)
     return
   end
 
+  -- Rebuilt from scratch when the acks stop: closed, then replaced. Asking
+  -- the old socket to reconnect is what silently failed before — and merely
+  -- dropping the reference without closing is what leaked reconnect loops
+  -- (see closeSocket).
+  sinceAck = sinceAck + dt
+  -- Deliberately not conditional on having been acked before. Gating this on
+  -- a previous ack meant a socket that never got one was never torn down —
+  -- precisely what happens when the app connects while TyPiQL is restarting.
+  -- A fresh socket gets the same window to prove itself, which is generous:
+  -- frames go out at 60Hz and the server acks within a second.
+  if sinceAck > ACK_TIMEOUT then
+    lastError = string.format('no ack for %.0fs, reconnecting', sinceAck)
+    ac.log('typiql-telemetry: ' .. lastError)
+    closeSocket()
+    status = 'reconnecting'
+    -- Was 0, i.e. rebuild on the very next frame. Backing off matters when
+    -- TyPiQL is down for a while (a rebuild, say): with no wait, this cycle
+    -- spun up a fresh socket every ACK_TIMEOUT indefinitely.
+    retryDue = RETRY_INTERVAL
+    return
+  end
+
   sendDue = sendDue - dt
   if sendDue > 0 then return end
   sendDue = SEND_INTERVAL
@@ -166,9 +267,13 @@ function script.update(dt)
   -- Calling the socket is how you send on it; see connect() above.
   local sent, sendErr = pcall(socket, encoded)
   if sent then
-    status = 'streaming'
+    framesSent = framesSent + 1
+    -- Only claims to be streaming while nothing has gone wrong: a send that
+    -- doesn't throw is not evidence the socket ever connected.
+    if lastError == '' then status = 'streaming' end
   else
-    status = 'send threw: ' .. tostring(sendErr)
+    lastError = tostring(sendErr)
+    status = 'send failed'
   end
 end
 
@@ -177,6 +282,9 @@ function windowMain()
   -- that opened and then failed to send looks identical to one that never
   -- opened, and telling those apart is most of the debugging.
   ui.text('Status: ' .. status)
+  ui.text(string.format('Frames sent: %d', framesSent))
+  ui.text(acked and string.format('Last ack: %.1fs ago', sinceAck) or 'Never acked')
+  if lastError ~= '' then ui.text('Last error: ' .. lastError) end
   ui.text(ENDPOINT)
   local sim = ac.getSim()
   if sim ~= nil then

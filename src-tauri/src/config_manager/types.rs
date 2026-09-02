@@ -154,9 +154,6 @@ pub struct GqlAppSettings {
     /// `service_commands` for why the switch is the build type rather than a
     /// setting, and why an unset one in a debug build refuses to start the
     /// service rather than falling back.
-    pub simd_debug_command: Option<String>,
-    pub monocoque_debug_command: Option<String>,
-    pub huenicorn_debug_command: Option<String>,
     /// Computed, never stored: whether the backend serving this is a debug
     /// build, so the Settings UI can say which set of commands is actually in
     /// effect rather than making the user infer it.
@@ -205,9 +202,6 @@ pub struct AppSettingsInput {
     pub simd_command: MaybeUndefined<String>,
     pub monocoque_command: MaybeUndefined<String>,
     pub huenicorn_command: MaybeUndefined<String>,
-    pub simd_debug_command: MaybeUndefined<String>,
-    pub monocoque_debug_command: MaybeUndefined<String>,
-    pub huenicorn_debug_command: MaybeUndefined<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -266,15 +260,6 @@ pub struct AppSettings {
     pub monocoque_command: String,
     #[serde(default = "default_huenicorn_command")]
     pub huenicorn_command: String,
-    /// None = no source build configured for this service. In a debug build
-    /// that means the watchdog declines to start it at all (see
-    /// `service_commands`); in a release build it's simply unused.
-    #[serde(default)]
-    pub simd_debug_command: Option<String>,
-    #[serde(default)]
-    pub monocoque_debug_command: Option<String>,
-    #[serde(default)]
-    pub huenicorn_debug_command: Option<String>,
 }
 
 fn default_ambient_saturation_boost() -> f32 {

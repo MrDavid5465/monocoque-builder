@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useSubscription } from '@apollo/client/react';
 import { DASHBOARD_UPDATES_SUB } from './DashboardDesigner/queries';
 import { useHealthPoll } from '../../graphql/health';
@@ -16,14 +16,32 @@ export type LiveUpdateTypename =
   | 'NightClockTick'
   | 'PreviewCarChanged'
   | 'CarDashPanChanged'
+  | 'CarChanged'
   | 'RecordingStatus'
   | 'AmbientColorChanged'
-  | 'HuenicornSettingsChanged';
+  | 'HuenicornSettingsChanged'
+  | 'AcTelemetry';
 
 type Listener = (event: any) => void;
 
+// What a consumer needs the shared connection to carry. The optional members
+// of dashboardUpdates are off unless something asks for them, because each is
+// a high-rate stream that most pages have no use for.
+export interface LiveUpdatesDemand {
+  includeTelemetry?: boolean;
+  includeNightClock?: boolean;
+  includeAmbientColor?: boolean;
+  includeAcTelemetry?: boolean;
+}
+
 export interface LiveUpdatesHub {
   subscribe: (typename: LiveUpdateTypename, listener: Listener) => () => void;
+  // Declares a demand for the duration of the returned release function. The
+  // hub carries the UNION of every live demand: with one provider at the app
+  // root, a page deep in the tree can turn telemetry on for itself without
+  // knowing anything about the connection, and it goes quiet again when that
+  // page unmounts. See useLiveUpdatesDemand.
+  request: (demand: LiveUpdatesDemand) => () => void;
 }
 
 // Populated by whichever component actually opened a hub (via
@@ -81,14 +99,15 @@ const LiveUpdatesSubscriber: React.FC<{
   includeTelemetry: boolean;
   includeNightClock: boolean;
   includeAmbientColor: boolean;
+  includeAcTelemetry: boolean;
   skip: boolean;
   listenersRef: React.MutableRefObject<Map<LiveUpdateTypename, Set<Listener>>>;
   onDown: () => void;
-}> = ({ includeTelemetry, includeNightClock, includeAmbientColor, skip, listenersRef, onDown }) => {
+}> = ({ includeTelemetry, includeNightClock, includeAmbientColor, includeAcTelemetry, skip, listenersRef, onDown }) => {
   useSubscription(DASHBOARD_UPDATES_SUB, {
     skip,
     fetchPolicy: 'no-cache',
-    variables: { includeTelemetry, includeNightClock, includeAmbientColor },
+    variables: { includeTelemetry, includeNightClock, includeAmbientColor, includeAcTelemetry },
     onData: ({ data }: any) => {
       const event = data.data?.dashboardUpdates;
       if (!event) return;
@@ -115,15 +134,36 @@ export function useLiveUpdatesHub(opts: {
   includeTelemetry?: boolean;
   includeNightClock?: boolean;
   includeAmbientColor?: boolean;
+  // Assetto Corsa's extended telemetry (NeckFX head movement). Off by
+  // default and gated per-caller: it only means anything to a dashboard
+  // driving motion from it, and it is the highest-rate member on this
+  // stream.
+  includeAcTelemetry?: boolean;
   skip?: boolean;
 } = {}): [LiveUpdatesHub, React.ReactNode] {
   const {
     includeTelemetry = false,
     includeNightClock = true,
     includeAmbientColor = false,
+    includeAcTelemetry = false,
     skip = false,
   } = opts;
   const listenersRef = useRef(new Map<LiveUpdateTypename, Set<Listener>>());
+
+  // Live demands, plus a counter to force the recompute below when the set
+  // changes. The set itself is a ref so registering never re-renders the
+  // consumer that registered — only this hub, which re-renders its own
+  // subscriber leaf with new variables.
+  const demandsRef = useRef(new Set<LiveUpdatesDemand>());
+  const [demandVersion, setDemandVersion] = useState(0);
+  const request = useCallback((demand: LiveUpdatesDemand) => {
+    demandsRef.current.add(demand);
+    setDemandVersion(v => v + 1);
+    return () => {
+      demandsRef.current.delete(demand);
+      setDemandVersion(v => v + 1);
+    };
+  }, []);
 
   const subscribe = useCallback((typename: LiveUpdateTypename, listener: Listener) => {
     let set = listenersRef.current.get(typename);
@@ -143,6 +183,23 @@ export function useLiveUpdatesHub(opts: {
   // manual reload. `subscriptionDown` tears the subscription down the
   // moment it errors; useHealthPoll brings it back the moment the server
   // actually answers again.
+  // Anything a caller asked for statically, plus anything any mounted
+  // consumer is currently demanding. Changing these re-subscribes — still ONE
+  // connection, reopened — which happens only when a consumer mounts,
+  // unmounts, or changes what it needs, not per frame.
+  const flags = useMemo(() => {
+    const demands = [...demandsRef.current];
+    return {
+      telemetry: includeTelemetry || demands.some(d => d.includeTelemetry),
+      nightClock: includeNightClock || demands.some(d => d.includeNightClock),
+      ambientColor: includeAmbientColor || demands.some(d => d.includeAmbientColor),
+      acTelemetry: includeAcTelemetry || demands.some(d => d.includeAcTelemetry),
+    };
+    // demandVersion is the trigger, not an input — the demands themselves
+    // live in a ref so registering doesn't re-render the registering component.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [demandVersion, includeTelemetry, includeNightClock, includeAmbientColor, includeAcTelemetry]);
+
   const [subscriptionDown, setSubscriptionDown] = useState(false);
   useHealthPoll(subscriptionDown, () => setSubscriptionDown(false));
   const onDown = useCallback(() => setSubscriptionDown(true), []);
@@ -150,13 +207,14 @@ export function useLiveUpdatesHub(opts: {
   // Stable identity across re-renders (subscribe itself is already
   // useCallback([])-stable) — callers that store this in a dependency array
   // (useGlobalNightMode does) don't get spurious effect re-runs.
-  const hubRef = useRef<LiveUpdatesHub>({ subscribe });
+  const hubRef = useRef<LiveUpdatesHub>({ subscribe, request });
 
   const subscriberEl = (
     <LiveUpdatesSubscriber
-      includeTelemetry={includeTelemetry}
-      includeNightClock={includeNightClock}
-      includeAmbientColor={includeAmbientColor}
+      includeTelemetry={flags.telemetry}
+      includeNightClock={flags.nightClock}
+      includeAmbientColor={flags.ambientColor}
+      includeAcTelemetry={flags.acTelemetry}
       skip={skip || subscriptionDown}
       listenersRef={listenersRef}
       onDown={onDown}
@@ -193,6 +251,45 @@ export function useHubListener<T = any>(
   }, [activeHub, typename, hasHandler]);
 }
 
+// Declares what the shared connection must carry, for as long as this
+// component is mounted.
+//
+// This is what lets a hub live at the app root while the decision about what
+// it carries stays next to the code that needs it — no page has to thread
+// flags up through its ancestors, and nothing stays switched on after the
+// consumer that wanted it unmounts. Pass a hub explicitly only when the
+// calling component opened it itself (same rule as useHubListener); otherwise
+// omit it and the nearest provider is used.
+//
+// The booleans are destructured into the dependency array on purpose: a fresh
+// object literal every render would otherwise re-register on every render.
+export function useLiveUpdatesDemand(
+  hub: LiveUpdatesHub | null | undefined,
+  demand: LiveUpdatesDemand,
+) {
+  const contextHub = useContext(LiveUpdatesContext);
+  const activeHub = hub ?? contextHub;
+  const {
+    includeTelemetry = false,
+    includeNightClock = false,
+    includeAmbientColor = false,
+    includeAcTelemetry = false,
+  } = demand;
+
+  useEffect(() => {
+    if (!activeHub) return;
+    if (!includeTelemetry && !includeNightClock && !includeAmbientColor && !includeAcTelemetry) {
+      return;
+    }
+    return activeHub.request({
+      includeTelemetry,
+      includeNightClock,
+      includeAmbientColor,
+      includeAcTelemetry,
+    });
+  }, [activeHub, includeTelemetry, includeNightClock, includeAmbientColor, includeAcTelemetry]);
+}
+
 // Convenience component for the common case: open a hub and provide it to
 // children, with no direct use by the provider itself — e.g. wrap a page
 // root in this once, and any nested component (however deep) can call
@@ -205,12 +302,14 @@ export const LiveUpdatesProvider: React.FC<{
   includeTelemetry?: boolean;
   includeNightClock?: boolean;
   includeAmbientColor?: boolean;
+  includeAcTelemetry?: boolean;
   children: React.ReactNode;
-}> = ({ includeTelemetry, includeNightClock, includeAmbientColor, children }) => {
+}> = ({ includeTelemetry, includeNightClock, includeAmbientColor, includeAcTelemetry, children }) => {
   const [hub, hubSubscriber] = useLiveUpdatesHub({
     includeTelemetry,
     includeNightClock,
     includeAmbientColor,
+    includeAcTelemetry,
   });
   return (
     <LiveUpdatesContext.Provider value={hub}>
