@@ -1,7 +1,8 @@
 use super::car::thumbnails_dir;
-use crate::typiql_types::DashTemplate;
+use crate::typiql_types::{DashTemplate, DashTemplateChanged};
 use async_graphql::{Context, Object, Result as GqlResult};
 use serde_json::json;
+use typiql::TypiQLBroker;
 
 #[derive(Default)]
 pub struct DashTemplateThumbnailMutation;
@@ -69,6 +70,17 @@ impl DashTemplateThumbnailMutation {
             .await
             .ok_or_else(|| async_graphql::Error::new("Update failed"))?;
 
-        serde_json::from_value(result_val).map_err(|e| async_graphql::Error::new(e.to_string()))
+        let updated: DashTemplate = serde_json::from_value(result_val)
+            .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        // Written through the adapter, which bypasses the macro's own
+        // announcement, so this has to publish by hand. `DashTemplateChanged`
+        // is already carried by the shared dashboardUpdates subscription —
+        // only the publish was missing, so a newly captured thumbnail didn't
+        // appear in a template list open anywhere else.
+        TypiQLBroker::publish(DashTemplateChanged {
+            operation_name: "update".to_string(),
+            value: updated.clone(),
+        });
+        Ok(updated)
     }
 }

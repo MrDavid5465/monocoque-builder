@@ -1,7 +1,10 @@
-use crate::typiql_types::ConnectedClient;
+use crate::typiql_types::{
+    ConnectedClient, KnownCar, KnownCarChanged, KnownTrack, KnownTrackChanged,
+};
 use async_graphql::{Context, Object, Result as GqlResult};
 use serde_json::json;
 use std::time::{SystemTime, UNIX_EPOCH};
+use typiql::TypiQLBroker;
 
 #[derive(Default)]
 pub struct ClientsMutation;
@@ -53,7 +56,7 @@ impl ClientsMutation {
         let adapter = crate::graphql::default_adapter(ctx)?;
         let existing = adapter.get_one("known_cars".into(), "id", &name).await;
         if existing.is_none() {
-            adapter
+            let added = adapter
                 .add(
                     "known_cars".into(),
                     "id",
@@ -61,6 +64,15 @@ impl ClientsMutation {
                 )
                 .await
                 .map_err(async_graphql::Error::new)?;
+            // Added through the adapter, which bypasses the macro's own
+            // announcement — a picker already open never gained the car/track
+            // that telemetry had just reported.
+            if let Ok(value) = serde_json::from_value::<KnownCar>(added) {
+                TypiQLBroker::publish(KnownCarChanged {
+                    operation_name: "add".to_string(),
+                    value,
+                });
+            }
             return Ok(true);
         }
         Ok(false)
@@ -74,7 +86,7 @@ impl ClientsMutation {
         let adapter = crate::graphql::default_adapter(ctx)?;
         let existing = adapter.get_one("known_tracks".into(), "id", &name).await;
         if existing.is_none() {
-            adapter
+            let added = adapter
                 .add(
                     "known_tracks".into(),
                     "id",
@@ -82,6 +94,15 @@ impl ClientsMutation {
                 )
                 .await
                 .map_err(async_graphql::Error::new)?;
+            // Added through the adapter, which bypasses the macro's own
+            // announcement — a picker already open never gained the car/track
+            // that telemetry had just reported.
+            if let Ok(value) = serde_json::from_value::<KnownTrack>(added) {
+                TypiQLBroker::publish(KnownTrackChanged {
+                    operation_name: "add".to_string(),
+                    value,
+                });
+            }
             return Ok(true);
         }
         Ok(false)
