@@ -205,6 +205,19 @@ async fn run_session(
     })
 }
 
+fn read_image(path: &std::path::Path, label: &str) -> Result<Vec<u8>, String> {
+    let bytes = std::fs::read(path).map_err(|err| {
+        format!(
+            "Couldn't read the {label} capture at {}: {err}",
+            path.display()
+        )
+    })?;
+    if bytes.is_empty() {
+        return Err(format!("The {label} capture came out empty."));
+    }
+    Ok(bytes)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -290,17 +303,4 @@ mod tests {
             Err(err) => panic!("restore failed: {err}"),
         }
     }
-}
-
-fn read_image(path: &std::path::Path, label: &str) -> Result<Vec<u8>, String> {
-    let bytes = std::fs::read(path).map_err(|err| {
-        format!(
-            "Couldn't read the {label} capture at {}: {err}",
-            path.display()
-        )
-    })?;
-    if bytes.is_empty() {
-        return Err(format!("The {label} capture came out empty."));
-    }
-    Ok(bytes)
 }

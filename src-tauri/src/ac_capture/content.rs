@@ -47,7 +47,7 @@ pub fn installed_cars(install_dir: &Path) -> Vec<AcCar> {
         })
         .collect();
 
-    cars.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    cars.sort_by_key(|a| a.name.to_lowercase());
     cars
 }
 

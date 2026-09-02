@@ -110,10 +110,9 @@ pub async fn sync_clock_from_game(
     // AC's race time multiplier: 1 = real time. Documented as possibly 0
     // (paused) or negative (online), neither of which is a rate this clock
     // should adopt — keep whatever it was using and just correct the time.
-    let game_speed_percent = (frame.time_multiplier as f64 * 100.0)
-        .is_finite()
-        .then(|| frame.time_multiplier as f64 * 100.0)
-        .filter(|p| *p > 0.0);
+    let raw_speed_percent = frame.time_multiplier as f64 * 100.0;
+    let game_speed_percent =
+        (raw_speed_percent.is_finite() && raw_speed_percent > 0.0).then_some(raw_speed_percent);
     let current_speed = record.sim_speed_percent.unwrap_or(100.0);
     let speed_changed =
         game_speed_percent.is_some_and(|p| (p - current_speed).abs() > SPEED_EPSILON_PERCENT);
