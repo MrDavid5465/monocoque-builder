@@ -1,6 +1,6 @@
 import React from 'react';
 import { Routes, Route } from 'react-router-dom';
-import TelemetryAdminHome from './Home';
+import DashboardsHome from './Home';
 import DashboardsAdmin from './DashboardsAdmin';
 import CarsAdmin from './CarsAdmin';
 import Default from './Default';
@@ -10,9 +10,9 @@ import TemplatesAdmin from './TemplatesAdmin';
 import RecordingsAdmin from './RecordingsAdmin';
 import TracksAdmin from './TracksAdmin';
 
-const TelemetryAdmin: React.FC = () => (
+const Dashboards: React.FC = () => (
   <Routes>
-    <Route path="/" element={<TelemetryAdminHome />} />
+    <Route path="/" element={<DashboardsHome />} />
     <Route path="/dashboards/*" element={<DashboardsAdmin />} />
     <Route path="/cars/*" element={<CarsAdmin />} />
     <Route path="/groups/*" element={<GroupsAdmin />} />
@@ -24,4 +24,4 @@ const TelemetryAdmin: React.FC = () => (
   </Routes>
 );
 
-export default TelemetryAdmin;
+export default Dashboards;

@@ -48,11 +48,11 @@ jobs:
           # (telemetry-admin-v0.1.1), not the plain v{version} this used to
           # assume — confirmed against the real v0.1.1 release, which 404'd
           # under the old URL.
-          curl -fsSL -o typiql.deb \
-            "https://github.com/MrDavid5465/telemetry-admin/releases/download/telemetry-admin-v${{ inputs.pkgver }}/typiql_${{ inputs.pkgver }}_amd64.deb"
-          sum=$(sha256sum typiql.deb | cut -d' ' -f1)
+          curl -fsSL -o monocoque-builder.deb \
+            "https://github.com/MrDavid5465/monocoque-builder/releases/download/monocoque-builder-v${{ inputs.pkgver }}/monocoque-builder_${{ inputs.pkgver }}_amd64.deb"
+          sum=$(sha256sum monocoque-builder.deb | cut -d' ' -f1)
           sed -i "s/^sha256sums=.*/sha256sums=('${sum}')/" PKGBUILD
-          rm typiql.deb
+          rm monocoque-builder.deb
 
       - name: Hand the workspace to the non-root build user
         run: chown -R builder:builder "$GITHUB_WORKSPACE"
@@ -86,9 +86,9 @@ jobs:
 
       - name: Push PKGBUILD to the AUR
         run: |
-          git clone ssh://aur@aur.archlinux.org/telemetry-admin.git /tmp/aur-telemetry-admin
-          cp typiql-tauri/typiql/pkg/aur/PKGBUILD typiql-tauri/typiql/pkg/aur/.SRCINFO /tmp/aur-telemetry-admin/
-          cd /tmp/aur-telemetry-admin
+          git clone ssh://aur@aur.archlinux.org/monocoque-builder.git /tmp/aur-monocoque-builder
+          cp typiql-tauri/typiql/pkg/aur/PKGBUILD typiql-tauri/typiql/pkg/aur/.SRCINFO /tmp/aur-monocoque-builder/
+          cd /tmp/aur-monocoque-builder
           git config user.name "David Scott"
           git config user.email "david@davidallanscott.ca"
           # AUR only accepts pushes to a branch literally named master —

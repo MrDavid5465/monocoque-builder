@@ -3,7 +3,7 @@
   "packages": {
     ".": {
       "release-type": "node",
-      "package-name": "telemetry-admin",
+      "package-name": "monocoque-builder",
       "draft": false,
       "changelog-sections": [
         { "type": "feat", "section": "Features" },

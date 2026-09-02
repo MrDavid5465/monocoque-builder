@@ -9,7 +9,7 @@ import { GET_DEVICE_DEFAULTS } from '../Telemetry/deviceDefaultsQueries';
 
 // Device/group-driven auto-launch — ported from the old #/telemetry app's
 // Default.tsx verbatim except for the two navigate targets, which now point
-// at telemetryadmin's own dashboard show (kiosk) route and its dashboards
+// at dashboards's own dashboard show (kiosk) route and its dashboards
 // list instead of the old app's /telemetry/dash/* and /telemetry/manage.
 const Default: React.FC = () => {
   const navigate = useNavigate();
@@ -53,23 +53,23 @@ const Default: React.FC = () => {
       })();
       const targetDash = (car && carDashMap[car]) || group.defaultDash;
       if (targetDash) {
-        navigate(`/telemetryadmin/dashboards/${encodeURIComponent(targetDash)}/show`, { replace: true });
+        navigate(`/dashboards/dashboards/${encodeURIComponent(targetDash)}/show`, { replace: true });
         return;
       }
     }
 
     if (deviceDash) {
-      navigate(`/telemetryadmin/dashboards/${encodeURIComponent(deviceDash)}/show`, { replace: true });
+      navigate(`/dashboards/dashboards/${encodeURIComponent(deviceDash)}/show`, { replace: true });
       return;
     }
 
     const globalDash = globalRec?.dash;
     if (globalDash) {
-      navigate(`/telemetryadmin/dashboards/${encodeURIComponent(globalDash)}/show`, { replace: true });
+      navigate(`/dashboards/dashboards/${encodeURIComponent(globalDash)}/show`, { replace: true });
       return;
     }
 
-    navigate('/telemetryadmin/dashboards', { replace: true });
+    navigate('/dashboards/dashboards', { replace: true });
   }, [myData, myLoading, defaultsData, defaultsLoading, group, groupsLoading, car, groupName, deviceDash, globalRec, navigate]);
 
   return <div style={{ padding: '2em' }}>Loading…</div>;

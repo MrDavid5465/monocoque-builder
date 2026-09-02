@@ -1,4 +1,4 @@
-# telemetry-admin
+# monocoque-builder
 
 A desktop app (Tauri + React/TypeScript frontend, Rust/Axum/GraphQL backend) for
 building live sim-racing dashboards and controlling a physical shaker rig.
@@ -62,21 +62,21 @@ Every merge to `master` that includes a
 [release-please](https://github.com/googleapis/release-please), which opens
 a PR bumping the version and changelog; merging that PR tags a release and
 triggers a build that attaches Linux packages to the corresponding
-[GitHub Release](https://github.com/MrDavid5465/telemetry-admin/releases).
+[GitHub Release](https://github.com/MrDavid5465/monocoque-builder/releases).
 Only Linux builds are produced today — no Windows/macOS packages yet.
 
 Install the latest release with whichever matches your distro:
 
-- **Arch Linux (AUR)**: `paru -S telemetry-admin` (or your AUR helper of
-  choice) — installs the `typiql` binary. The PKGBUILD is validated against
+- **Arch Linux (AUR)**: `paru -S monocoque-builder` (or your AUR helper of
+  choice) — installs the `monocoque-builder` binary. The PKGBUILD is validated against
   a real Arch container on every PR; publishing to the AUR itself is a
   manual, deliberate step (see `.github/workflows/publish-aur.yml`).
 - **Debian/Ubuntu**: download the `.deb` asset from the
-  [latest release](https://github.com/MrDavid5465/telemetry-admin/releases/latest)
-  and `sudo dpkg -i typiql_*.deb` (then `sudo apt-get install -f` if it
+  [latest release](https://github.com/MrDavid5465/monocoque-builder/releases/latest)
+  and `sudo dpkg -i monocoque-builder_*.deb` (then `sudo apt-get install -f` if it
   reports missing dependencies).
 - **Fedora/RPM-based**: download the `.rpm` asset and
-  `sudo dnf install ./typiql-*.rpm` (or `rpm -i`).
+  `sudo dnf install ./monocoque-builder-*.rpm` (or `rpm -i`).
 - **Any other Linux**: download the `.AppImage` asset, `chmod +x` it, and
   run it directly — no install step required.
 
@@ -86,8 +86,8 @@ All three package formats need `webkit2gtk-4.1`, `gtk3`, and
 them. The shaker DSP feature additionally needs PipeWire with
 `pactl`/`pw-cli`/`pw-dump`.
 
-A Flatpak build (`.github/workflows/flatpak.yml`) exists but is still
-best-effort and unverified — don't rely on it yet.
+A Flatpak build (`.github/workflows/flatpak.yml`) is also produced, and has
+been verified co-installed alongside the monocoque Flatpak on a real system.
 
 ## Development
 

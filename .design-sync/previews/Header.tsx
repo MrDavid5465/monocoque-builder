@@ -10,9 +10,9 @@ import { Header, Logo } from 'denim';
 // contrasting populated vs empty applications — they render identically.
 
 const my = {
-  settings: { theme: 'default', fontSize: 1, launchPage: 'telemetryadmin' },
+  settings: { theme: 'default', fontSize: 1, launchPage: 'dashboards' },
   applications: [
-    { name: 'Telemetry Admin', path: 'telemetryadmin', frontEnd: 'TelemetryAdmin', defaultRoute: '', links: [] },
+    { name: 'Dashboards', path: 'dashboards', frontEnd: 'Dashboards', defaultRoute: 'dashboards', links: [] },
     { name: 'Shakers', path: 'shakers', frontEnd: 'Shakers', defaultRoute: '', links: [] },
     { name: 'Ambient Lights', path: 'ambientlights', frontEnd: 'AmbientLights', defaultRoute: '', links: [] },
   ],

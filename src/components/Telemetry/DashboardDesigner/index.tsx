@@ -96,7 +96,7 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
   // identity on every ~60Hz simTimeMs tick would defeat that memo).
   const handleKioskButton = useCallback(() => {
     if (kioskMode) navigate(-1);
-    else navigate(`/telemetryadmin/dashboards/${encodeURIComponent(dashboardName)}/show`);
+    else navigate(`/dashboards/dashboards/${encodeURIComponent(dashboardName)}/show`);
   }, [kioskMode, navigate, dashboardName]);
 
   const { dashboard, setDashboard, saveDashboard, deleteDashboard, savePanCoordinates, savePhotoEditing, uploadSprite, deleteSprite, refetchSprites, copyBuiltinSprite, uploadSpriteData, uploadBackground, isDirty, sprites, loading, canvasRef, forceNightPreview, handleDashboardUpdate } = useDashboard(dashboardName);
@@ -382,7 +382,7 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
   useHubListener(hub, 'CarChanged', dashboard?.baseDashType === '360' ? onCarChanged : undefined);
 
   const { handleDeviceDefaultEvent } = useMappingWatcher(
-    () => navigate('/telemetryadmin/default', { replace: true }),
+    () => navigate('/dashboards/default', { replace: true }),
     !kioskMode,
     car,
     simStatus,
@@ -693,7 +693,7 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
   }, [saveDashboard]);
   const handleDeleteDashboard = useCallback(async () => {
     await deleteDashboard();
-    navigate('/telemetryadmin/dashboards');
+    navigate('/dashboards/dashboards');
   }, [deleteDashboard, navigate]);
 
   // Manual memo cache (not useMemo) for kioskLive360 below — everything past
@@ -1185,7 +1185,7 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
             <IconButton
               iconProps={{ iconName: 'Back' }}
               title="Back to dashboards"
-              onClick={() => navigate('/telemetryadmin/dashboards')}
+              onClick={() => navigate('/dashboards/dashboards')}
               styles={{ root: { height: 30, width: 30 } }}
             />
             <span style={{ fontSize: '0.9em', fontWeight: 600, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>

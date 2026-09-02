@@ -35,7 +35,7 @@ const carsSchema = {
 // Typical SaaS-admin-style home page (not a sim-racing telemetry dashboard) —
 // a quick-glance summary, not a full CRUD screen. No sorting/limiting yet;
 // deliberately deferred.
-const TelemetryAdminHome: React.FC = () => (
+const DashboardsHome: React.FC = () => (
   <Stack tokens={{ childrenGap: 16 }} style={{ padding: '2em' }}>
     <h2>Recently edited dashboards</h2>
     <CardList
@@ -46,10 +46,10 @@ const TelemetryAdminHome: React.FC = () => (
       titleField="name"
       thumbnailField="thumbnailDay"
       idField="name"
-      // Without this the cards link to /telemetryadmin/:id/show — this
+      // Without this the cards link to /dashboards/:id/show — this
       // page is the admin root, not the dashboards list route, so
       // CardList's pathname default is wrong here.
-      basePath="/telemetryadmin/dashboards"
+      basePath="/dashboards/dashboards"
       hideHeader
     />
 
@@ -60,10 +60,10 @@ const TelemetryAdminHome: React.FC = () => (
       schemaDefinition={carsSchema}
       titleField="name"
       thumbnailField="thumbnail"
-      basePath="/telemetryadmin/cars"
+      basePath="/dashboards/cars"
       hideHeader
     />
   </Stack>
 );
 
-export default TelemetryAdminHome;
+export default DashboardsHome;

@@ -81,19 +81,19 @@ export async function mockGraphQL(
           contentType: 'application/json',
           body: gqlResponse({
             my: {
-              // The /telemetryadmin/* routes are only registered by Denim
+              // The /dashboards/* routes are only registered by Denim
               // (src/lib/denim/components/index.tsx) when a matching entry
               // exists in `my.applications` — mirrors the real app registry
               // built server-side in config_manager/app_config.rs. Without
-              // this, every e2e navigation to /telemetryadmin/... silently
+              // this, every e2e navigation to /dashboards/... silently
               // falls through to the catch-all route and renders whatever
               // DefaultLanding resolves to instead.
               applications: [
                 {
-                  name: 'Telemetry Admin',
-                  path: 'telemetryadmin',
+                  name: 'Dashboards',
+                  path: 'dashboards',
                   defaultRoute: '',
-                  frontEnd: 'TelemetryAdmin',
+                  frontEnd: 'Dashboards',
                   links: [],
                 },
               ],
@@ -106,7 +106,7 @@ export async function mockGraphQL(
               // full-screen Splashscreen mid-test, well after the page
               // otherwise looks settled.
               settings: {
-                launchPage: 'telemetryadmin/default',
+                launchPage: 'dashboards/default',
                 theme: 'darkred',
                 // A small multiplier (default 1), not a literal px size —
                 // src/lib/themes/index.ts computes every themed font/spacing
@@ -215,9 +215,9 @@ export async function mockGraphQL(
  */
 export async function gotoDesigner(page: Page, dashboardName = 'E2E Test') {
   // The old telemetry app's /telemetry/manage/:name route was removed when
-  // dashboards moved under ReactiveAdmin (TelemetryAdmin/DashboardsAdmin) —
-  // the designer now lives at /telemetryadmin/dashboards/:id/edit (idField
+  // dashboards moved under ReactiveAdmin (Dashboards/DashboardsAdmin) —
+  // the designer now lives at /dashboards/dashboards/:id/edit (idField
   // is the dashboard name, route built by CardList's `${pathname}/${routeId}/edit`).
-  await page.goto(`/#/telemetryadmin/dashboards/${encodeURIComponent(dashboardName)}/edit`);
+  await page.goto(`/#/dashboards/dashboards/${encodeURIComponent(dashboardName)}/edit`);
   await page.waitForSelector('text=Loading dashboard...', { state: 'hidden', timeout: 10_000 });
 }

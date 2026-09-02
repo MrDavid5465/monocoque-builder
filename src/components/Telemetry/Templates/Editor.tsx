@@ -165,7 +165,7 @@ const TemplateEditor: React.FC<Props> = ({ template }) => {
   const handleDelete = async () => {
     if (!(await confirmAsync(`Delete template "${templateName}"? This cannot be undone.`, { danger: true }))) return;
     await removeTemplate(template.id);
-    navigate('/telemetryadmin/templates');
+    navigate('/dashboards/templates');
   };
 
   const onUpdateDashboard = useCallback((patch: Partial<DashboardConfig>) => {
@@ -209,7 +209,7 @@ const TemplateEditor: React.FC<Props> = ({ template }) => {
         <IconButton
           iconProps={{ iconName: 'Back' }}
           title="Back to templates"
-          onClick={() => navigate('/telemetryadmin/templates')}
+          onClick={() => navigate('/dashboards/templates')}
           styles={{ root: { height: 28, width: 28 } }}
         />
         <input
