@@ -61,6 +61,24 @@ jobs:
         with:
           workspaces: typiql-tauri/typiql/src-tauri -> target
 
+      # tauri::generate_context! embeds the frontend bundle whenever
+      # custom-protocol is enabled, and --all-features below enables it, so the
+      # macro refuses to expand unless frontendDist ("../dist") exists:
+      #
+      #   error: proc macro panicked
+      #     help: message: The `frontendDist` configuration is set to `"../dist"`
+      #           but this path doesn't exist
+      #
+      # This job lints and tests Rust. Producing the real bundle would mean
+      # adding node, the two frontend submodules and a vite run for no extra
+      # coverage, so a placeholder satisfies the macro instead. The frontend is
+      # built for real in the build job and in every packaging workflow.
+      - name: Placeholder frontend bundle for generate_context!
+        working-directory: typiql-tauri/typiql
+        run: |
+          mkdir -p dist
+          printf '<!doctype html><title>ci placeholder</title>' > dist/index.html
+
       - name: cargo fmt --check
         working-directory: typiql-tauri/typiql/src-tauri
         run: cargo fmt --all -- --check

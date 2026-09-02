@@ -187,7 +187,7 @@ jobs:
       - name: Stage the downloaded binary where the smoke test expects it
         run: |
           mkdir -p "$GITHUB_WORKSPACE/typiql-tauri/typiql/src-tauri/target/release"
-          cp /tmp/monocoque-builder-binary/typiql "$GITHUB_WORKSPACE/typiql-tauri/typiql/src-tauri/target/release/monocoque-builder"
+          cp /tmp/monocoque-builder-binary/monocoque-builder "$GITHUB_WORKSPACE/typiql-tauri/typiql/src-tauri/target/release/monocoque-builder"
           chmod +x "$GITHUB_WORKSPACE/typiql-tauri/typiql/src-tauri/target/release/monocoque-builder"
 
       - name: Stage the downloaded .deb where the PKGBUILD expects it
