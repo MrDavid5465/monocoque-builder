@@ -134,6 +134,10 @@ impl AppConfigMutation {
                     s.huenicorn_command,
                     existing.settings.huenicorn_command,
                 ),
+                // Carried straight through from what was read. These are keys
+                // this build doesn't model (see AppSettings::extra); dropping
+                // them here would defeat the point of capturing them.
+                extra: existing.settings.extra,
             }
         } else {
             existing.settings
