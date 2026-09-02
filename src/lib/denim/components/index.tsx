@@ -9,6 +9,7 @@ import {
   Route,
   Routes,
   Navigate,
+  useLocation,
   useQuery
 } from "../lib";
 import { Header } from "./Header";
@@ -82,6 +83,28 @@ interface Props {
   Controls?: React.FC<any>;
   ExternalApps?: React.FC<any>;
 }
+// Renders an app's `defaultRoute` redirect ONLY when the browser is actually
+// at that app's root.
+//
+// The routes below are `${app.path}/*`, so their element renders for every
+// route underneath them too. A bare <Navigate> there fired on deep links as
+// well as on the root: opening /dashboards/dashboards/963/show redirected
+// straight back to /dashboards/dashboards, making every dashboard
+// unreachable. It only surfaced when the app rename gave the Dashboards app a
+// defaultRoute - every other app has none, so their sub-routes were never
+// redirected and this sat latent.
+//
+// `replace` so a redirect that does fire doesn't leave the app root in history
+// for Back to bounce off.
+const AppDefaultRedirect: React.FC<{ path: string; defaultRoute: string }> = ({
+  path,
+  defaultRoute,
+}) => {
+  const { pathname } = useLocation();
+  if (pathname.replace(/\/+$/, "") !== `/${path}`) return null;
+  return <Navigate to={`/${path}/${defaultRoute}`} replace />;
+};
+
 const App: React.FC<Props> = ({
   components = {},
   themes,
@@ -215,7 +238,10 @@ const App: React.FC<Props> = ({
                 element={
                     <Stack className={style.content}>
                       {app.defaultRoute && (
-                        <Navigate to={`/${app.path}/${app.defaultRoute}`} />
+                        <AppDefaultRedirect
+                          path={app.path}
+                          defaultRoute={app.defaultRoute}
+                        />
                       )}
                       {React.createElement(components[app.frontEnd] || Empty, {
                         app
@@ -237,9 +263,10 @@ const App: React.FC<Props> = ({
                 path={`/kiosk/${app.path}`}
                 element={
                     <Stack className={style.content} style={{ top: "0em" }}>
-                      {app.defaultRoute && (                    
-                        <Navigate
-                          to={`/kiosk/${app.path}/${app.defaultRoute}`}
+                      {app.defaultRoute && (
+                        <AppDefaultRedirect
+                          path={`kiosk/${app.path}`}
+                          defaultRoute={app.defaultRoute}
                         />
                       )}
                       {React.createElement(components[app.frontEnd] || Empty, {
