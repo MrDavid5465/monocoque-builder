@@ -9,6 +9,7 @@ mod config_manager;
 mod device_enumeration;
 mod gamepad;
 mod graphql;
+mod host_command;
 mod huenicorn;
 mod night_state;
 mod pipewire_dsp;
@@ -28,6 +29,11 @@ fn main() {
         eprintln!("BACKEND PANIC: {info}\n{bt}");
     }));
 
+    // Runs in the webview before the app's own code. It reports the origin the
+    // page actually got -- which decides the API URL the frontend builds from
+    // window.location.hostname -- and then reports whether that URL works,
+    // straight to the backend's log. 127.0.0.1 is used for the report itself
+    // precisely because it cannot depend on the thing being diagnosed.
     tauri::Builder::default()
         .setup(|_app| {
             std::thread::spawn(|| {
@@ -42,7 +48,21 @@ fn main() {
                     let app = api::build_router().await;
 
                     println!("Starting API on http://0.0.0.0:9000");
-                    let listener = tokio::net::TcpListener::bind("0.0.0.0:9000").await.unwrap();
+                    // Same reasoning as the DuckDB open in api.rs: a port
+                    // already in use means another copy is running, and
+                    // unwrapping here killed only this task -- leaving a
+                    // window whose UI could only report "connection refused".
+                    let listener = match tokio::net::TcpListener::bind("0.0.0.0:9000").await {
+                        Ok(listener) => listener,
+                        Err(e) => {
+                            eprintln!(
+                                "Could not bind 0.0.0.0:9000: {e}\n\
+                                 typiql is probably already running. Close the other \
+                                 window and start again."
+                            );
+                            std::process::exit(1);
+                        }
+                    };
 
                     if let Err(e) = serve(
                         listener,

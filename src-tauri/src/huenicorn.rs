@@ -7,7 +7,6 @@ use async_graphql::SimpleObject;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
-use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -201,7 +200,7 @@ fn command_installed(command: &str) -> bool {
     let Some(first) = command.split_whitespace().next() else {
         return false;
     };
-    Command::new("sh")
+    crate::host_command::host_command("sh")
         .arg("-c")
         .arg("command -v -- \"$0\" >/dev/null 2>&1")
         .arg(first)
@@ -235,10 +234,16 @@ pub fn start_huenicorn() -> Result<u32, String> {
             .to_string()
     })?;
 
+    // Same host-resolution the watchdogs do: this spawn runs on the host under
+    // Flatpak, so a command that only exists in a Flatpak has to be named as
+    // one. A no-op today, since huenicorn is installed to ~/.local/bin, which
+    // is on the host's PATH.
+    let command = crate::service_commands::resolve_for_host(&command);
+
     let log_file = std::fs::File::create(log_file_path()).map_err(|e| e.to_string())?;
     let log_file_err = log_file.try_clone().map_err(|e| e.to_string())?;
 
-    let mut child = Command::new("sh")
+    let mut child = crate::host_command::host_command("sh")
         .arg("-c")
         .arg(&command)
         .stdout(log_file)
@@ -298,7 +303,7 @@ pub fn start_huenicorn() -> Result<u32, String> {
 pub fn stop_huenicorn() -> Result<(), String> {
     *HUENICORN_PID.lock().map_err(|e| e.to_string())? = None;
 
-    Command::new("pkill")
+    crate::host_command::host_command("pkill")
         .arg("-x")
         .arg("huenicorn")
         .output()
@@ -312,7 +317,7 @@ pub fn stop_huenicorn() -> Result<(), String> {
     }
 
     eprintln!("stop_huenicorn: huenicorn survived SIGTERM, escalating to SIGKILL");
-    Command::new("pkill")
+    crate::host_command::host_command("pkill")
         .args(["-9", "-x", "huenicorn"])
         .output()
         .map_err(|e| format!("Failed to run pkill -9: {e}"))?;

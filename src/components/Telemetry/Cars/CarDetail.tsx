@@ -27,7 +27,7 @@ interface Props {
 type ProfileRef = { id: string; name: string; carId?: string | null };
 
 // The one shared detail/edit UI for a Car record — mounted both from the
-// existing #/telemetry/cars/:id page and from #/telemetryadmin/cars's show
+// existing #/telemetry/cars/:id page and from #/dashboards/cars's show
 // and edit slots. Does its own data-fetching (fetch-whole-list-and-find-by-id,
 // same convention useDashboard.ts already uses) so both hosts can just pass
 // the record id and nothing else.

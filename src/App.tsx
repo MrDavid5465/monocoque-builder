@@ -15,7 +15,7 @@ import LedsDevices from "./components/LedsDevices";
 import ShiftLights from "./components/ShiftLights";
 import SimWindDevices from "./components/SimWindDevices";
 import AmbientLights from "./components/AmbientLights";
-import TelemetryAdmin from "./components/TelemetryAdmin";
+import Dashboards from "./components/Dashboards";
 import TelemetryControls from "./components/Telemetry/Controls";
 import { useMutation, useQuery } from "@apollo/client/react";
 import { HEARTBEAT_CLIENT } from "./components/Telemetry/clientsQueries";
@@ -49,14 +49,14 @@ const SetupGuard: React.FC = () => {
 };
 
 // Root landing ("/") — the user's own Launch Page setting wins when set,
-// otherwise falls back to Telemetry Admin. Already resolved from cache by
+// otherwise falls back to the Dashboards app. Already resolved from cache by
 // the time this renders: Denim's own top-level `my` query gates rendering
 // any routes at all until it resolves, so this never shows a loading flash.
 const DefaultLanding: React.FC = () => {
   const { data, loading } = useQuery<IMy>(dispatcher.my, { fetchPolicy: 'cache-first' });
   if (loading || !data) return null;
   const launchPage = data.my?.settings?.launchPage;
-  return <Navigate to={launchPage ? `/${launchPage}` : '/telemetryadmin/default'} replace />;
+  return <Navigate to={launchPage ? `/${launchPage}` : '/dashboards/default'} replace />;
 };
 
 const App: React.FC = () => {
@@ -69,13 +69,13 @@ const App: React.FC = () => {
       <Denim
         Logo={Logo}
         Brand={(props) => (
-          <Link to="/telemetryadmin/default">
+          <Link to="/dashboards/default">
             <Logo className={style.logoLink} {...props} />
           </Link>
         )}
         RootComponent={DefaultLanding}
         Controls={TelemetryControls}
-        components={{ Shakers, LedsDevices, ShiftLights, SimWindDevices, AmbientLights, TelemetryAdmin }}
+        components={{ Shakers, LedsDevices, ShiftLights, SimWindDevices, AmbientLights, Dashboards }}
         themes={THEMES}
         />
     </>

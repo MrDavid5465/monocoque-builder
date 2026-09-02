@@ -8,10 +8,57 @@ name: Flatpak (best effort)
 # cross-workflow `needs:`, which doesn't work across separate workflow
 # files.
 #
-# UNVERIFIED: nothing here has been exercised against a real
-# flatpak-builder run (no way to do that in this environment). Expect to
-# iterate on generator invocations, runtime/SDK extension versions, and
-# the offline build step once a real CI log exists.
+# VERIFIED END-TO-END (2026-08-30): a real workflow_dispatch run
+# (33313137887) completed the full pipeline for the first time ever --
+# npm ci, npm run build, cargo build --release --offline (DuckDB compiled
+# from source, ~40min), appstreamcli compose, and `flatpak build-bundle`
+# all succeeded, producing a real io.github.mrdavid5465.MonocoqueBuilder .flatpak (~80MB).
+# Getting there took ten iterations against real GitHub Actions runs (plus
+# local flatpak-builder runs where the failure didn't need CI to reproduce),
+# fixing real bugs nobody had hit before:
+#  - the `dir` source's `path: ../..` was one level too shallow to reach the
+#    sibling typiql-rs checkout (needed `../../..`)
+#  - `npm ci --offline` had no XDG_CACHE_HOME/npm_config_cache pointed at
+#    flatpak-node-generator's cache, so it always fell through to the real
+#    registry
+#  - flatpak-node-generator.py doesn't exist at that path anymore (it's a pip
+#    package with a console-script entry point now), and
+#    flatpak-cargo-generator.py needs tomlkit, not toml
+#  - package.json's "@octant/per-form": "github:...#master" was a stale git
+#    dependency: unused by any actual import (the app consumes per-form via
+#    the src/lib/per-form submodule instead) and no longer even installable
+#    as an npm package, since per-form's own master branch was restructured
+#    to a submodule-only, no-package.json layout. Removing the dead
+#    dependency was the actual fix, not a flatpak-side workaround. Also
+#    dropped the now-unnecessary --allow-git=all from integration-test.yml's
+#    npm-ci step, added for this same dependency.
+#  - `cargo build --release --offline --locked` failed on a real (harmless)
+#    Cargo.lock drift -- src-tauri's own package version was stale at 0.2.0
+#    against Cargo.toml/tauri.conf.json's 0.4.0. Synced Cargo.lock and
+#    dropped --locked (--offline alone still guarantees no network access).
+#  - GNOME 46/freedesktop 24.08 were already EOL; bumped to GNOME 49/
+#    freedesktop 25.08, which surfaced the next one --
+#  - GNOME Sdk 49 dropped the legacy `appstream-compose` binary (just
+#    `appstreamcli` now). Ubuntu 22.04's apt-packaged flatpak-builder
+#    predates the `appstreamcli compose` fallback for this. Tried
+#    org.flatpak.Builder (Flathub's flatpak-wrapped build, confirmed via
+#    `strings` on the binary to have the fallback) but flatpak-in-flatpak
+#    introduced its own unrelated failure ("Unable to find sdk
+#    org.gnome.Sdk version 49"). Landed on a native flatpak-builder from
+#    ppa:flatpak/stable (the flatpak project's own PPA for exactly this)
+#    instead, which also happens to pull in a real appstream-compose 0.15.2
+#    package as a dependency.
+#  - that newer flatpak-builder needs `bsdunzip` for zip-type sources (e.g.
+#    Playwright's browser downloads in generated-node-sources); Ubuntu
+#    22.04's libarchive-tools only provides `bsdtar`. Symlinking bsdunzip to
+#    bsdtar first seemed reasonable (both are libarchive tools) but they're
+#    not flag-compatible -- real bsdunzip mimics classic Info-ZIP unzip's
+#    CLI, so symlinking to plain `unzip` instead is what actually worked.
+#
+# Not yet covered: this repo's own git submodules (src/lib/per-form,
+# src/lib/typical-admin-fabric), added in the feat/huenicorn-ambient-lights
+# branch and not yet on master -- worth a real test once that branch merges
+# and this workflow runs against a checkout that actually has them.
 on:
   push:
     tags: ['v*']
@@ -35,21 +82,50 @@ jobs:
 
       - name: Install flatpak-builder + GNOME runtime/SDK + extensions
         run: |
+          # Wrapping flatpak-builder in its own flatpak sandbox
+          # (org.flatpak.Builder) hit a different, flatpak-in-flatpak-shaped
+          # failure ("Unable to find sdk org.gnome.Sdk version 49", right
+          # after a dconf permission-denied warning) rather than actually
+          # fixing anything -- reverting to a native binary. The real fix for
+          # GNOME Sdk 49 dropping the legacy appstream-compose binary (see
+          # below) is a newer flatpak-builder, gotten here via the
+          # flatpak project's own PPA rather than Ubuntu 22.04's stale
+          # default package.
+          sudo add-apt-repository -y ppa:flatpak/stable
           sudo apt-get update
-          sudo apt-get install -y flatpak flatpak-builder
+          # This newer flatpak-builder shells out to bsdunzip for extracting
+          # zip-type sources (e.g. the Playwright browser downloads in
+          # generated-node-sources) instead of plain unzip. Confirmed by two
+          # failed runs that bsdtar isn't a substitute despite both being
+          # part of libarchive: symlinking bsdunzip -> bsdtar produced
+          # "bsdunzip: Must specify one of -c, -r, -t, -u, -x" -- that's
+          # bsdtar's own diagnostic for missing a tar-style mode flag, since
+          # flatpak-builder invokes it with unzip-style flags instead. The
+          # real bsdunzip (a separate libarchive component, not shipped by
+          # Ubuntu 22.04's libarchive-tools 3.6.0-1ubuntu1.8) was explicitly
+          # designed to mimic classic Info-ZIP unzip's CLI, so plain unzip
+          # (already standard on Ubuntu) is flag-compatible.
+          sudo apt-get install -y flatpak flatpak-builder unzip
+          sudo ln -sf "$(command -v unzip)" /usr/local/bin/bsdunzip
           sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-          sudo flatpak install -y --noninteractive flathub org.gnome.Platform//46 org.gnome.Sdk//46
-          sudo flatpak install -y --noninteractive flathub org.freedesktop.Sdk.Extension.rust-stable//24.08 org.freedesktop.Sdk.Extension.node20//24.08
+          sudo flatpak install -y --noninteractive flathub org.gnome.Platform//49 org.gnome.Sdk//49
+          sudo flatpak install -y --noninteractive flathub org.freedesktop.Sdk.Extension.rust-stable//25.08 org.freedesktop.Sdk.Extension.node20//25.08
 
       - name: Install flatpak-builder-tools generators
         run: |
-          pip install --user aiohttp toml
+          # flatpak-node-generator is a proper pip package now (with a console-script
+          # entry point), not a standalone script at node/flatpak-node-generator.py --
+          # that path stopped existing upstream. The cargo generator needs tomlkit,
+          # not toml (aiohttp+toml here silently left flatpak-cargo-generator.py unable
+          # to import tomlkit at all). Both only surfaced by actually running this for
+          # the first time (see flatpak/io.github.mrdavid5465.MonocoqueBuilder.yml's header comment).
+          pip install --user aiohttp tomlkit
           git clone --depth 1 https://github.com/flatpak/flatpak-builder-tools /tmp/flatpak-builder-tools
+          pip install --user /tmp/flatpak-builder-tools/node
 
       - name: Generate offline npm sources
         run: |
-          python3 /tmp/flatpak-builder-tools/node/flatpak-node-generator.py \
-            npm typiql-tauri/typiql/package-lock.json \
+          ~/.local/bin/flatpak-node-generator npm typiql-tauri/typiql/package-lock.json \
             -o typiql-tauri/typiql/flatpak/generated-node-sources.json
 
       - name: Generate offline cargo sources
@@ -58,16 +134,42 @@ jobs:
             typiql-tauri/typiql/src-tauri/Cargo.lock \
             -o typiql-tauri/typiql/flatpak/generated-cargo-sources.json
 
+      # flatpak-builder keys its cache per module and per source checksum, so
+      # this survives runs where only the app source changed. Restore-keys
+      # deliberately falls back to any older cache: a stale one is still a big
+      # win, because the expensive entries (downloaded sources, unchanged
+      # modules) rarely change.
+      - name: Cache flatpak-builder state
+        uses: actions/cache@v4
+        with:
+          path: typiql-tauri/typiql/flatpak/.flatpak-builder
+          key: flatpak-builder-${{ runner.os }}-${{ hashFiles('typiql-tauri/typiql/flatpak/io.github.mrdavid5465.MonocoqueBuilder.yml', 'typiql-tauri/typiql/src-tauri/Cargo.lock', 'typiql-tauri/typiql/package-lock.json') }}
+          restore-keys: |
+            flatpak-builder-${{ runner.os }}-
+
+      # No --force-clean: that deletes the state the cache above just restored.
+      # --ccache reuses compiled C/C++ objects across runs for anything still
+      # built from source.
       - name: Build .flatpak (network-isolated, offline sources only)
         working-directory: typiql-tauri/typiql/flatpak
         run: |
-          flatpak-builder --force-clean --repo=repo build-dir com.telemetryadmin.app.yml
-          flatpak build-bundle repo typiql.flatpak com.telemetryadmin.app
+          flatpak-builder --ccache --repo=repo build-dir io.github.mrdavid5465.MonocoqueBuilder.yml
+          flatpak build-bundle repo monocoque-builder.flatpak io.github.mrdavid5465.MonocoqueBuilder
+
+      # Always uploaded (unlike the release step below, which only fires on
+      # tag pushes) so a manual workflow_dispatch run -- like the one that
+      # first proved this pipeline end-to-end -- still produces a
+      # downloadable artifact for manual host testing.
+      - name: Upload .flatpak as a build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: monocoque-builder.flatpak
+          path: typiql-tauri/typiql/flatpak/monocoque-builder.flatpak
 
       - name: Upload .flatpak to the matching (draft) release
         if: success() && startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          files: typiql-tauri/typiql/flatpak/typiql.flatpak
+          files: typiql-tauri/typiql/flatpak/monocoque-builder.flatpak
           draft: true

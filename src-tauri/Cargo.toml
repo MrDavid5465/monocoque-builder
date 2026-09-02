@@ -4,7 +4,7 @@ members = [
 ]
 
 [package]
-name = "typiql"
+name = "monocoque-builder"
 version = "0.4.0"
 description = "A Tauri App"
 authors = ["you"]
@@ -16,7 +16,7 @@ edition = "2021"
 # The `_lib` suffix may seem redundant but it is necessary
 # to make the lib name unique and wouldn't conflict with the bin name.
 # This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
-name = "typiql_lib"
+name = "monocoque_builder_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
@@ -46,6 +46,28 @@ uuid = { version = "1", features = ["v4"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 typiql = { path = "../../../typiql-rs/crates/typiql-core", package = "typiql-core" }
 typiql-adapter-json = { path = "../../../typiql-rs/crates/typiql-adapter-json" }
-typiql-adapter-duckdb = { path = "../../../typiql-rs/crates/typiql-adapter-duckdb" }
+typiql-adapter-duckdb = { path = "../../../typiql-rs/crates/typiql-adapter-duckdb", default-features = false }
 evdev = "0.12"
 nusb = "0.2.7"
+
+[features]
+# Opt-in, not shipped: `cargo build --features devtools` enables the WebKit
+# inspector in a release build. Left off by default because on this hardware
+# opening it wedges the render process and then crashes the window to a blank
+# grey -- the same NVIDIA/WebKitGTK territory as WEBKIT_DISABLE_DMABUF_RENDERER
+# in the Flatpak manifest.
+devtools = ["tauri/devtools"]
+# Without this the build is a *dev* build as far as Tauri is concerned -- its
+# build script literally does `let dev = !custom_protocol` -- so the window
+# loads devUrl (http://localhost:1420) instead of the embedded frontend, and
+# shows "Could not connect to localhost: Connection refused" with nothing
+# listening there. `tauri build` passes this feature itself; builds that call
+# cargo directly, as the Flatpak manifest does, have to ask for it.
+custom-protocol = ["tauri/custom-protocol"]
+# On by default so `cargo build` and the deb/rpm/AppImage builds keep
+# compiling DuckDB from source exactly as before. The Flatpak build passes
+# --no-default-features and supplies a prebuilt libduckdb instead, which cuts
+# that build from ~42 minutes to ~6. See the adapter crate's own [features]
+# for the version-matching constraint.
+default = ["duckdb-bundled", "custom-protocol"]
+duckdb-bundled = ["typiql-adapter-duckdb/bundled"]

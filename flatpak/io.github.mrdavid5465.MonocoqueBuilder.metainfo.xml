@@ -1,19 +1,19 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>com.telemetryadmin.app</id>
-  <name>typiql</name>
+  <id>io.github.mrdavid5465.MonocoqueBuilder</id>
+  <name>Monocoque Builder</name>
   <summary>Telemetry dashboard designer and recorder for sim racing rigs</summary>
   <metadata_license>MIT</metadata_license>
   <project_license>MIT</project_license>
   <description>
     <p>
-      typiql is a dashboard designer, live telemetry viewer, and telemetry
+      Monocoque Builder is a dashboard designer, live telemetry viewer, and telemetry
       recorder/player for sim racing rigs, built on the monocoque telemetry
       bridge.
     </p>
   </description>
-  <launchable type="desktop-id">com.telemetryadmin.app.desktop</launchable>
-  <url type="homepage">https://github.com/MrDavid5465/telemetry-admin</url>
+  <launchable type="desktop-id">io.github.mrdavid5465.MonocoqueBuilder.desktop</launchable>
+  <url type="homepage">https://github.com/MrDavid5465/monocoque-builder</url>
   <content_rating type="oars-1.1" />
   <releases>
     <release version="0.1.0" date="2026-07-20" />

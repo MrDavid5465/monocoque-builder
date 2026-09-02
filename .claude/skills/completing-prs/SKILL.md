@@ -5,7 +5,7 @@ license: MIT
 disable-model-invocation: true
 ---
 
-# Completing a PR in telemetry-admin
+# Completing a PR in monocoque-builder
 
 "Complete this PR" means: confirm it's actually safe to merge under this
 repo's real CI/CD rules (not just "no red X visible"), merge it the way
@@ -59,7 +59,7 @@ merge gate.
      just lands on `master` quietly. No release-please PR appears.
    - If the PR contains any `feat`/`fix` commit, the next push to `master`
      (this merge) makes `release-please.yml` open or update a
-     `chore(master): release telemetry-admin X.Y.Z` PR. That PR is not yours
+     `chore(master): release monocoque-builder X.Y.Z` PR. That PR is not yours
      to merge automatically — merging *it* is a real, deliberate release
      (tags, triggers `build-release`, uploads Linux packages to a public
      GitHub Release). Flag it to the user rather than completing it the same
