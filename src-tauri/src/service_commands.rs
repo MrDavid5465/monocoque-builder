@@ -27,9 +27,9 @@
 
 /// Environment variables holding the dev command for each service. Only read
 /// in debug builds.
-pub const SIMD_DEV_COMMAND_ENV: &str = "TYPIQL_SIMD_DEV_COMMAND";
-pub const MONOCOQUE_DEV_COMMAND_ENV: &str = "TYPIQL_MONOCOQUE_DEV_COMMAND";
-pub const HUENICORN_DEV_COMMAND_ENV: &str = "TYPIQL_HUENICORN_DEV_COMMAND";
+pub const SIMD_DEV_COMMAND_ENV: &str = "MONOCOQUE_BUILDER_SIMD_DEV_COMMAND";
+pub const MONOCOQUE_DEV_COMMAND_ENV: &str = "MONOCOQUE_BUILDER_MONOCOQUE_DEV_COMMAND";
+pub const HUENICORN_DEV_COMMAND_ENV: &str = "MONOCOQUE_BUILDER_HUENICORN_DEV_COMMAND";
 
 /// True when this is a debug (`cargo build` / `tauri dev`) binary.
 pub fn is_debug_build() -> bool {

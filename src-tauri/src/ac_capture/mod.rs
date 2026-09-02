@@ -216,7 +216,7 @@ mod tests {
     /// the result, and shutting down. The only part left out is filing the
     /// images onto a Car record, which needs the app's data store.
     ///
-    /// Assetto Corsa must be closed first. Set `TYPIQL_CAPTURE_CAR` to pick
+    /// Assetto Corsa must be closed first. Set `MONOCOQUE_BUILDER_CAPTURE_CAR` to pick
     /// a car; the track comes from whatever `race.ini` currently points at.
     ///
     /// `#[ignore]`, and genuinely invasive — it edits real settings, though
@@ -225,8 +225,8 @@ mod tests {
     #[test]
     #[ignore]
     fn full_capture_run() {
-        let car =
-            std::env::var("TYPIQL_CAPTURE_CAR").unwrap_or_else(|_| "ks_corvette_c7r".to_string());
+        let car = std::env::var("MONOCOQUE_BUILDER_CAPTURE_CAR")
+            .unwrap_or_else(|_| "ks_corvette_c7r".to_string());
 
         let paths = CapturePaths::resolve(None, None).expect("no Assetto Corsa install detected");
         let mut config = CaptureConfig::new(car.clone(), String::new());

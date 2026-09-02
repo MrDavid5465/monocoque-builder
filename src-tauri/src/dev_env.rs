@@ -1,5 +1,5 @@
 //! Loads machine-local development settings from a `.env.local` file, so the
-//! `TYPIQL_*_DEV_COMMAND` variables don't have to be retyped on every
+//! `MONOCOQUE_BUILDER_*_DEV_COMMAND` variables don't have to be retyped on every
 //! `npm run tauri dev`.
 //!
 //! This is the missing half of `service_commands`: that module explains why
@@ -17,7 +17,7 @@
 //! - **The environment wins.** A variable already set in the shell is left
 //!   alone, so a one-off override on the command line still takes precedence
 //!   over the file.
-//! - **Prefixed keys only.** The file can set `TYPIQL_*` and `RUST_*` and
+//! - **Prefixed keys only.** The file can set `MONOCOQUE_BUILDER_*` and `RUST_*` and
 //!   nothing else. A dotfile that silently edits `PATH` or `LD_PRELOAD` for
 //!   the process is a bigger hazard than the convenience is worth. Skipped
 //!   keys are logged rather than ignored quietly.
@@ -32,7 +32,7 @@ use std::path::PathBuf;
 const FILE_NAME: &str = ".env.local";
 
 /// Key prefixes the file is allowed to set.
-const ALLOWED_PREFIXES: [&str; 2] = ["TYPIQL_", "RUST_"];
+const ALLOWED_PREFIXES: [&str; 2] = ["MONOCOQUE_BUILDER_", "RUST_"];
 
 /// Reads `.env.local` into the process environment.
 ///
@@ -153,22 +153,25 @@ mod tests {
         let parsed = parse(
             r#"
 # a comment
-TYPIQL_SIMD_DEV_COMMAND=/src/build/simd
+MONOCOQUE_BUILDER_SIMD_DEV_COMMAND=/src/build/simd
 
-  export TYPIQL_MONOCOQUE_DEV_COMMAND="/src/build/monocoque play"
-TYPIQL_HUENICORN_DEV_COMMAND='/src/build/huenicorn'
+  export MONOCOQUE_BUILDER_MONOCOQUE_DEV_COMMAND="/src/build/monocoque play"
+MONOCOQUE_BUILDER_HUENICORN_DEV_COMMAND='/src/build/huenicorn'
 "#,
         );
         assert_eq!(
             parsed,
             vec![
-                ("TYPIQL_SIMD_DEV_COMMAND".into(), "/src/build/simd".into()),
                 (
-                    "TYPIQL_MONOCOQUE_DEV_COMMAND".into(),
+                    "MONOCOQUE_BUILDER_SIMD_DEV_COMMAND".into(),
+                    "/src/build/simd".into()
+                ),
+                (
+                    "MONOCOQUE_BUILDER_MONOCOQUE_DEV_COMMAND".into(),
                     "/src/build/monocoque play".into()
                 ),
                 (
-                    "TYPIQL_HUENICORN_DEV_COMMAND".into(),
+                    "MONOCOQUE_BUILDER_HUENICORN_DEV_COMMAND".into(),
                     "/src/build/huenicorn".into()
                 ),
             ]
@@ -179,11 +182,11 @@ TYPIQL_HUENICORN_DEV_COMMAND='/src/build/huenicorn'
     /// and an `=` inside a value must not split the line a second time.
     #[test]
     fn keeps_spaces_and_later_equals_signs_in_the_value() {
-        let parsed = parse("TYPIQL_MONOCOQUE_DEV_COMMAND=monocoque play --flag=1");
+        let parsed = parse("MONOCOQUE_BUILDER_MONOCOQUE_DEV_COMMAND=monocoque play --flag=1");
         assert_eq!(
             parsed,
             vec![(
-                "TYPIQL_MONOCOQUE_DEV_COMMAND".into(),
+                "MONOCOQUE_BUILDER_MONOCOQUE_DEV_COMMAND".into(),
                 "monocoque play --flag=1".into()
             )]
         );
@@ -194,7 +197,7 @@ TYPIQL_HUENICORN_DEV_COMMAND='/src/build/huenicorn'
         assert!(parse("no equals sign here").is_empty());
         assert!(parse("=novalue").is_empty());
         assert!(parse("   ").is_empty());
-        assert!(parse("#TYPIQL_SIMD_DEV_COMMAND=x").is_empty());
+        assert!(parse("#MONOCOQUE_BUILDER_SIMD_DEV_COMMAND=x").is_empty());
     }
 
     #[test]
@@ -214,17 +217,24 @@ TYPIQL_HUENICORN_DEV_COMMAND='/src/build/huenicorn'
     #[test]
     fn keeps_empty_values() {
         assert_eq!(
-            parse("TYPIQL_SIMD_DEV_COMMAND="),
-            vec![("TYPIQL_SIMD_DEV_COMMAND".into(), "".into())]
+            parse("MONOCOQUE_BUILDER_SIMD_DEV_COMMAND="),
+            vec![("MONOCOQUE_BUILDER_SIMD_DEV_COMMAND".into(), "".into())]
         );
     }
 
     #[test]
     fn only_prefixed_keys_are_allowed() {
-        for key in ["TYPIQL_SIMD_DEV_COMMAND", "RUST_LOG", "RUST_BACKTRACE"] {
+        for key in [
+            "MONOCOQUE_BUILDER_SIMD_DEV_COMMAND",
+            "RUST_LOG",
+            "RUST_BACKTRACE",
+        ] {
             assert!(ALLOWED_PREFIXES.iter().any(|p| key.starts_with(p)), "{key}");
         }
-        for key in ["PATH", "LD_PRELOAD", "HOME", "TYPIQ_TYPO"] {
+        // MONOCOQUE_SOMETHING is the near-miss worth pinning: the service
+        // is called monocoque and the app is Monocoque Builder, so a
+        // shortened prefix is an easy thing to write by mistake.
+        for key in ["PATH", "LD_PRELOAD", "HOME", "MONOCOQUE_SOMETHING"] {
             assert!(
                 !ALLOWED_PREFIXES.iter().any(|p| key.starts_with(p)),
                 "{key} should not be settable from .env.local"

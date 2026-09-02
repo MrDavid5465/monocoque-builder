@@ -171,7 +171,7 @@ pub fn launch(paths: &CapturePaths, app_id: &str) -> Result<(), String> {
 fn host_exec_prefix() -> Option<Vec<String>> {
     // Explicit override first, so a development container can point at
     // whatever escape hatch it has (`distrobox-host-exec`, say).
-    if let Ok(value) = std::env::var("TYPIQL_CAPTURE_HOST_EXEC") {
+    if let Ok(value) = std::env::var("MONOCOQUE_BUILDER_CAPTURE_HOST_EXEC") {
         let parts: Vec<String> = value.split_whitespace().map(str::to_string).collect();
         if !parts.is_empty() {
             return Some(parts);
