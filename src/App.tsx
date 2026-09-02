@@ -23,6 +23,7 @@ import { getAppId } from "./graphql/client";
 import dispatcher, { IMy } from "./lib/denim/lib/queries";
 import SetupWizard from "./components/Onboarding/SetupWizard";
 import { ConfirmDialogHost } from "./lib/denim/components/ConfirmDialog";
+import { LiveUpdatesProvider } from "./components/Telemetry/liveUpdatesHub";
 
 export const getStyle = () => {
   return { ...getDenimStyle(), ...mergeStyleSets(qStyles(getTheme())) };
@@ -66,6 +67,20 @@ const App: React.FC = () => {
       <ClientHeartbeat />
       <SetupGuard />
       <ConfirmDialogHost />
+      {/* THE live-updates connection for the whole app. Every optional
+          stream is off here: what it actually carries is decided by
+          useLiveUpdatesDemand, declared next to the code that needs it (see
+          liveUpdatesHub). Pages below therefore share one subscription
+          instead of each opening its own — which is what the per-origin
+          connection budget requires once several kiosk windows are open, and
+          what keeps a future subscribe-to-one pass from opening one
+          connection per entity. */}
+      <LiveUpdatesProvider
+        includeTelemetry={false}
+        includeNightClock={false}
+        includeAmbientColor={false}
+        includeAcTelemetry={false}
+      >
       <Denim
         Logo={Logo}
         Brand={(props) => (
@@ -78,6 +93,7 @@ const App: React.FC = () => {
         components={{ Shakers, LedsDevices, ShiftLights, SimWindDevices, AmbientLights, Dashboards }}
         themes={THEMES}
         />
+      </LiveUpdatesProvider>
     </>
   );
 }

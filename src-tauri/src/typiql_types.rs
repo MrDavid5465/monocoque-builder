@@ -11,9 +11,10 @@ use crate::graphql::builtin_templates::BuiltinTemplatesQuery;
 use crate::graphql::clients::ClientsMutation;
 use crate::graphql::dashboard_files::{DashboardFileSyncQuery, DashboardFileUploadMutation};
 use crate::graphql::{
-    CarFileMutation, CarPhotoSyncQuery, DashTemplateThumbnailMutation, DashboardMutation,
-    GamepadMutation, HuenicornMutation, NightClockMutation, RecordingControlMutation,
-    ShakerDspMutation, ShakerDspQuery, TrackGeocodeQuery,
+    AcTelemetryMutation, AcTelemetryQuery, CarCaptureMutation, CarCaptureQuery, CarFileMutation,
+    CarPhotoSyncQuery, DashTemplateThumbnailMutation, DashboardMutation, GamepadMutation,
+    HuenicornMutation, NightClockMutation, RecordingControlMutation, ShakerDspMutation,
+    ShakerDspQuery, TrackGeocodeQuery,
 };
 use crate::graphql::{QueryRoot, SubscriptionRoot};
 use crate::telemetry::types::{CourseFlag, SimStatus};
@@ -407,6 +408,30 @@ pub struct Car {
     /// storing that inline would bloat the JSON store. Out of scope for the
     /// File-relation migration — stays a plain filename for now.
     pub thumbnail: Option<String>,
+    /// The one car used as a stand-in wherever a dashboard has no car of its
+    /// own to show.
+    ///
+    /// Replaces `Dashboard.photo360File`, which made every dashboard carry
+    /// its own fallback 360° image: the same picture had to be chosen again
+    /// per dashboard, and it was a loose sprite file rather than a real car,
+    /// so it had no night variant and no pan alignment. Hanging the fallback
+    /// off a Car instead means one choice covers every dashboard and brings
+    /// its day photo, night photo and alignment with it.
+    ///
+    /// Exactly one Car should have this set; `setFavoriteCar` enforces that
+    /// by clearing the others, the same way a profile's `car_id` link is kept
+    /// 1:1 in `CarDetail`.
+    pub favorite: bool,
+    /// Which installed Assetto Corsa car the 360° capture should load for
+    /// this record.
+    ///
+    /// Separate from `car_ids` because the two answer different questions:
+    /// `car_ids` is every raw id this record represents (a record can stand
+    /// for several, and they arrive from telemetry), while this is the one
+    /// specific car to put on track when taking its photo. Left unset it
+    /// falls back to the first `car_ids` entry, which is right whenever a
+    /// record maps to exactly one car — so most records never need it.
+    pub capture_car_id: Option<String>,
 }
 
 /// Global day/night state, shared live across every dashboard and kiosk display
@@ -486,6 +511,21 @@ pub struct PreviewCar {
     #[typiql(key)]
     pub id: String,
     pub car_id: String,
+    /// When the pin was last confirmed still wanted, ms since epoch.
+    ///
+    /// This is a globally-shared, persisted override — every kiosk in the
+    /// house follows it — but the only thing that used to clear it was a
+    /// React unmount cleanup on the page that set it. Closing the tab,
+    /// killing the app or a crash all skip that, leaving every dashboard
+    /// pinned to a car someone glanced at once, indefinitely. Observed
+    /// exactly that.
+    ///
+    /// So the page that wants the pin keeps saying so (see CarDetail's
+    /// refresh interval), and `preview_car::run_expiry_watchdog` drops it
+    /// once nothing has for a while. Rows written before this field existed
+    /// have no timestamp — those are treated as expired, which is the safe
+    /// reading for a stale pin.
+    pub touched_at: Option<f64>,
 }
 
 /// A real-world circuit location, used to compute real sunrise/sunset times
@@ -727,7 +767,7 @@ typiql_schema!(
     MonocoqueSimWindDevice, SimWindDeviceProfile,
     DashTemplate, ConnectedClient, DashGroup, KnownCar, KnownTrack, DeviceDefault,
     Car, File, NightMode, CarDashPan, PreviewCar, DashboardEntry, Recording, RecordingFrame, TrackLocation;
-    AppConfigQuery, DashboardFileSyncQuery, BuiltinTemplatesQuery, CarPhotoSyncQuery, ShakerDspQuery, TrackGeocodeQuery, QueryRoot;
-    AppConfigMutation, DashboardFileUploadMutation, ClientsMutation, CarFileMutation, DashTemplateThumbnailMutation, DashboardMutation, GamepadMutation, NightClockMutation, ShakerDspMutation, RecordingControlMutation, HuenicornMutation;
+    AppConfigQuery, DashboardFileSyncQuery, BuiltinTemplatesQuery, CarPhotoSyncQuery, CarCaptureQuery, AcTelemetryQuery, ShakerDspQuery, TrackGeocodeQuery, QueryRoot;
+    AppConfigMutation, DashboardFileUploadMutation, ClientsMutation, CarFileMutation, CarCaptureMutation, AcTelemetryMutation, DashTemplateThumbnailMutation, DashboardMutation, GamepadMutation, NightClockMutation, ShakerDspMutation, RecordingControlMutation, HuenicornMutation;
     SubscriptionRoot
 );

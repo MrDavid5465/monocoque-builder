@@ -4,8 +4,11 @@
 // per merged type — adding File pushed the schema's type count past rustc's
 // default query recursion limit (128).
 #![recursion_limit = "256"]
+mod ac_capture;
+mod ac_telemetry;
 mod api;
 mod config_manager;
+mod dev_env;
 mod device_enumeration;
 mod gamepad;
 mod graphql;
@@ -13,6 +16,7 @@ mod host_command;
 mod huenicorn;
 mod night_state;
 mod pipewire_dsp;
+mod preview_car;
 mod process_liveness;
 mod service_commands;
 mod service_watchdogs;
@@ -24,6 +28,12 @@ use axum::serve;
 use std::net::SocketAddr;
 use tokio::runtime::Runtime;
 fn main() {
+    // First, before any thread exists: this mutates the process environment,
+    // which is only safe while nothing else can be reading it, and the
+    // service watchdogs spawned below are exactly the readers. No-op in
+    // release builds.
+    dev_env::load();
+
     std::panic::set_hook(Box::new(|info| {
         let bt = std::backtrace::Backtrace::capture();
         eprintln!("BACKEND PANIC: {info}\n{bt}");
@@ -39,6 +49,20 @@ fn main() {
             std::thread::spawn(|| {
                 let rt = Runtime::new().unwrap();
                 rt.block_on(async {
+                    // A 360° capture temporarily swaps out Assetto Corsa's
+                    // display mode, upscaling and session settings. If a run
+                    // died before it could put them back (crash, power cut,
+                    // killed process), the journal it left behind is replayed
+                    // here — otherwise the user would find their sim stuck in
+                    // 360° mode with upscaling off and no clear way back.
+                    match ac_capture::restore_pending_config() {
+                        Ok(true) => {
+                            println!("Restored Assetto Corsa settings left over from an interrupted 360° capture")
+                        }
+                        Ok(false) => {}
+                        Err(e) => eprintln!("Could not restore Assetto Corsa settings: {e}"),
+                    }
+
                     tokio::spawn(gamepad::run_watchdog());
                     tokio::spawn(huenicorn::run_sim_watcher());
                     tokio::spawn(huenicorn::run_color_poller());

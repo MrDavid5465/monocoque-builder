@@ -1,5 +1,7 @@
+pub mod ac_telemetry;
 pub mod app_config;
 pub mod builtin_templates;
+pub mod capture;
 pub mod car;
 pub mod clients;
 pub mod dashboard_entry;
@@ -11,6 +13,8 @@ pub mod recording;
 pub mod shaker_dsp;
 pub mod templates;
 pub mod track_geocode;
+pub use ac_telemetry::{AcTelemetryMutation, AcTelemetryQuery};
+pub use capture::{CarCaptureMutation, CarCaptureQuery};
 pub use car::{CarFileMutation, CarPhotoSyncQuery};
 pub use dashboard_entry::DashboardMutation;
 pub use gamepad::GamepadMutation;
@@ -34,9 +38,9 @@ use crate::service_watchdogs::{self, MonocoqueStatus, SimdStatus};
 use crate::telemetry::recording as telemetry_recording;
 use crate::telemetry::{build_frame, read_simdata, types::TelemetryFrame};
 use crate::typiql_types::{
-    CarDashPanChanged, DashTemplateChanged, DashboardEntryChanged, DeviceDefaultChanged,
-    LfeChannelChanged, MonocoqueSoundDeviceChanged, NightModeChanged, PreviewCarChanged,
-    ShakerChannelChanged, ShakerDspChannelChanged,
+    CarChanged, CarDashPanChanged, DashTemplateChanged, DashboardEntryChanged,
+    DeviceDefaultChanged, LfeChannelChanged, MonocoqueSoundDeviceChanged, NightModeChanged,
+    PreviewCarChanged, ShakerChannelChanged, ShakerDspChannelChanged,
 };
 use async_graphql::{Context, Object, SimpleObject, Subscription};
 use futures_util::stream::{select, select_all, Stream, StreamExt};
@@ -85,6 +89,10 @@ enum DashboardUpdateEvent {
     NightClock(NightClockTick),
     PreviewCar(PreviewCarChanged),
     CarDashPan(CarDashPanChanged),
+    // Which car a dashboard shows can change without any dashboard edit at
+    // all — starring a favourite is the case that exposed this. Event-driven
+    // like its neighbours here, so it needs no include flag.
+    Car(CarChanged),
     // Replaces Controls.tsx's old 1s recordingStatus poll (fired from every
     // mounted window, since Controls is on the always-present nav bar) — see
     // publish_recording_status' own doc comment for where this gets
@@ -94,6 +102,13 @@ enum DashboardUpdateEvent {
     // poller loop (not a mutation-triggered event like the others above —
     // see AmbientColorChanged's own doc comment).
     AmbientColor(AmbientColorChanged),
+    // Assetto Corsa's extended telemetry, for the same reason as the rest:
+    // the NeckFX sway consumer would otherwise hold a second always-open
+    // subscription alongside this one. Opt-in (see `include_ac_telemetry`)
+    // because it's the only member here that carries no meaning for a
+    // dashboard not driving motion from it, and at 60Hz it roughly doubles
+    // this stream's message rate.
+    AcTelemetry(ac_telemetry::AcTelemetry),
     // Huenicorn-relevant settings (enabled/intensity/primary channel),
     // published from update_settings — see HuenicornSettingsChanged's own
     // doc comment.
@@ -111,6 +126,12 @@ enum DashboardUpdateEvent {
 pub struct NightClockTick {
     pub sim_time_ms: f64,
     pub real_time_ms: f64,
+    /// Whether Assetto Corsa is currently disciplining this clock (see
+    /// `night_clock::sync_clock_from_game`). Informational only — the clock
+    /// is read the same way either way, which is the whole point of
+    /// disciplining rather than switching sources. A UI that offers to
+    /// configure the simulation can use it to say the game is driving it.
+    pub from_game: bool,
 }
 
 /// `nightModeUpdates` merges two logically-separate things (the record's
@@ -154,16 +175,65 @@ async fn night_clock_tick(adapter: &Arc<dyn TypiQLAdapter>) -> NightClockTick {
     // photo viewer reacts to the car changing — see this function's own
     // doc comment for why it needs a remembered date to do that, since
     // telemetry has no "what date is it in-game" signal of its own.
+    // Assetto Corsa DISCIPLINES this clock rather than replacing it: while the
+    // game is reporting, its time, date and rate are written into the anchor,
+    // and the clock is then read from that anchor exactly as it always was.
+    //
+    // The alternative — returning the game's clock directly and falling back
+    // to the simulation when it stops — has a hole in it that shows up
+    // constantly in practice: the Lua app dies whenever the player enters the
+    // setup menus, so the clock would snap from the real in-game time back to
+    // a simulation that had been free-running elsewhere for hours. Cross-fading
+    // between two clocks that disagree is not something a dashboard can hide.
+    // Disciplining leaves exactly one clock, which keeps running from the last
+    // values the game gave it and so bridges those gaps unnoticed.
+    let record = match &record {
+        Some(record) => night_clock::sync_clock_from_game(adapter, record)
+            .await
+            .or_else(|| Some(record.clone())),
+        None => None,
+    };
     if let Some(record) = &record {
         night_clock::maybe_auto_recompute_sun_times(adapter, record).await;
     }
+
+    let synced = crate::ac_telemetry::latest().is_some();
     let sim_time_ms = record
         .and_then(|record| night_clock::current_sim_ms(&record, now))
         .unwrap_or(now);
     NightClockTick {
         sim_time_ms,
         real_time_ms: now,
+        from_game: synced,
     }
+}
+
+/// The game's own instant — date included — as ms since epoch.
+///
+/// Prefers `timestamp`, which CSP documents as seconds since the epoch *in
+/// the track's own timezone rather than UTC0*. That quirk is what makes it
+/// directly usable: consumers read the value back with `getUTCHours()` (see
+/// `computeSimulatedNightState`), so a track-local epoch yields the game's
+/// local time-of-day, and its date along with it. A session set in June 2024
+/// then reports June 2024 rather than today's date wearing the game's clock.
+///
+/// Falls back to placing the time-of-day on today's UTC midnight if the
+/// timestamp is missing or implausible — an older CSP, or a frame that
+/// arrived before the field was populated. Time-of-day is the part that
+/// drives day/night, so it's worth keeping even without a trustworthy date.
+///
+/// Deliberately not derived from `dayOfYear`: measured against a real
+/// session, that field reported 168 for 2024-06-17, which is day 169 — it
+/// appears to be 0-based, and the timestamp needs no such guesswork.
+pub(super) fn sim_ms_from_game(frame: &crate::ac_telemetry::AcTelemetryFrame, now_ms: f64) -> f64 {
+    const MS_PER_DAY: f64 = 86_400_000.0;
+
+    if let Some(timestamp) = frame.session_timestamp() {
+        return timestamp as f64 * 1000.0;
+    }
+
+    let utc_midnight = (now_ms / MS_PER_DAY).floor() * MS_PER_DAY;
+    utc_midnight + frame.time_total_seconds * 1000.0
 }
 
 #[derive(SimpleObject, Clone)]
@@ -312,6 +382,24 @@ impl SubscriptionRoot {
             .enumerate()
             .map(|(i, _)| i as i32)
     }
+    /// Extended, Assetto-Corsa-only telemetry from the in-game Lua app.
+    ///
+    /// Deliberately separate from `telemetry` above rather than folded into
+    /// it: that one is cross-sim and comes from the shared-memory bridge,
+    /// while this exists only when AC is running with the TyPiQL app
+    /// installed. Merging them would mean a dashboard couldn't tell which
+    /// fields it could actually count on. Query `acTelemetrySupport` first to
+    /// decide whether to subscribe at all.
+    async fn ac_telemetry(
+        &self,
+        // 60, matching both the Lua app's send rate and screen rate — the
+        // NeckFX sway consumers read this inside a requestAnimationFrame loop,
+        // where anything slower steps visibly.
+        #[graphql(default = 60)] rate_hz: u32,
+    ) -> impl Stream<Item = Option<ac_telemetry::AcTelemetry>> {
+        ac_telemetry::stream(rate_hz)
+    }
+
     async fn telemetry(&self) -> impl Stream<Item = Option<TelemetryFrame>> {
         IntervalStream::new(tokio::time::interval(Duration::from_millis(33)))
             .map(|_| current_frame())
@@ -408,6 +496,10 @@ impl SubscriptionRoot {
         #[graphql(default = true)] include_telemetry: bool,
         #[graphql(default = true)] include_night_clock: bool,
         #[graphql(default = true)] include_ambient_color: bool,
+        // Defaults OFF, unlike the others: only a dashboard actually driving
+        // NeckFX sway has any use for it, and at 60Hz it would otherwise
+        // roughly double this stream's message rate for every window.
+        #[graphql(default = false)] include_ac_telemetry: bool,
     ) -> async_graphql::Result<impl Stream<Item = DashboardUpdateEvent>> {
         let adapter = default_adapter(ctx)?;
 
@@ -458,6 +550,9 @@ impl SubscriptionRoot {
         let s8 = TypiQLBroker::<CarDashPanChanged>::subscribe()
             .map(DashboardUpdateEvent::CarDashPan)
             .boxed();
+        let s13 = TypiQLBroker::<CarChanged>::subscribe()
+            .map(DashboardUpdateEvent::Car)
+            .boxed();
         let s9 = TypiQLBroker::<RecordingStatus>::subscribe()
             .map(DashboardUpdateEvent::Recording)
             .boxed();
@@ -472,9 +567,23 @@ impl SubscriptionRoot {
         let s11 = TypiQLBroker::<HuenicornSettingsChanged>::subscribe()
             .map(DashboardUpdateEvent::HuenicornSettings)
             .boxed();
+        // `flat_map` over the Option rather than mapping it into the union:
+        // `ac_telemetry::stream` yields None whenever the game isn't
+        // reporting, and a union arm has no way to express "no frame". The
+        // consumer treats silence as inactive anyway (its own staleness
+        // handling), so dropping the Nones keeps this stream quiet while AC
+        // isn't running instead of sending 60 empty events a second.
+        let s12: std::pin::Pin<Box<dyn Stream<Item = DashboardUpdateEvent> + Send>> =
+            if include_ac_telemetry {
+                ac_telemetry::stream(60)
+                    .filter_map(|frame| async move { frame.map(DashboardUpdateEvent::AcTelemetry) })
+                    .boxed()
+            } else {
+                futures_util::stream::empty().boxed()
+            };
 
         Ok(futures_util::stream::select_all([
-            s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11,
+            s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11, s12, s13,
         ]))
     }
 }

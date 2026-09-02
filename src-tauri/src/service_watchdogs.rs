@@ -301,19 +301,18 @@ pub async fn run_simd_watchdog() {
             .as_ref()
             .map(|c| c.settings.simd_command.clone())
             .unwrap_or_else(|| "simd".into());
-        let debug = config
-            .as_ref()
-            .and_then(|c| c.settings.simd_debug_command.clone());
-
-        let Some(command) = service_commands::resolve(&production, debug.as_deref()) else {
+        let Some(command) =
+            service_commands::resolve(&production, service_commands::SIMD_DEV_COMMAND_ENV)
+        else {
             // Logged once per streak: this loop runs every 5s and the
             // situation only changes when someone edits the setting.
             if !warned_missing_dev_command {
                 warned_missing_dev_command = true;
                 eprintln!(
-                    "run_simd_watchdog: this is a debug build and no simd dev command is set \
-                     (Settings > Services). Refusing to start the installed simd - set the dev \
-                     command to your source build, or run a release build to use `{production}`."
+                    "run_simd_watchdog: debug build with {} unset. Refusing to start the installed \
+                     simd - set that variable to your source build, or run a release build to \
+                     use `{production}`.",
+                    service_commands::SIMD_DEV_COMMAND_ENV
                 );
             }
             continue;
@@ -453,16 +452,16 @@ pub async fn run_monocoque_watchdog() {
             .as_ref()
             .map(|c| c.settings.monocoque_command.clone())
             .unwrap_or_else(|| "monocoque play".into());
-        let debug = config
-            .as_ref()
-            .and_then(|c| c.settings.monocoque_debug_command.clone());
-
-        let Some(command) = service_commands::resolve(&production, debug.as_deref()) else {
+        let Some(command) =
+            service_commands::resolve(&production, service_commands::MONOCOQUE_DEV_COMMAND_ENV)
+        else {
             if !warned_missing_dev_command {
                 warned_missing_dev_command = true;
                 eprintln!(
-                    "run_monocoque_watchdog: this is a debug build and no monocoque dev command \
-                     is set (Settings > Services). Refusing to start the installed monocoque."
+                    "run_monocoque_watchdog: debug build with {} unset. Refusing to start the \
+                     installed monocoque - set that variable to your source build, or run a \
+                     release build.",
+                    service_commands::MONOCOQUE_DEV_COMMAND_ENV
                 );
             }
             continue;

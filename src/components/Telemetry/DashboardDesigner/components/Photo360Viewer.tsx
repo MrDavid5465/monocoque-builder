@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, useImperativeHandle, forwardRef, useCallback } from 'react';
 import * as THREE from 'three';
+import { NeckFxSample, neckFxIsLive } from '../../useAcNeckFx';
 
 export interface Photo360Handle {
   capture: (captureWidth: number, captureHeight: number) => Promise<string>;
@@ -52,6 +53,12 @@ interface Props {
   // based on lateral/longitudinal g, mirroring the canvas sway effect used for
   // non-360 backgrounds. Never written back via onChange.
   telemetryData?: Record<string, number>;
+  // Assetto Corsa's applied head movement, when the AC telemetry app is
+  // streaming — preferred over the g-derived sway above, which stays as the
+  // fallback for every other sim. A ref rather than a field on telemetryData:
+  // it arrives at 60Hz off the shared hub (useAcNeckFx) and is read inside the
+  // render loop, so it must never re-render anything.
+  neckFxRef?: React.RefObject<NeckFxSample>;
   swayEnabled?: boolean;
   swayGainX?: number;
   swayGainY?: number;
@@ -79,18 +86,39 @@ interface Props {
 const SWAY_YAW_DEG_PER_G   = 1.5;
 const SWAY_PITCH_DEG_PER_G = 0.75;
 
+// NeckFX path: degrees of pan per metre of head movement, used INSTEAD of the
+// per-g constants above whenever Assetto Corsa is reporting the offset it
+// actually applied (see telemetry/types.rs on why a washout filter can't be
+// approximated from g).
+//
+// Scaled to land in the same visual range as the g-derived path they replace,
+// so enabling the telemetry app changes the phase and feel of the sway but not
+// its magnitude: CSP's cockpit camera moves the head a few centimetres at
+// cornering loads, and ~1.5° at ~0.045m is where these come from. The 2:1
+// yaw:pitch ratio is carried over deliberately.
+const SWAY_YAW_DEG_PER_M   = 33;
+const SWAY_PITCH_DEG_PER_M = 16.5;
+
+// Head movement past this (metres) is treated as a glitch rather than a
+// reading — mirrors the ±3g/±4g clamps on the fallback path.
+const NECK_OFFSET_CLAMP_M = 0.25;
+
 // Fraction of the full night darkening applied when the car HAS a night
 // photo. The photo already supplies the night *look*; this only takes the
 // overall level down so it reads as night rather than as a differently-lit
 // daytime shot. Turn this up if night still isn't dark enough, down if the
 // scene goes muddy. 0 restores the previous behaviour (photo only).
+// How often a gesture reports to the parent. The render loop shows every
+// frame regardless, so this only paces the React updates behind it.
+const EMIT_INTERVAL_MS = 120;
+
 const NIGHT_DARKEN_WITH_PHOTO = 0.45;
 
 const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
   photoUrl, nightPhotoUrl, nightAmount = 0, ambientColor = null, ambientTintIntensity = 0,
   ambientSaturationBoostDay = 1, ambientSaturationBoostNight = 1,
   yaw, pitch, fov, roll, displayWidth, displayHeight, onChange, readOnly = false,
-  telemetryData, swayEnabled = false, swayGainX = 1, swayGainY = 1, swayDisableX = false, swayDisableY = false,
+  telemetryData, neckFxRef, swayEnabled = false, swayGainX = 1, swayGainY = 1, swayDisableX = false, swayDisableY = false,
   onLoaded, tintOverlayRef,
 }, ref) => {
   const mountRef    = useRef<HTMLDivElement>(null);
@@ -125,8 +153,48 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
   stateRef.current  = { yaw, pitch, fov, roll, displayWidth, displayHeight, nightAmount, ambientColor, ambientTintIntensity, ambientSaturationBoostDay, ambientSaturationBoostNight };
   const dragRef     = useRef<{ startX: number; startY: number; startYaw: number; startPitch: number } | null>(null);
 
+  // Live pan, owned here while the user is interacting, and read by the
+  // render loop in preference to the props.
+  //
+  // The viewer is a controlled component, so before this every pointer move
+  // had to round-trip through the parent's React state before it could show:
+  // in the designer that meant `trackedSetDashboard` re-rendering the entire
+  // dashboard node tree at pointer rate, which is exactly as smooth as it
+  // sounds. The gesture now updates this ref and the ~60Hz loop picks it up
+  // on the next frame regardless of what React is doing; `onChange` is still
+  // called, just throttled, so saves and sliders keep working.
+  const livePanRef = useRef<{ yaw: number; pitch: number; fov: number } | null>(null);
+  // What we last told the parent. Lets an incoming prop change be classified:
+  // matching means it's our own value echoing back, differing means something
+  // else moved the pan (sliders, a car switch, a reset) and should win.
+  const lastEmittedRef = useRef<{ yaw: number; pitch: number; fov: number } | null>(null);
+  const emitTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const lastEmitAtRef = useRef(0);
+
+  {
+    const last = lastEmittedRef.current;
+    // Only a value we've already published can be compared against. Before
+    // the first emit of a gesture `last` is null and the props are legitimately
+    // stale — treating that as external would discard the live value and snap
+    // back, which is visible if anything else re-renders mid-gesture (a
+    // telemetry tick will do it).
+    const external = !!last
+      && (Math.abs(last.yaw - yaw) > 0.001
+        || Math.abs(last.pitch - pitch) > 0.001
+        || Math.abs(last.fov - fov) > 0.001);
+    if (external && !dragRef.current) {
+      livePanRef.current = null;
+      lastEmittedRef.current = null;
+    }
+  }
+
   const telemetryRef = useRef(telemetryData);
   telemetryRef.current = telemetryData;
+  // Mirrored the same way as telemetryData above: the GL-setup effect below
+  // runs once, so it must not close over whichever ref object happened to be
+  // passed on the first render.
+  const neckFxPropRef = useRef(neckFxRef);
+  neckFxPropRef.current = neckFxRef;
   const swayConfigRef = useRef({ swayEnabled, swayGainX, swayGainY, swayDisableX, swayDisableY });
   swayConfigRef.current = { swayEnabled, swayGainX, swayGainY, swayDisableX, swayDisableY };
   const onLoadedRef = useRef(onLoaded);
@@ -285,7 +353,12 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
       // itself is still called every frame so rendering resumes
       // immediately on refocus, with no extra listener needed.
       if (document.hidden) return;
-      const { yaw: y, pitch: p, fov: f, roll: r, displayWidth: dw, displayHeight: dh } = stateRef.current;
+      const { roll: r, displayWidth: dw, displayHeight: dh } = stateRef.current;
+      // Live gesture value when there is one, otherwise the prop.
+      const live = livePanRef.current;
+      const y = live ? live.yaw : stateRef.current.yaw;
+      const p = live ? live.pitch : stateRef.current.pitch;
+      const f = live ? live.fov : stateRef.current.fov;
 
       // displayWidth/displayHeight can change after mount (e.g. a
       // responsive container being resized) — the renderer's own canvas
@@ -299,10 +372,41 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
 
       const { swayEnabled: active, swayGainX, swayGainY, swayDisableX, swayDisableY } = swayConfigRef.current;
       const t = telemetryRef.current;
-      const gLat = active ? Math.max(-3, Math.min(3, t?.['gLat'] ?? 0)) : 0;
-      const gLon = active ? Math.max(-4, Math.min(4, t?.['gLon'] ?? 0)) : 0;
-      sway.yaw   = lerp(sway.yaw,   swayDisableX ? 0 : -gLat * SWAY_YAW_DEG_PER_G   * swayGainX, 0.08);
-      sway.pitch = lerp(sway.pitch, swayDisableY ? 0 :  gLon * SWAY_PITCH_DEG_PER_G * swayGainY, 0.08);
+      // Assetto Corsa's real head movement when it's available, the g-derived
+      // approximation otherwise. Not a blend: they disagree in phase by
+      // design, so crossfading would produce motion neither source asked for.
+      //
+      // Read from its own ref rather than from `telemetryData` — this comes
+      // over the separate acTelemetry subscription (see useAcNeckFx), so the
+      // cross-sim frame stays free of AC-only fields.
+      const neck = neckFxPropRef.current?.current;
+      const neckLive = neckFxIsLive(neck);
+      const clampNeck = (v: number) =>
+        Math.max(-NECK_OFFSET_CLAMP_M, Math.min(NECK_OFFSET_CLAMP_M, v));
+
+      let targetYaw: number;
+      let targetPitch: number;
+      if (active && neckLive && neck) {
+        // Signs follow from the head lagging BEHIND the car: under leftward
+        // acceleration the head is thrown right (+x), which is the same
+        // direction the g-derived path pans for that corner — hence the
+        // positive coefficient here against gLat's negative one. Likewise
+        // braking throws the head forward (+z) where gLon goes negative.
+        targetYaw   = clampNeck(neck.x) * SWAY_YAW_DEG_PER_M   * swayGainX;
+        targetPitch = -clampNeck(neck.z) * SWAY_PITCH_DEG_PER_M * swayGainY;
+      } else {
+        const gLat = active ? Math.max(-3, Math.min(3, t?.['gLat'] ?? 0)) : 0;
+        const gLon = active ? Math.max(-4, Math.min(4, t?.['gLon'] ?? 0)) : 0;
+        targetYaw   = -gLat * SWAY_YAW_DEG_PER_G   * swayGainX;
+        targetPitch =  gLon * SWAY_PITCH_DEG_PER_G * swayGainY;
+      }
+      if (!active) { targetYaw = 0; targetPitch = 0; }
+
+      // Same 0.08 smoothing either way. It stays even on the NeckFX path:
+      // frames arrive at 30Hz against this ~60Hz render loop, so without it
+      // the sway would step rather than move.
+      sway.yaw   = lerp(sway.yaw,   swayDisableX ? 0 : targetYaw,   0.08);
+      sway.pitch = lerp(sway.pitch, swayDisableY ? 0 : targetPitch, 0.08);
 
       if (cameraRef.current) {
         cameraRef.current.fov = f;
@@ -566,33 +670,101 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
     },
   }));
 
+  // Publishes the live pan to the parent, at most every EMIT_INTERVAL_MS with
+  // a guaranteed trailing call. The render loop is already showing the value,
+  // so this only needs to be often enough for sliders and the debounced saves
+  // to keep up — one React update per frame would put the whole dashboard
+  // tree back in the drag path, which is what made this jerky.
+  const emitPan = useCallback((immediate = false) => {
+    const live = livePanRef.current;
+    if (!live) return;
+    const send = () => {
+      lastEmitAtRef.current = Date.now();
+      lastEmittedRef.current = { ...live };
+      onChangeRef.current(live.yaw, live.pitch, live.fov, stateRef.current.roll);
+    };
+    if (emitTimerRef.current) clearTimeout(emitTimerRef.current);
+    if (immediate || Date.now() - lastEmitAtRef.current >= EMIT_INTERVAL_MS) {
+      send();
+    } else {
+      emitTimerRef.current = setTimeout(send, EMIT_INTERVAL_MS);
+    }
+  }, []);
+
   const onPointerDown = useCallback((e: React.PointerEvent) => {
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    const live = livePanRef.current;
     dragRef.current = {
       startX: e.clientX, startY: e.clientY,
-      startYaw: stateRef.current.yaw, startPitch: stateRef.current.pitch,
+      startYaw: live ? live.yaw : stateRef.current.yaw,
+      startPitch: live ? live.pitch : stateRef.current.pitch,
     };
   }, []);
 
   const onPointerMove = useCallback((e: React.PointerEvent) => {
     const d = dragRef.current;
     if (!d) return;
-    const sensitivity = stateRef.current.fov / 400;
+    const fovNow = livePanRef.current?.fov ?? stateRef.current.fov;
+    const sensitivity = fovNow / 400;
     const newYaw   = d.startYaw   - (e.clientX - d.startX) * sensitivity;
+    // Inverted: dragging DOWN now looks down. Grabbing the scene and pulling
+    // it with you is the direct-manipulation reading, and it matches the
+    // horizontal axis beside it, which has always worked that way.
     const newPitch = Math.max(-85, Math.min(85,
-      d.startPitch + (e.clientY - d.startY) * sensitivity,
+      d.startPitch - (e.clientY - d.startY) * sensitivity,
     ));
-    onChange(newYaw, newPitch, stateRef.current.fov, stateRef.current.roll);
-  }, [onChange]);
+    livePanRef.current = { yaw: newYaw, pitch: newPitch, fov: fovNow };
+    emitPan();
+  }, [emitPan]);
 
-  const onPointerUp = useCallback(() => { dragRef.current = null; }, []);
+  const onPointerUp = useCallback(() => {
+    if (!dragRef.current) return;
+    dragRef.current = null;
+    // The throttle may be mid-wait holding the final position — make sure the
+    // parent ends up with where the gesture actually stopped.
+    emitPan(true);
+  }, [emitPan]);
 
-  const onWheel = useCallback((e: React.WheelEvent) => {
-    e.preventDefault();
-    const delta = e.deltaY * 0.05;
-    const newFov = Math.max(5, Math.min(120, stateRef.current.fov + delta));
-    onChange(stateRef.current.yaw, stateRef.current.pitch, newFov, stateRef.current.roll);
-  }, [onChange]);
+  // Zoom-by-wheel, as a NATIVE non-passive listener rather than JSX onWheel.
+  //
+  // React registers `wheel` passively at its root, so `preventDefault()` in an
+  // onWheel handler is silently a no-op: the page scrolled while zooming, and
+  // on a dashboard the canvas's own wheel-zoom (Canvas.tsx, itself a
+  // non-passive native listener on an ancestor) fired too, so one gesture
+  // zoomed both the 360 and the canvas under it. Attaching here gets a real
+  // preventDefault, and stopPropagation keeps the gesture from reaching that
+  // ancestor at all.
+  //
+  // `onChange` is read through a ref so this listener is attached once rather
+  // than re-attached on every render by callers passing an inline arrow.
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+  useEffect(() => {
+    const el = mountRef.current;
+    if (!el || readOnly) return;
+    const handler = (e: WheelEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      // Multiplicative, and normalised for deltaMode — the same treatment
+      // Canvas.tsx gives its own zoom. A fixed additive step felt coarse at
+      // narrow FOV and sluggish at wide, because a degree is worth far more
+      // when you're zoomed in; scaling keeps each notch the same proportion.
+      // deltaMode 1 is lines rather than pixels (Firefox), which without the
+      // conversion made every notch a huge jump.
+      const pixelDelta = e.deltaMode === 0 ? e.deltaY : e.deltaY * 16;
+      const current = livePanRef.current?.fov ?? stateRef.current.fov;
+      const newFov = Math.max(5, Math.min(120, current * Math.exp(pixelDelta * 0.0015)));
+      const live = livePanRef.current;
+      livePanRef.current = {
+        yaw: live ? live.yaw : stateRef.current.yaw,
+        pitch: live ? live.pitch : stateRef.current.pitch,
+        fov: newFov,
+      };
+      emitPan();
+    };
+    el.addEventListener('wheel', handler, { passive: false });
+    return () => el.removeEventListener('wheel', handler);
+  }, [readOnly, emitPan]);
 
   return (
     <div style={{ position: 'relative', width: displayWidth, height: displayHeight, cursor: readOnly ? 'default' : 'grab', flexShrink: 0 }}>
@@ -603,7 +775,6 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
         onPointerMove={readOnly ? undefined : onPointerMove}
         onPointerUp={readOnly ? undefined : onPointerUp}
         onPointerCancel={readOnly ? undefined : onPointerUp}
-        onWheel={readOnly ? undefined : onWheel}
       />
     </div>
   );

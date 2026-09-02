@@ -1,5 +1,5 @@
-import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
-import { Stack, IconButton, getTheme, useQuery } from '../../../lib/denim/lib';
+import React, { useState, useMemo, useRef, useEffect, useCallback, useContext } from 'react';
+import { Stack, IconButton, getTheme, useQuery, useMutation } from '../../../lib/denim/lib';
 import dispatcher from '../../../lib/denim/lib/queries';
 import { useNavigate } from 'react-router';
 import Canvas, { CanvasTool } from './Canvas';
@@ -11,13 +11,14 @@ import { useTemplates } from './useTemplates';
 import { builtInSprites } from '../../../mock/dashboardMock';
 import { useTelemetryPlayback, computeStaticFrame, SequenceConfig, DEFAULT_SWEEP_CONFIG } from './useTelemetryPlayback';
 import { computeTelemetryValues } from '../useLiveTelemetry';
+import { useAcNeckFx } from '../useAcNeckFx';
 import { useMappingWatcher } from '../useMappingWatcher';
 import { useGlobalNightMode } from '../useGlobalNightMode';
 import { useGlobalPreviewCar } from '../useGlobalPreviewCar';
-import { LiveUpdatesContext, useHubListener, useLiveUpdatesHub } from '../liveUpdatesHub';
+import { LiveUpdatesContext, useHubListener, useLiveUpdatesDemand, useLiveUpdatesHub } from '../liveUpdatesHub';
 import { ClockTimeContext } from './clockTimeContext';
 import { GET_CARS, parseCarIds, CarRecord } from '../carQueries';
-import { GET_CAR_DASH_PANS } from '../carDashPanQueries';
+import { GET_CAR_DASH_PANS, ADD_CAR_DASH_PAN, UPDATE_CAR_DASH_PAN, REMOVE_CAR_DASH_PAN, CarDashPanRecord } from '../carDashPanQueries';
 import { DashboardConfig, ComponentNode } from '../../../types/dashboard';
 import {
   findNodeById,
@@ -29,6 +30,7 @@ import {
   isDescendantOf,
 } from './components/utils';
 import { captureAllNodeThumbnails, captureNodeThumbnail } from './useScreenshot';
+import { confirmAsync } from '../../../lib/denim/components/ConfirmDialog';
 
 interface Props {
   dashboardName: string;
@@ -268,19 +270,55 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
   // subscriptions *each*, exhausting that shared budget with just 2 windows
   // open (confirmed live — one window's requests stalled until the other's
   // connections were released).
-  const [hub, hubSubscriber] = useLiveUpdatesHub({
-    includeTelemetry: kioskMode,
-    includeNightClock: kioskMode,
-    // Same gating as includeTelemetry — only a kiosk 360 dashboard with the
-    // feature actually dialed up needs this stream; the editor never does.
-    includeAmbientColor: kioskMode && ambientTintIntensity > 0,
+  // Normally the app-root provider (see App.tsx), in which case nothing is
+  // opened here at all. The own-hub fallback stays for the case where this is
+  // rendered outside that provider — same established pattern as
+  // useGlobalNightMode/Controls.
+  const ambientHub = useContext(LiveUpdatesContext);
+  const [ownHub, hubSubscriber] = useLiveUpdatesHub({
     // Skip until dashboard is loaded — avoids a useSyncExternalStore commit
     // during the initial mount burst when Apollo is already processing
     // multiple queries.
-    skip: !dashboard,
+    skip: !!ambientHub || !dashboard,
+    includeNightClock: false,
+  });
+  const hub = ambientHub ?? ownHub;
+
+  // What this dashboard needs the shared connection to carry. Declared as a
+  // demand rather than as options on a private hub, so it reaches whichever
+  // hub is actually in use and is withdrawn when this unmounts.
+  useLiveUpdatesDemand(hub, {
+    includeTelemetry: kioskMode,
+    // includeNightClock is deliberately NOT declared here: useGlobalNightMode
+    // below demands it for itself, in both modes, and it is the thing that
+    // actually consumes the tick. Declaring it here too would mean two places
+    // deciding when the clock streams, which is how the editor ended up
+    // frozen (see that call's own comment).
+    // Only a kiosk 360 dashboard with the feature actually dialed up needs
+    // this stream; the editor never does.
+    includeAmbientColor: kioskMode && ambientTintIntensity > 0,
+    // Same again for Assetto Corsa's head movement: the highest-rate member
+    // on this stream, and only a kiosk dashboard with NeckFX sway switched on
+    // has any use for it.
+    includeAcTelemetry: kioskMode && !!dashboard?.neckFx,
   });
 
-  const { isNight, nightAmount, simTimeMs, toggleNightMode } = useGlobalNightMode(hub, { liveClock: kioskMode });
+  // liveClock is on in BOTH modes, throttled instead of switched off outside
+  // kiosk. It used to be `liveClock: kioskMode`, which left the editor with no
+  // clock ticks at all — so simTimeMs and lightSuggestion fell back to
+  // GET_NIGHT_CLOCK_SNAPSHOT, a one-shot query with no poll, and the editor's
+  // day/night froze at whatever the clock read when the page was loaded.
+  // Harmless when the simulated clock ran near real time; obvious once it can
+  // run at 1200% (a 2-hour day) or be overridden by the game's own clock,
+  // where a page open for a while showed deep night against a 6am session.
+  //
+  // 1Hz outside kiosk keeps the reason that flag existed — the editor must not
+  // re-render at the tick's native ~60Hz — while still tracking reality. Same
+  // trade DayNightSimPanel already makes for the same reason.
+  const { isNight, nightAmount, simTimeMs, toggleNightMode } = useGlobalNightMode(hub, {
+    liveClock: true,
+    tickThrottleMs: kioskMode ? 0 : 1000,
+  });
 
   // v1 picks one channel from the per-channel array to actually drive the
   // 360 viewer's tint (the wire format already carries all channels — see
@@ -313,7 +351,7 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
   });
   const { previewCarId } = useGlobalPreviewCar(hub);
 
-  const { data: carsData } = useQuery(GET_CARS, {
+  const { data: carsData, refetch: refetchCars } = useQuery(GET_CARS, {
     skip: dashboard?.baseDashType !== '360',
     fetchPolicy: 'cache-and-network',
   });
@@ -323,7 +361,7 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
     skip: dashboard?.baseDashType !== '360',
     fetchPolicy: 'cache-and-network',
   });
-  const carDashPans: Array<{ carId: string; dashName: string; yaw: number; pitch: number; fov: number; roll: number }> =
+  const carDashPans: CarDashPanRecord[] =
     (carDashPansData as any)?.getCarDashPans ?? [];
 
   // A per-car pan override edited on the Cars page (DashPanEditor) must reach
@@ -334,6 +372,15 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
   const onCarDashPanChanged = useCallback(() => { refetchCarDashPans(); }, [refetchCarDashPans]);
   useHubListener(hub, 'CarDashPanChanged', dashboard?.baseDashType === '360' ? onCarDashPanChanged : undefined);
 
+  // Which car a dashboard shows can change with no dashboard edit at all —
+  // starring a different favourite is the case that exposed this, since with
+  // no live sim the favourite IS the displayed car. Refetches the list rather
+  // than patching the one record in the event: `favorite` is a cross-record
+  // invariant (promoting one demotes another), so a partial update would
+  // leave two cars looking starred.
+  const onCarChanged = useCallback(() => { refetchCars(); }, [refetchCars]);
+  useHubListener(hub, 'CarChanged', dashboard?.baseDashType === '360' ? onCarChanged : undefined);
+
   const { handleDeviceDefaultEvent } = useMappingWatcher(
     () => navigate('/dashboards/default', { replace: true }),
     !kioskMode,
@@ -343,6 +390,16 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
   );
 
   useHubListener(hub, 'DashboardEntryChanged', handleDashboardUpdate);
+  // Sprites live in the dashboard's own file table, not its content, so a
+  // file upload/delete leaves the content byte-identical — handleDashboardUpdate
+  // above deliberately bails on that, which is why file changes need their own
+  // signal (backend publishes operationName 'files'; see dashboard_files.rs).
+  const onDashboardFilesChanged = useCallback((event: any) => {
+    if (event?.operationName !== 'files') return;
+    if (event?.value?.name !== dashboardName) return;
+    refetchSprites();
+  }, [dashboardName, refetchSprites]);
+  useHubListener(hub, 'DashboardEntryChanged', onDashboardFilesChanged);
   useHubListener(hub, 'DashTemplateChanged', refetchTemplates);
   useHubListener(hub, 'DeviceDefaultChanged', kioskMode ? handleDeviceDefaultEvent : undefined);
 
@@ -452,6 +509,17 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
   // or Play would never be able to override a still-pinned preview value.
   const previewOverride = !playing ? previewTelemetry : null;
   const telemetryData = { ...baseTelemetry, ...(manualFrame ?? {}), ...(previewOverride ?? {}) };
+
+  // Assetto Corsa's applied head movement. Not folded into telemetryData
+  // above — that frame is cross-sim and must not carry AC-only fields — but
+  // it rides the SAME hub connection as everything else, so one more live
+  // signal costs no extra socket. Read once here and handed to both sway
+  // consumers (Canvas and the 360 viewer).
+  //
+  // `dashboard?.` — this sits above the component's null-dashboard guard,
+  // because a hook can't be called conditionally. No dashboard means no sway,
+  // which is the right answer anyway.
+  const neckFxSampleRef = useAcNeckFx(hub, !!dashboard?.neckFx);
   const getCanvasEl = useCallback(
     () => canvasRef.current?.getCanvasEl() ?? null,
     [canvasRef],
@@ -500,8 +568,20 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
   }, [updateDashboard]);
 
   const enter360Edit = useCallback(async () => {
-    await savePhotoEditing(true);
+    // Local state FIRST, persistence after. This used to await the mutation
+    // before flipping, which left a window — as long as that round trip took
+    // — where the 360 was already on screen (dashboards with photo360LiveKiosk
+    // show it before editing starts) but not yet interactive, so a drag in
+    // that window panned the canvas instead of the photo. The window is
+    // invisible on a cold load, where the mutation resolves promptly, and
+    // wide after client-side navigation, where it queues behind an
+    // already-streaming subscription — which is exactly the reported
+    // "navigate, edit, drag" repro against "refresh, edit, drag".
+    //
+    // Nothing local depends on the write: photo360Editing exists so KIOSK
+    // screens know to switch to the live viewer, which is not urgent here.
     setViewing360(true);
+    await savePhotoEditing(true);
   }, [savePhotoEditing]);
 
   const save360 = useCallback(async () => {
@@ -546,10 +626,63 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
     });
   }, [trackedSetDashboard]);
 
+  // Assigned during render once the displayed car is known (see panCarId
+  // below); read here rather than depended on, so a drag's ~60Hz of changes
+  // doesn't rebuild this handler.
+  const [addCarDashPan] = useMutation(ADD_CAR_DASH_PAN);
+  const [updateCarDashPan] = useMutation(UPDATE_CAR_DASH_PAN);
+  const [removeCarDashPan] = useMutation(REMOVE_CAR_DASH_PAN);
+  const panTargetRef = useRef<{ carId: string; dashName: string; existingId?: string } | null>(null);
+  // The row this component just created, so the rest of a drag updates it
+  // instead of adding a second one — the refetch that would otherwise supply
+  // the id arrives a round trip later. Carries which car/dash it belongs to,
+  // so it can't be reused for a different one.
+  const createdCarPanIdRef = useRef<{ id: string; carId: string; dashName: string } | undefined>(undefined);
+  const carPanSaveTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
+
+  // Same 800ms debounce as savePanCoordinates: onChange fires continuously
+  // while dragging, and each of these is a mutation.
+  const saveCarPan = useCallback((y: number, p: number, f: number, r: number) => {
+    // Captured NOW, not when the timer fires: if the displayed car changes
+    // within the debounce window, a pending edit must still belong to the car
+    // it was made on rather than landing on whatever came into view.
+    const target = panTargetRef.current;
+    if (!target) return;
+    if (carPanSaveTimeoutRef.current) clearTimeout(carPanSaveTimeoutRef.current);
+    carPanSaveTimeoutRef.current = setTimeout(() => {
+      const pan = { yaw: y, pitch: p, fov: f, roll: r };
+      const created = createdCarPanIdRef.current;
+      const existingId =
+        target.existingId
+        ?? (created && created.carId === target.carId && created.dashName === target.dashName
+          ? created.id
+          : undefined);
+      if (existingId) {
+        updateCarDashPan({ variables: { id: existingId, update: pan } });
+      } else {
+        addCarDashPan({
+          variables: { values: { carId: target.carId, dashName: target.dashName, ...pan } },
+        }).then((res: any) => {
+          const id = res?.data?.addCarDashPan?.id;
+          if (id) createdCarPanIdRef.current = { id, carId: target.carId, dashName: target.dashName };
+        });
+      }
+    }, 800);
+  }, [addCarDashPan, updateCarDashPan]);
+
+  // Editing a 360 here writes BOTH: the registration-specific pan for the car
+  // currently on screen, and the dashboard's own base pan.
+  //
+  // The dashboard values stay the default any car without an override of its
+  // own falls back to, so adjusting here still improves the general case. The
+  // per-registration row is what makes the same edit reachable from either
+  // end — the car page for one car, this designer for whatever is showing —
+  // and land in the same place.
   const handle360Change = useCallback((y: number, p: number, f: number, r: number) => {
     trackedSetDashboard(prev => prev ? { ...prev, photo360Yaw: y, photo360Pitch: p, photo360Fov: f, photo360Roll: r } : prev);
     savePanCoordinates(y, p, f, r);
-  }, [trackedSetDashboard, savePanCoordinates]);
+    saveCarPan(y, p, f, r);
+  }, [trackedSetDashboard, savePanCoordinates, saveCarPan]);
 
   const handleFlip = useCallback(() => setPanelSide(s => s === 'left' ? 'right' : 'left'), []);
   const handleTogglePlay = useCallback(() => setPlaying(p => !p), []);
@@ -603,6 +736,25 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
     gamepadMappings,
     editing360: viewing360,
     onChange360: handle360Change,
+    // Every per-car override for THIS dashboard, so the panel can say how
+    // many there are before offering to drop them.
+    carPanOverrideCount: carDashPans.filter(p => p.dashName === dashboard.name).length,
+    onResetAllCarPans: async () => {
+      const doomed = carDashPans.filter(p => p.dashName === dashboard.name);
+      if (doomed.length === 0) return;
+      const ok = await confirmAsync(
+        `Reset ${doomed.length} per-car pan override${doomed.length === 1 ? '' : 's'} for "${dashboard.name}"? `
+        + 'Every car will fall back to this dashboard\'s own pan.',
+        { danger: true, confirmText: 'Reset all' },
+      );
+      if (!ok) return;
+      await Promise.all(doomed.map(p => removeCarDashPan({ variables: { id: p.id } })));
+      // The subscription refetches too, but this component may be the one
+      // that just removed the row it was reading — don't wait for the round
+      // trip to stop showing a pan that no longer exists.
+      createdCarPanIdRef.current = undefined;
+      refetchCarDashPans();
+    },
     templates,
     onAdd: addNode,
     onRemoveTemplate: removeTemplate,
@@ -631,36 +783,104 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
   const carPhoto360 = matchedCar;
   const carDayPhoto = carPhoto360?.dayPhoto;
   const carNightPhoto = carPhoto360?.nightPhoto;
-  // Whether the car has a distinct night photo at all — not gated by the
-  // current nightAmount, since Photo360CrossfadeViewer already blends the
-  // two photos correctly across the *entire* 0..1 range on its own; gating
-  // this by isNight would un-suppress Canvas's generic darkening overlay
-  // partway through a transition and double-darken the scene.
-  const hasCarNightPhoto = !!carNightPhoto;
-  const defaultPhoto360Sprite = dashboard.baseDashType === '360' && dashboard.photo360File
-    ? sprites.find(s => s.file === dashboard.photo360File)
-    : undefined;
+  // The stand-in when the live car has no photo of its own: the car marked
+  // favourite, rather than a sprite file configured per dashboard.
+  //
+  // The old `dashboard.photo360File` had to be chosen again on every
+  // dashboard, and being a loose image it carried no night variant and no pan
+  // alignment — so a fallback always looked wrong at night and sat at
+  // whatever rotation the sprite happened to have. A Car brings its day
+  // photo, its night photo and its alignment with it, and one choice covers
+  // every dashboard.
+  const favoriteCar = cars.find(c => c.favorite);
   const photo360Url = (ref?: { url: string }) =>
     ref ? `http://${window.location.hostname}:9000${ref.url}` : undefined;
-  const dayPhoto360Url = photo360Url(carDayPhoto) ?? defaultPhoto360Sprite?.thumbnail ?? '';
-  const nightPhoto360Url = photo360Url(carNightPhoto);
+  const dayPhoto360Url =
+    photo360Url(carDayPhoto) ?? photo360Url(favoriteCar?.dayPhoto) ?? '';
+  // Falls back to the favourite's night photo only when the day photo also
+  // came from the favourite — mixing one car's day frame with another's night
+  // frame would crossfade between two different cockpits.
+  const nightPhoto360Url = carDayPhoto
+    ? photo360Url(carNightPhoto)
+    : photo360Url(favoriteCar?.nightPhoto);
+  // Whether a distinct night photo is actually in play — derived from the
+  // resolved URL, not from the matched car, so it stays true when the night
+  // frame came from the favourite instead. Getting that wrong would leave
+  // Canvas's generic darkening overlay un-suppressed while the crossfade
+  // viewer was already handling night, darkening the scene twice.
+  //
+  // Not gated by the current nightAmount: Photo360CrossfadeViewer blends
+  // correctly across the entire 0..1 range on its own, and gating by isNight
+  // would flip the overlay back on partway through a transition.
+  const hasCarNightPhoto = !!nightPhoto360Url;
   const photoUrl = show360 ? dayPhoto360Url : '';
 
-  // Per-car pan override for this dashboard — lets the same dashboard be reused
-  // across cars whose 360° photos don't line up identically with the dashboard's
-  // own base pan. Only affects the kiosk live viewer, not the designer's own
-  // edit-360 pan (which always edits the dashboard's base values). Keyed by
-  // the matched Car's own id (not the raw effectiveCar id) — pan alignment is
-  // shared across every game/raw car_id that Car appears under.
-  const carDashPan = matchedCar
-    ? carDashPans.find(p => p.carId === matchedCar.id && p.dashName === dashboard.name)
+  // Whether entering 360 edit mode would actually get a live viewer. Note this
+  // deliberately does NOT depend on `show360` — that's already true whenever
+  // we're editing, so using it would make this vacuous exactly when it matters.
+  const live360Ready = !!dayPhoto360Url;
+
+  // The car whose 360 is actually on screen — which is not always
+  // `matchedCar`. When the matched car has no photo of its own the
+  // favourite's is displayed instead (see dayPhoto360Url above), and the pan
+  // being looked at, and edited, belongs to that photo.
+  const displayedCar = carDayPhoto ? matchedCar : favoriteCar;
+
+  // Which REGISTRATION the pan belongs to. One Car can carry several raw car
+  // ids — the same physical car as it appears in different games — and they
+  // share one 360 photo (captured once, in AC) but not one alignment: the
+  // cockpit sits differently in each game, so each needs its own pan to line
+  // the photo up. So the key is the raw id, not the Car.
+  //
+  // When the displayed photo came from the favourite rather than from a
+  // matched car there is no live raw id to use, so the favourite's primary
+  // registration stands in.
+  const panCarId = (displayedCar === matchedCar && effectiveCar)
+    ? effectiveCar
+    : (displayedCar ? parseCarIds(displayedCar)[0] : undefined);
+
+  // Per-registration pan override for this dashboard, with the dashboard's
+  // own base pan as the default for any registration without one.
+  //
+  // The legacy lookup is the migration: rows written before the key changed
+  // hold the Car's uuid and so covered every registration at once. They're
+  // still honoured as a starting value — nobody loses an alignment they'd
+  // already dialled in — but a save always writes a raw-id row, so the first
+  // edit per registration splits them apart naturally. Nothing rewrites the
+  // old rows; they simply stop being found once a specific one exists.
+  const carDashPan = panCarId
+    ? carDashPans.find(p => p.carId === panCarId && p.dashName === dashboard.name)
+      ?? (displayedCar
+        ? carDashPans.find(p => p.carId === displayedCar.id && p.dashName === dashboard.name)
+        : undefined)
     : undefined;
+  // What an active dashboard would show. The designer renders this too, not
+  // the dashboard's base values, so editing a 360 aims the shot you'll
+  // actually get rather than one you have to mentally offset.
   const kioskPan = {
     yaw:   carDashPan?.yaw   ?? dashboard.photo360Yaw   ?? 0,
     pitch: carDashPan?.pitch ?? dashboard.photo360Pitch ?? 0,
     fov:   carDashPan?.fov   ?? dashboard.photo360Fov   ?? 90,
     roll:  carDashPan?.roll  ?? dashboard.photo360Roll  ?? 0,
   };
+
+  // Where an edit in the designer is written, read by handle360Change (which
+  // is defined earlier but only ever called from the viewer below, by which
+  // point this has been assigned). A ref rather than a dependency so the
+  // handler identity stays stable across the ~60Hz churn a drag produces.
+  panTargetRef.current = panCarId
+    ? {
+        carId: panCarId,
+        dashName: dashboard.name,
+        // Only a row that already belongs to THIS registration is updated in
+        // place. A legacy Car-keyed row found above is read but never written
+        // through, or one game's adjustment would silently move every other
+        // game's alignment — the exact thing keying by registration fixes.
+        existingId: carDashPans.find(
+          p => p.carId === panCarId && p.dashName === dashboard.name,
+        )?.id,
+      }
+    : null;
 
   const liveBackground360 = show360 && dayPhoto360Url ? (
     <Photo360CrossfadeViewer
@@ -669,10 +889,10 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
       nightPhotoUrl={nightPhoto360Url}
       tintOverlayRef={ambientOverlayRef}
       nightAmount={nightAmount}
-      yaw={dashboard.photo360Yaw ?? 0}
-      pitch={dashboard.photo360Pitch ?? 0}
-      fov={dashboard.photo360Fov ?? 90}
-      roll={dashboard.photo360Roll ?? 0}
+      yaw={kioskPan.yaw}
+      pitch={kioskPan.pitch}
+      fov={kioskPan.fov}
+      roll={kioskPan.roll}
       displayWidth={dashboard.canvasWidth}
       displayHeight={dashboard.canvasHeight}
       onChange={handle360Change}
@@ -725,6 +945,7 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
           displayHeight={dashboard.canvasHeight}
           onChange={() => {}}
           telemetryData={telemetryData}
+          neckFxRef={neckFxSampleRef}
           swayEnabled={dashboard.neckFx}
           swayGainX={dashboard.neckFxGainX}
           swayGainY={dashboard.neckFxGainY}
@@ -763,6 +984,7 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
       kioskMode={kioskMode}
       onKioskButton={handleKioskButton}
       telemetryData={telemetryData}
+      neckFxSampleRef={neckFxSampleRef}
       kioskSweepActive={kioskMode && !kioskSweepDone}
       ref={canvasRef}
       forceNightPreview={forceNightPreview}
@@ -841,7 +1063,25 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
             icon="EditPhoto"
             label="Edit 360°"
             onClick={enter360Edit}
-            title="Open live 360° photo viewer to adjust pan/zoom"
+            // Disabled until the photo this edits is actually resolvable.
+            //
+            // `dayPhoto360Url` comes from GET_CARS, which is `skip`ped until
+            // the dashboard has loaded and turns out to be a 360 — so the
+            // query only STARTS at the moment this button appears. Clicking it
+            // in that window put the editor into 360 edit mode with no live
+            // viewer to render (liveBackground360 is undefined without a URL),
+            // so the canvas showed the baked background screenshot instead —
+            // visually identical to the real thing, but a static image with no
+            // pan handling behind it. Dragging did nothing, and that state
+            // persisted for the whole session.
+            //
+            // Reproduced as: navigate in and click immediately (broken) vs
+            // reload and click (fine) — the reload simply spends long enough
+            // loading that the query has resolved first.
+            disabled={!live360Ready}
+            title={live360Ready
+              ? 'Open live 360° photo viewer to adjust pan/zoom'
+              : 'Loading the 360° photo…'}
           />
         )}
         {viewing360 && (

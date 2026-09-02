@@ -3,6 +3,7 @@ import gql from 'graphql-tag';
 export interface PreviewCarRecord {
   id: string;
   carId: string;
+  touchedAt?: number | null;
 }
 
 export const GET_PREVIEW_CARS = gql`
@@ -10,6 +11,7 @@ export const GET_PREVIEW_CARS = gql`
     getPreviewCars {
       id
       carId
+      touchedAt
     }
   }
 `;
@@ -19,6 +21,7 @@ export const ADD_PREVIEW_CAR = gql`
     addPreviewCar(values: $values) {
       id
       carId
+      touchedAt
     }
   }
 `;
@@ -28,6 +31,7 @@ export const UPDATE_PREVIEW_CAR = gql`
     updatePreviewCar(id: $id, update: $update) {
       id
       carId
+      touchedAt
     }
   }
 `;
@@ -39,6 +43,7 @@ export const PREVIEW_CAR_CHANGED = gql`
       value {
         id
         carId
+        touchedAt
       }
     }
   }

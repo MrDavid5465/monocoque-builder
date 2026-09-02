@@ -27,6 +27,35 @@ fn julian_day_number(year: i32, month: u32, day: u32) -> f64 {
     (day as i64 + (153 * m + 2) / 5 + 365 * y + y / 4 - y / 100 + y / 400 - 32045) as f64
 }
 
+/// Inverse of `julian_day_number` — the standard Fliegel–Van Flandern
+/// Gregorian inversion. Kept next to its forward counterpart, and covered by
+/// a round-trip test, since the two magic-constant sets have to agree.
+fn civil_from_julian_day_number(jdn: i64) -> (i32, u32, u32) {
+    let a = jdn + 32044;
+    let b = (4 * a + 3) / 146097;
+    let c = a - 146097 * b / 4;
+    let d = (4 * c + 3) / 1461;
+    let e = c - 1461 * d / 4;
+    let m = (5 * e + 2) / 153;
+    let day = e - (153 * m + 2) / 5 + 1;
+    let month = m + 3 - 12 * (m / 10);
+    let year = 100 * b + d - 4800 + m / 10;
+    (year as i32, month as u32, day as u32)
+}
+
+/// UTC calendar date of a Unix timestamp, as "YYYY-MM-DD".
+///
+/// Exists so the in-game date carried by AC telemetry (`AcTelemetryFrame`'s
+/// `timestamp`, which is track-local rather than real-world UTC — see
+/// `graphql/mod.rs`'s `sim_ms_from_game`) can drive sunrise/sunset without
+/// pulling in a date crate. `floor`, not truncating division, so pre-1970
+/// timestamps don't land a day late.
+pub fn iso_date_from_epoch_seconds(secs: i64) -> String {
+    let days = (secs as f64 / 86_400.0).floor() as i64;
+    let (year, month, day) = civil_from_julian_day_number(2_440_588 + days);
+    format!("{year:04}-{month:02}-{day:02}")
+}
+
 /// Parses "YYYY-MM-DD" into (year, month, day). No external date crate.
 pub fn parse_iso_date(s: &str) -> Option<(i32, u32, u32)> {
     let mut parts = s.trim().splitn(3, '-');
@@ -103,15 +132,25 @@ fn equation_of_time(t: f64) -> f64 {
         - 1.25 * e * e * sin2m;
     rad2deg(e_time) * 4.0 // minutes of time
 }
-/// Hour angle (degrees) of sunrise/sunset — `90.833°` bakes in standard
+/// Solar zenith angle defining sunrise/sunset — bakes in standard
 /// atmospheric refraction plus the sun's apparent radius, same convention
-/// NOAA's calculator uses. `None` for a latitude/declination with no
-/// sunrise or sunset that day (polar day/night).
-fn hour_angle_deg(lat: f64, solar_dec: f64) -> Option<f64> {
+/// NOAA's calculator uses.
+const SUNRISE_ZENITH_DEG: f64 = 90.833;
+/// Solar zenith angle defining civil twilight (sun 6° below the horizon) —
+/// conventionally the point where outdoor light stops being usable and
+/// headlights go on, which is exactly the boundary the dawn/dusk ramp is
+/// modelling.
+const CIVIL_TWILIGHT_ZENITH_DEG: f64 = 96.0;
+
+/// Hour angle (degrees) at which the sun reaches `zenith_deg`. `None` for a
+/// latitude/declination that never reaches it that day (polar day/night, or
+/// a high-latitude summer night that never gets dark enough for civil
+/// twilight to end).
+fn hour_angle_deg(lat: f64, solar_dec: f64, zenith_deg: f64) -> Option<f64> {
     let lat_rad = deg2rad(lat);
     let sd_rad = deg2rad(solar_dec);
     let ha_arg =
-        deg2rad(90.833).cos() / (lat_rad.cos() * sd_rad.cos()) - lat_rad.tan() * sd_rad.tan();
+        deg2rad(zenith_deg).cos() / (lat_rad.cos() * sd_rad.cos()) - lat_rad.tan() * sd_rad.tan();
     if !(-1.0..=1.0).contains(&ha_arg) {
         return None;
     }
@@ -134,7 +173,7 @@ pub fn compute_sunrise_sunset(
     let t = time_julian_cent(jd);
     let eq_time = equation_of_time(t);
     let solar_dec = sun_declination(t);
-    let ha_deg = hour_angle_deg(latitude, solar_dec)?;
+    let ha_deg = hour_angle_deg(latitude, solar_dec, SUNRISE_ZENITH_DEG)?;
 
     // NOAA's own formula takes longitude WEST-positive (opposite of the
     // standard East-positive geographic convention this app/Nominatim use
@@ -147,6 +186,42 @@ pub fn compute_sunrise_sunset(
         sunrise_min.rem_euclid(1440.0),
         sunset_min.rem_euclid(1440.0),
     ))
+}
+
+/// Width (minutes) of the dawn/dusk ramp for the given date and location —
+/// i.e. `NightMode.sim_transition_minutes`, derived rather than guessed.
+///
+/// dayNightSim.ts centres the ramp ON sunrise/sunset with half-width
+/// `transition / 2`, so half of it falls before sunrise and half after. Civil
+/// twilight (sun from -6° up to the horizon) is the natural half-width: the
+/// ramp then begins at civil dawn — the point conventionally treated as
+/// "lights on" — and ends as far after sunrise as it began before it. Hence
+/// the factor of 2. Each degree of hour angle is 4 minutes of rotation.
+///
+/// Latitude matters a lot here, which is the whole reason not to leave this
+/// as a fixed default: civil twilight is ~21 minutes at the equator but
+/// stretches past an hour at Spa in midwinter. Returns `None` at latitudes
+/// where the sun never crosses one of the two boundaries that day.
+pub fn compute_transition_minutes(
+    year: i32,
+    month: u32,
+    day: u32,
+    latitude: f64,
+    _longitude: f64,
+) -> Option<f64> {
+    let t = time_julian_cent(julian_day_number(year, month, day));
+    let solar_dec = sun_declination(t);
+    let ha_sunrise = hour_angle_deg(latitude, solar_dec, SUNRISE_ZENITH_DEG)?;
+    let ha_civil = hour_angle_deg(latitude, solar_dec, CIVIL_TWILIGHT_ZENITH_DEG)?;
+    Some(2.0 * 4.0 * (ha_civil - ha_sunrise))
+}
+
+/// Rounds a raw transition width onto the Dawn/dusk slider's own domain
+/// (0..240, step 5 — see DayNightSimPanel.tsx's `configSchema`) so a computed
+/// value lands exactly on a slider stop instead of a hair off one, which
+/// would otherwise read back as an unsaved edit.
+pub fn quantize_transition_minutes(minutes: f64) -> i64 {
+    ((minutes / 5.0).round() as i64 * 5).clamp(0, 240)
 }
 
 /// Minutes since midnight -> "HH:MM", matching dayNightSim.ts's
@@ -231,5 +306,66 @@ mod tests {
         assert_eq!(parse_iso_date("2024-06-21"), Some((2024, 6, 21)));
         assert_eq!(parse_iso_date("bogus"), None);
         assert_eq!(parse_iso_date("2024-13-01"), None);
+    }
+
+    #[test]
+    fn julian_day_number_round_trips_through_its_inverse() {
+        // The forward and inverse algorithms carry different magic-constant
+        // sets (-32045 vs +32044); this is what keeps them honest. Spans a
+        // leap day, a century non-leap (1900), and a 400-year leap (2000).
+        for (y, m, d) in [
+            (1900, 2, 28),
+            (1970, 1, 1),
+            (2000, 2, 29),
+            (2024, 6, 17),
+            (2024, 12, 31),
+            (2026, 9, 1),
+        ] {
+            let jdn = julian_day_number(y, m, d) as i64;
+            assert_eq!(civil_from_julian_day_number(jdn), (y, m, d), "{y}-{m}-{d}");
+        }
+    }
+
+    #[test]
+    fn iso_date_from_epoch_seconds_matches_known_instants() {
+        assert_eq!(iso_date_from_epoch_seconds(0), "1970-01-01");
+        // The exact in-game instant this feature was verified against
+        // (2024-06-17 12:57:27 UTC), plus its own midnight boundaries.
+        assert_eq!(iso_date_from_epoch_seconds(1_718_629_047), "2024-06-17");
+        assert_eq!(iso_date_from_epoch_seconds(1_718_582_400), "2024-06-17");
+        assert_eq!(iso_date_from_epoch_seconds(1_718_582_399), "2024-06-16");
+        // Negative (pre-epoch) must floor, not truncate toward zero.
+        assert_eq!(iso_date_from_epoch_seconds(-1), "1969-12-31");
+    }
+
+    #[test]
+    fn transition_is_about_forty_minutes_at_the_equator() {
+        // Civil twilight at the equator is ~21 min year-round, so the
+        // sunrise-centred ramp spans ~42 — which is why 40 was a defensible
+        // hardcoded default before this was computed.
+        let t = compute_transition_minutes(2024, 3, 20, 0.0, 0.0).unwrap();
+        assert!((t - 42.0).abs() < 4.0, "equator transition {t} not ~42min");
+    }
+
+    #[test]
+    fn transition_widens_with_latitude_in_winter() {
+        // Spa (50.44°N) in midwinter has markedly longer twilight than the
+        // equator — the whole reason for deriving this per track/date rather
+        // than leaving one fixed number for every circuit.
+        let equator = compute_transition_minutes(2024, 12, 21, 0.0, 0.0).unwrap();
+        let spa = compute_transition_minutes(2024, 12, 21, 50.4372, 5.9714).unwrap();
+        assert!(
+            spa > equator + 20.0,
+            "spa {spa} not much wider than equator {equator}"
+        );
+        assert!(spa < 240.0, "spa {spa} outside the slider's domain");
+    }
+
+    #[test]
+    fn quantize_snaps_to_slider_stops_and_clamps() {
+        assert_eq!(quantize_transition_minutes(42.3), 40);
+        assert_eq!(quantize_transition_minutes(43.0), 45);
+        assert_eq!(quantize_transition_minutes(-5.0), 0);
+        assert_eq!(quantize_transition_minutes(9999.0), 240);
     }
 }

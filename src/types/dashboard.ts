@@ -340,7 +340,6 @@ export interface DashboardConfig {
   neckFxDisableY?: boolean;
 
   // 360-specific (designer only)
-  photo360File?: string;
   photo360Yaw?: number;
   photo360Pitch?: number;
   photo360Fov?: number;

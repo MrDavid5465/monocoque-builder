@@ -1,6 +1,6 @@
 use async_graphql::{InputObject, MaybeUndefined, SimpleObject};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 #[derive(SimpleObject, Clone)]
 pub struct GqlAppLink {
@@ -154,9 +154,6 @@ pub struct GqlAppSettings {
     /// `service_commands` for why the switch is the build type rather than a
     /// setting, and why an unset one in a debug build refuses to start the
     /// service rather than falling back.
-    pub simd_debug_command: Option<String>,
-    pub monocoque_debug_command: Option<String>,
-    pub huenicorn_debug_command: Option<String>,
     /// Computed, never stored: whether the backend serving this is a debug
     /// build, so the Settings UI can say which set of commands is actually in
     /// effect rather than making the user infer it.
@@ -205,9 +202,6 @@ pub struct AppSettingsInput {
     pub simd_command: MaybeUndefined<String>,
     pub monocoque_command: MaybeUndefined<String>,
     pub huenicorn_command: MaybeUndefined<String>,
-    pub simd_debug_command: MaybeUndefined<String>,
-    pub monocoque_debug_command: MaybeUndefined<String>,
-    pub huenicorn_debug_command: MaybeUndefined<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -266,15 +260,23 @@ pub struct AppSettings {
     pub monocoque_command: String,
     #[serde(default = "default_huenicorn_command")]
     pub huenicorn_command: String,
-    /// None = no source build configured for this service. In a debug build
-    /// that means the watchdog declines to start it at all (see
-    /// `service_commands`); in a release build it's simply unused.
-    #[serde(default)]
-    pub simd_debug_command: Option<String>,
-    #[serde(default)]
-    pub monocoque_debug_command: Option<String>,
-    #[serde(default)]
-    pub huenicorn_debug_command: Option<String>,
+
+    /// Every key in the settings file this build doesn't model, kept verbatim
+    /// so writing settings never deletes another build's configuration.
+    ///
+    /// Serde ignores unknown fields when reading but only writes the ones it
+    /// knows, so a build that drops a field silently strips it from the file
+    /// on the next save. That is not hypothetical: the dev-command settings
+    /// moved to environment variables here, which left
+    /// `simd_debug_command`/`monocoque_debug_command`/`huenicorn_debug_command`
+    /// unmodelled — and a build that still reads them (they are how it starts
+    /// simd/monocoque/huenicorn at all) would have found them gone after any
+    /// save from this one, with services then silently refusing to start.
+    ///
+    /// Flattened, so these sit at the same level they came in at and round-trip
+    /// byte-for-byte rather than nesting under a key of their own.
+    #[serde(flatten, default)]
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 fn default_ambient_saturation_boost() -> f32 {
@@ -296,4 +298,55 @@ fn default_huenicorn_command() -> String {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     pub settings: AppSettings,
+}
+
+#[cfg(test)]
+mod app_settings_tests {
+    use super::AppSettings;
+
+    /// A settings file written by a build that models MORE fields than this
+    /// one must survive a read/write round trip here untouched.
+    ///
+    /// The dev-command settings moved to environment variables in this build,
+    /// so `*_debug_command` is no longer modelled — but another build still
+    /// reads those to start simd/monocoque/huenicorn at all. Without the
+    /// `extra` catch-all, serde would read them, ignore them, and omit them on
+    /// the next save, silently disabling that build's services.
+    #[test]
+    fn preserves_settings_this_build_does_not_model() {
+        let original = r#"{
+            "theme": "dark-purple",
+            "font_size": 1.0,
+            "launch_page": "shakers",
+            "setup_complete": true,
+            "simd_command": "simd",
+            "monocoque_command": "monocoque play",
+            "huenicorn_command": "huenicorn",
+            "simd_debug_command": "/src/build/simd",
+            "monocoque_debug_command": "/src/build/monocoque play",
+            "huenicorn_debug_command": "/src/build/huenicorn",
+            "some_future_setting": {"nested": [1, 2, 3]}
+        }"#;
+
+        let parsed: AppSettings = serde_json::from_str(original).expect("parses");
+        // Modelled fields still land where they should.
+        assert_eq!(parsed.launch_page, "shakers");
+        assert_eq!(parsed.simd_command, "simd");
+
+        let rewritten = serde_json::to_value(&parsed).expect("serialises");
+        let obj = rewritten.as_object().expect("object");
+
+        for key in [
+            "simd_debug_command",
+            "monocoque_debug_command",
+            "huenicorn_debug_command",
+            "some_future_setting",
+        ] {
+            assert!(obj.contains_key(key), "{key} was dropped on write");
+        }
+        assert_eq!(obj["monocoque_debug_command"], "/src/build/monocoque play");
+        assert_eq!(obj["some_future_setting"]["nested"][2], 3);
+        // Flattened, not nested under a key of its own.
+        assert!(!obj.contains_key("extra"), "extra leaked as its own key");
+    }
 }

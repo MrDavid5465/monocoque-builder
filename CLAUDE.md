@@ -40,6 +40,18 @@ cargo fmt   -p monocoque-builder
 `--no-default-features` matters: `custom-protocol` is on by default and leaves
 `cargo run` stuck on the splashscreen.
 
+**CI runs clippy with `-D warnings`, and it is the gate that fails.** Run it
+before pushing — a clean `cargo build` says nothing about it:
+
+```bash
+cargo clippy --all-targets --all-features -- -D warnings
+```
+
+`cargo fmt --all -- --check` may report diffs in the sibling `typiql-rs` path
+dependency. CI resolves that dependency differently and doesn't see them —
+don't reformat another repo to chase it. Scope to this crate to confirm:
+`cargo fmt -p monocoque-builder --check`.
+
 Frontend: `npx tsc --noEmit -p tsconfig.json` and `npx vitest run`.
 
 **`e2e/*.spec.ts` fail under vitest.** They're Playwright specs caught by

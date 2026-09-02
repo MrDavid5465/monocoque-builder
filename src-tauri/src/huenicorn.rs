@@ -179,10 +179,10 @@ fn resolved_command() -> Option<String> {
         .as_ref()
         .map(|c| c.settings.huenicorn_command.clone())
         .unwrap_or_else(|| "huenicorn".into());
-    let debug = config
-        .as_ref()
-        .and_then(|c| c.settings.huenicorn_debug_command.clone());
-    crate::service_commands::resolve(&production, debug.as_deref())
+    crate::service_commands::resolve(
+        &production,
+        crate::service_commands::HUENICORN_DEV_COMMAND_ENV,
+    )
 }
 
 /// Whether `command`'s first whitespace-separated token resolves to
@@ -229,9 +229,12 @@ pub fn start_huenicorn() -> Result<u32, String> {
     // debug-build refusal is returned as an error the caller surfaces rather
     // than only logged.
     let command = resolved_command().ok_or_else(|| {
-        "This is a debug build and no Huenicorn dev command is set (Settings > Services). \
-         Refusing to start the installed Huenicorn."
-            .to_string()
+        format!(
+            "This is a debug build and {} is not set. Refusing to start the installed \
+             Huenicorn — point that variable at your source build, or run a release build \
+             to use the configured command.",
+            crate::service_commands::HUENICORN_DEV_COMMAND_ENV
+        )
     })?;
 
     // Same host-resolution the watchdogs do: this spawn runs on the host under
