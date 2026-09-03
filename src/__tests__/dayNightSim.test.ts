@@ -67,33 +67,42 @@ describe('computeSimulatedNightState', () => {
     expect(state.nightAmount).toBe(1);
   });
 
-  it('is exactly 0.5 at the sunrise instant', () => {
+  it('is still full night at the sunrise instant — the ramp starts there, not centred on it', () => {
     const sixAm = Date.UTC(2026, 0, 1, 6, 0, 0);
     const state = computeSimulatedNightState(sixAm, config())!;
-    expect(state.nightAmount).toBeCloseTo(0.5, 5);
+    expect(state.nightAmount).toBe(1);
   });
 
-  it('ramps linearly through the dawn window', () => {
-    // 10 min before sunrise, halfway through a 20-min-half-width dawn ramp -> 3/4 night.
-    const tenMinBeforeSunrise = Date.UTC(2026, 0, 1, 5, 50, 0);
-    const state = computeSimulatedNightState(tenMinBeforeSunrise, config({ simTransitionMinutes: 40 }))!;
-    expect(state.nightAmount).toBeCloseTo(0.75, 5);
+  it('is still full day at the sunset instant — the ramp starts there, not centred on it', () => {
+    const eightPm = Date.UTC(2026, 0, 1, 20, 0, 0);
+    const state = computeSimulatedNightState(eightPm, config())!;
+    expect(state.nightAmount).toBe(0);
   });
 
-  it('ramps the other direction through dusk (day -> night)', () => {
+  it('ramps linearly through the dawn window, forward from sunrise', () => {
+    const tenMinAfterSunrise = Date.UTC(2026, 0, 1, 6, 10, 0);
+    expect(computeSimulatedNightState(tenMinAfterSunrise, config({ simTransitionMinutes: 40 }))!.nightAmount).toBeCloseTo(0.75, 5);
+    const twentyMinAfterSunrise = Date.UTC(2026, 0, 1, 6, 20, 0);
+    expect(computeSimulatedNightState(twentyMinAfterSunrise, config({ simTransitionMinutes: 40 }))!.nightAmount).toBeCloseTo(0.5, 5);
+    const fortyMinAfterSunrise = Date.UTC(2026, 0, 1, 6, 40, 0);
+    expect(computeSimulatedNightState(fortyMinAfterSunrise, config({ simTransitionMinutes: 40 }))!.nightAmount).toBeCloseTo(0, 5);
+  });
+
+  it('ramps the other direction through dusk (day -> night), forward from sunset', () => {
     const tenMinAfterSunset = Date.UTC(2026, 0, 1, 20, 10, 0);
-    const state = computeSimulatedNightState(tenMinAfterSunset, config({ simTransitionMinutes: 40 }))!;
-    expect(state.nightAmount).toBeCloseTo(0.75, 5);
+    expect(computeSimulatedNightState(tenMinAfterSunset, config({ simTransitionMinutes: 40 }))!.nightAmount).toBeCloseTo(0.25, 5);
+    const fortyMinAfterSunset = Date.UTC(2026, 0, 1, 20, 40, 0);
+    expect(computeSimulatedNightState(fortyMinAfterSunset, config({ simTransitionMinutes: 40 }))!.nightAmount).toBeCloseTo(1, 5);
   });
 
   it('handles a sunset near midnight without wraparound glitches', () => {
-    const fiveMinAfterSunset = Date.UTC(2026, 0, 2, 0, 5, 0);
+    const fifteenMinAfterSunset = Date.UTC(2026, 0, 2, 0, 5, 0);
     const state = computeSimulatedNightState(
-      fiveMinAfterSunset,
+      fifteenMinAfterSunset,
       config({ simSunrise: '06:00', simSunset: '23:50', simTransitionMinutes: 40 }),
     )!;
-    expect(state.nightAmount).toBeGreaterThan(0.5);
-    expect(state.nightAmount).toBeLessThan(1);
+    // 23:50 + 15min is still inside the 40-minute dusk ramp, well short of full night.
+    expect(state.nightAmount).toBeCloseTo(0.375, 5);
   });
 });
 

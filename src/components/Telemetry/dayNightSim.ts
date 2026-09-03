@@ -63,24 +63,29 @@ export function computeSimulatedNightState(simTimeMs: number, config: NightRampC
   const sunriseMin = parseTimeOfDay(config.simSunrise);
   const sunsetMin = parseTimeOfDay(config.simSunset);
   if (sunriseMin == null || sunsetMin == null) return null;
-  const halfT = Math.max(0, (config.simTransitionMinutes ?? 40) / 2);
+  // The ramp starts AT the sunrise/sunset clock time and runs forward for the
+  // full configured duration — it isn't centred on it. In-game, the sky is
+  // still fully dark right at the calculated "sunrise" time; daylight only
+  // arrives progressively over the following `simTransitionMinutes`, and the
+  // same holds in reverse for sunset. A centred ramp made both transitions
+  // appear to start too early (still dark well past the sunrise time).
+  const t = Math.max(0, config.simTransitionMinutes ?? 40);
 
   const simDate = new Date(simTimeMs);
   const minOfDay = simDate.getUTCHours() * 60 + simDate.getUTCMinutes() + simDate.getUTCSeconds() / 60;
 
-  const dSunrise = shortestSignedDistance(sunriseMin, minOfDay); // minutes AFTER sunrise (negative = before)
-  const dSunset = shortestSignedDistance(sunsetMin, minOfDay);
-  const inDawnRamp = halfT > 0 && Math.abs(dSunrise) <= halfT;
-  const inDuskRamp = halfT > 0 && Math.abs(dSunset) <= halfT;
+  const sinceSunrise = wrapMinutes(minOfDay - sunriseMin);
+  const sinceSunset = wrapMinutes(minOfDay - sunsetMin);
+  const inDawnRamp = t > 0 && sinceSunrise <= t;
+  const inDuskRamp = t > 0 && sinceSunset <= t;
 
   let nightAmount: number;
   if (inDawnRamp) {
-    nightAmount = 0.5 - dSunrise / (2 * halfT);
+    nightAmount = 1 - sinceSunrise / t;
   } else if (inDuskRamp) {
-    nightAmount = 0.5 + dSunset / (2 * halfT);
+    nightAmount = sinceSunset / t;
   } else {
     const dayLength = wrapMinutes(sunsetMin - sunriseMin);
-    const sinceSunrise = wrapMinutes(minOfDay - sunriseMin);
     nightAmount = sinceSunrise < dayLength ? 0 : 1;
   }
   nightAmount = Math.max(0, Math.min(1, nightAmount));
