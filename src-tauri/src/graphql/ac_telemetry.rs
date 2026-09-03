@@ -45,6 +45,10 @@ pub struct AcTelemetry {
     pub neck_offset_x: f32,
     pub neck_offset_y: f32,
     pub neck_offset_z: f32,
+    /// Head rotation relative to the car, degrees — see the wire struct.
+    pub neck_yaw_deg: f32,
+    pub neck_pitch_deg: f32,
+    pub neck_roll_deg: f32,
 
     pub sky_occlusion: f32,
     pub rain_intensity: f32,
@@ -83,6 +87,9 @@ impl From<AcTelemetryFrame> for AcTelemetry {
             neck_offset_x: frame.neck_offset_x,
             neck_offset_y: frame.neck_offset_y,
             neck_offset_z: frame.neck_offset_z,
+            neck_yaw_deg: frame.neck_yaw_deg,
+            neck_pitch_deg: frame.neck_pitch_deg,
+            neck_roll_deg: frame.neck_roll_deg,
             sky_occlusion: frame.sky_occlusion,
             rain_intensity: frame.rain_intensity,
             wind_speed_kmh: frame.wind_speed_kmh,

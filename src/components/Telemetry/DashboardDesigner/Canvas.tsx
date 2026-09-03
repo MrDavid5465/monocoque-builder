@@ -108,13 +108,18 @@ const NIGHT_OVERLAY_Z = 40;
 // NeckFX: pixels (and degrees) per metre of real head movement, used when
 // Assetto Corsa reports the offset it actually applied instead of the
 // g-derived approximation. Sized against the g constants they replace
-// (25px/12px/1.5deg per g, at CSP's few-centimetres-per-g of head travel) so
+// (25px/12px per g, at CSP's few-centimetres-per-g of head travel) so
 // switching source changes the phase and honesty of the motion, not how big it
 // looks. Movement beyond the clamp is a glitch, not a reading.
 const NECK_PX_PER_M_X = 555;
 const NECK_PX_PER_M_Y = 267;
-const NECK_DEG_PER_M = 33;
 const NECK_CLAMP_M = 0.25;
+
+// Rotation channel. Pixels per degree of head turn for the 2D shift, and the
+// same glitch clamp the 360 viewer uses. Roll maps to rotation 1:1 — the head
+// tilting IS the dash tilting, so there is no gain to invent there.
+const NECK_PX_PER_DEG = 6;
+const NECK_ANGLE_CLAMP_DEG = 45;
 
 // ---------------------------------------------------------------------------
 // ButtonControlNode — button-control component with state machine
@@ -1334,9 +1339,17 @@ const Canvas = React.memo(forwardRef<CanvasHandle, Props>(({
         // VERTICAL channel finally does something — that's real heave over
         // kerbs and crests, which the g-derived path could only fake by
         // reusing longitudinal g for the y axis.
-        targetX   = clamp(neck.x) * NECK_PX_PER_M_X * gainX;
-        targetY   = -clamp(neck.y) * NECK_PX_PER_M_Y * gainY;
-        targetRot = clamp(neck.x) * NECK_DEG_PER_M   * gainX;
+        // Rotation first — it is the channel NeckFX actually drives on a
+        // typical look-into-the-corner config (see useAcNeckFx). Position is
+        // added on top for the movement rotation can't express: heave over
+        // kerbs, and whatever the following effects contribute when enabled.
+        const clampDeg = (v: number) =>
+          Math.max(-NECK_ANGLE_CLAMP_DEG, Math.min(NECK_ANGLE_CLAMP_DEG, v));
+        targetX =
+          (clampDeg(neck.yawDeg) * NECK_PX_PER_DEG + clamp(neck.x) * NECK_PX_PER_M_X) * gainX;
+        targetY =
+          (-clampDeg(neck.pitchDeg) * NECK_PX_PER_DEG - clamp(neck.y) * NECK_PX_PER_M_Y) * gainY;
+        targetRot = clampDeg(neck.rollDeg) * gainX;
       } else {
         const gLat = active ? Math.max(-3, Math.min(3, data['gLat'] ?? 0)) : 0;
         const gLon = active ? Math.max(-4, Math.min(4, data['gLon'] ?? 0)) : 0;

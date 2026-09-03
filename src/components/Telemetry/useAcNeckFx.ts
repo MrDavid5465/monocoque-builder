@@ -4,9 +4,23 @@ import { LiveUpdatesHub, useHubListener } from './liveUpdatesHub';
 /// The head movement Assetto Corsa actually applied, in car-local metres
 /// relative to the driver's rest eye position (x right, y up, z forward).
 export interface NeckFxSample {
+  /// Head POSITION relative to the driver's rest eye point, car-local metres.
   x: number;
   y: number;
   z: number;
+  /// Head ROTATION relative to the car, degrees.
+  ///
+  /// Preferred over the position above: NeckFX's effects (TRACK_FOLLOWING,
+  /// SLIDING_LOOK, STEERING) all change where the head LOOKS, so on a typical
+  /// configuration the position barely moves while these do. Measured that way
+  /// on this rig — position-only reported near zero through hard cornering.
+  ///
+  /// Also the natural unit for the consumers, which pan in degrees; the
+  /// position channel had to be converted through an invented degrees-per-metre
+  /// gain, and this needs no such fudge.
+  yawDeg: number;
+  pitchDeg: number;
+  rollDeg: number;
   /// Whether the three above are real. Distinct from them being zero, which is
   /// also what a centred head looks like — consumers must fall back to their
   /// g-derived approximation rather than treating a zero as a measurement.
@@ -15,7 +29,11 @@ export interface NeckFxSample {
   receivedAt: number;
 }
 
-const REST: NeckFxSample = { x: 0, y: 0, z: 0, active: false, receivedAt: 0 };
+const REST: NeckFxSample = {
+  x: 0, y: 0, z: 0,
+  yawDeg: 0, pitchDeg: 0, rollDeg: 0,
+  active: false, receivedAt: 0,
+};
 
 /// How long a sample stays trusted with nothing newer behind it.
 ///
@@ -64,6 +82,9 @@ export function useAcNeckFx(
       x: event?.neckOffsetX ?? 0,
       y: event?.neckOffsetY ?? 0,
       z: event?.neckOffsetZ ?? 0,
+      yawDeg: event?.neckYawDeg ?? 0,
+      pitchDeg: event?.neckPitchDeg ?? 0,
+      rollDeg: event?.neckRollDeg ?? 0,
       // In replays and for remote cars online the cockpit camera offset isn't
       // meaningful, and the Lua app says so rather than sending a
       // plausible-looking zero.

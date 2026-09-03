@@ -103,6 +103,12 @@ const SWAY_PITCH_DEG_PER_M = 16.5;
 // reading — mirrors the ±3g/±4g clamps on the fallback path.
 const NECK_OFFSET_CLAMP_M = 0.25;
 
+// Same idea for the rotation channel. Generous: NeckFX's look-into-the-corner
+// effects can legitimately reach well past ten degrees when their multipliers
+// are turned up, and this only exists to reject a garbage frame — it is not a
+// taste control. Turn the gain down instead.
+const NECK_ANGLE_CLAMP_DEG = 45;
+
 // Fraction of the full night darkening applied when the car HAS a night
 // photo. The photo already supplies the night *look*; this only takes the
 // overall level down so it reads as night rather than as a differently-lit
@@ -383,6 +389,8 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
       const neckLive = neckFxIsLive(neck);
       const clampNeck = (v: number) =>
         Math.max(-NECK_OFFSET_CLAMP_M, Math.min(NECK_OFFSET_CLAMP_M, v));
+      const clampAngle = (v: number) =>
+        Math.max(-NECK_ANGLE_CLAMP_DEG, Math.min(NECK_ANGLE_CLAMP_DEG, v));
 
       let targetYaw: number;
       let targetPitch: number;
@@ -392,8 +400,18 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
         // direction the g-derived path pans for that corner — hence the
         // positive coefficient here against gLat's negative one. Likewise
         // braking throws the head forward (+z) where gLon goes negative.
-        targetYaw   = clampNeck(neck.x) * SWAY_YAW_DEG_PER_M   * swayGainX;
-        targetPitch = -clampNeck(neck.z) * SWAY_PITCH_DEG_PER_M * swayGainY;
+        // Degrees straight through — this viewer pans in degrees, and the
+        // game is reporting the angle it actually applied, so there is nothing
+        // to convert. The position channel below needed an invented
+        // degrees-per-metre gain; this needs none.
+        //
+        // Position is added on top rather than ignored: it carries movement
+        // the rotation cannot (heave over kerbs), and it is what responds if
+        // the following effects are turned up in neck.ini.
+        targetYaw =
+          (clampAngle(neck.yawDeg) + clampNeck(neck.x) * SWAY_YAW_DEG_PER_M) * swayGainX;
+        targetPitch =
+          (clampAngle(neck.pitchDeg) - clampNeck(neck.z) * SWAY_PITCH_DEG_PER_M) * swayGainY;
       } else {
         const gLat = active ? Math.max(-3, Math.min(3, t?.['gLat'] ?? 0)) : 0;
         const gLon = active ? Math.max(-4, Math.min(4, t?.['gLon'] ?? 0)) : 0;

@@ -227,6 +227,9 @@ export const DASHBOARD_UPDATES_SUB = gql`
         neckOffsetX
         neckOffsetY
         neckOffsetZ
+        neckYawDeg
+        neckPitchDeg
+        neckRollDeg
         physicsAvailable
       }
       ... on TelemetryEvent {

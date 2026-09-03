@@ -168,6 +168,42 @@ end
 --- corner the real head drifts back to centre and then overshoots the other
 --- way on release. A proportional mapping of g-force is out of phase with
 --- that for a good part of every corner.
+--- Head ROTATION relative to the car, in degrees.
+---
+--- This is the channel NeckFX actually drives in most configurations. Its
+--- three effects -- TRACK_FOLLOWING, SLIDING_LOOK and STEERING (see
+--- cfg/extension/neck.ini) -- all change where the head LOOKS, not where it
+--- sits. Reading only the eye POSITION, as neckOffset below does, therefore
+--- reports almost nothing on a rig whose neck.ini is a typical
+--- look-into-the-corner setup, which is exactly what was measured: the
+--- offsets stayed near zero however hard the car was cornering.
+---
+--- Both channels are sent. Position still matters for vertical movement over
+--- kerbs, and for anyone who turns the following effects up.
+---
+--- The camera's forward vector is world-space, so it is projected onto the
+--- car's own axes (look/up/side are normalised, so each dot product is a
+--- direct component) to get an angle relative to the car rather than to the
+--- world -- otherwise simply driving round a bend would read as a huge neck
+--- rotation.
+local function neckRotation(car)
+  if car == nil then return 0, 0, 0 end
+  local fwd = ac.getCameraForward()
+  local up = ac.getCameraUp()
+  if fwd == nil or up == nil or car.look == nil or car.up == nil or car.side == nil then
+    return 0, 0, 0
+  end
+  local yaw = math.deg(math.atan2(fwd:dot(car.side), fwd:dot(car.look)))
+  -- Clamped before asin: floating point can nudge a normalised dot product a
+  -- hair outside [-1, 1], and asin returns NaN there, which would poison every
+  -- consumer downstream.
+  local vertical = math.max(-1, math.min(1, fwd:dot(car.up)))
+  local pitch = math.deg(math.asin(vertical))
+  local roll = math.deg(math.atan2(up:dot(car.side), up:dot(car.up)))
+  return yaw, pitch, roll
+end
+
+--- Head POSITION relative to the driver's rest eye point, in car-local metres.
 local function neckOffset(car)
   local applied = ac.getCameraPositionRelativeToCar()
   if applied == nil or car == nil then return 0, 0, 0 end
@@ -178,6 +214,7 @@ end
 
 local function buildFrame(sim, car)
   local neckX, neckY, neckZ = neckOffset(car)
+  local neckYaw, neckPitch, neckRoll = neckRotation(car)
   local position = car ~= nil and car.position or nil
 
   return {
@@ -195,6 +232,9 @@ local function buildFrame(sim, car)
     neck_offset_x = neckX,
     neck_offset_y = neckY,
     neck_offset_z = neckZ,
+    neck_yaw_deg = neckYaw,
+    neck_pitch_deg = neckPitch,
+    neck_roll_deg = neckRoll,
 
     sky_occlusion = sim.weatherSkyOcclusion,
     rain_intensity = sim.rainIntensity,

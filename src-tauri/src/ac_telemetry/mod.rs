@@ -75,6 +75,18 @@ pub struct AcTelemetryFrame {
     pub neck_offset_y: f32,
     pub neck_offset_z: f32,
 
+    /// Head ROTATION relative to the car, degrees.
+    ///
+    /// Usually the channel that carries the signal. NeckFX's three effects
+    /// (TRACK_FOLLOWING, SLIDING_LOOK, STEERING) all change where the head
+    /// LOOKS rather than where it sits, so on a typical
+    /// look-into-the-corner configuration the offsets above stay near zero
+    /// while these move. Measured that way on this rig, which is why both
+    /// channels are carried rather than position alone.
+    pub neck_yaw_deg: f32,
+    pub neck_pitch_deg: f32,
+    pub neck_roll_deg: f32,
+
     // ---- Weather -----------------------------------------------------
     /// Cloud cover proxy, 0→1.
     pub sky_occlusion: f32,
