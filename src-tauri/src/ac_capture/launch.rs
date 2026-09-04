@@ -215,6 +215,31 @@ fn launch_via_proton(
     proton: &Path,
     compat_data: &Path,
 ) -> Result<(), String> {
+    // `runinprefix` when something already holds the prefix — in practice
+    // Content Manager sitting in its UI.
+    //
+    // The verbs differ in exactly the way that matters here. `run` does full
+    // session setup and `waitforexitandrun` literally blocks on
+    // `wineserver -w`, i.e. waits for the existing prefix to CLOSE, which is
+    // the opposite of what is wanted. `runinprefix` execs wine directly, and
+    // wine attaches to the wineserver already running for that WINEPREFIX, so
+    // the capture joins the live session instead of standing up a second one.
+    //
+    // A second session was the actual failure: it could not create a D3D11
+    // device and AC died 1.7 seconds in. Refusing to start was the first fix
+    // and it worked, but telling someone to close their launcher to take a
+    // screenshot is a poor trade when the prefix can simply be shared.
+    //
+    // Not the default, because `runinprefix` also skips the prefix-update
+    // step (`init_session(update_prefix_files=False)`) and the drive mappings
+    // that `run` performs. Those are exactly the things an already-running
+    // prefix has done for us, so this is only safe in that case — on a cold
+    // start the full `run` is still required.
+    let verb = if is_launcher_running() || is_ac_running() {
+        "runinprefix"
+    } else {
+        "run"
+    };
     let steam_client = paths.steam_client_dir().ok_or_else(|| {
         "Found Proton but not Steam's own directory, which it needs to run.".to_string()
     })?;
@@ -276,7 +301,7 @@ fn launch_via_proton(
     };
 
     command
-        .arg("run")
+        .arg(verb)
         .arg(paths.acs_exe())
         // AC resolves content relative to its working directory.
         .current_dir(&paths.install_dir)
