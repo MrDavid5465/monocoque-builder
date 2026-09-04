@@ -63,13 +63,18 @@ fn resolve_with_mode(production: &str, debug: Option<&str>, debug_build: bool) -
 /// `flatpak run --command=<program> <app-id> <args…>`.
 ///
 /// Asking which app provides the binary, rather than matching the app id's
-/// last segment, is what makes `simd` work: it ships inside monocoque's
-/// Flatpak, so its id ends in `.monocoque` and a suffix match found nothing —
-/// the log said "no installed Flatpak app id ends in `.simd`" while `simd` sat
-/// in that app's own bin directory. The lookup reads
-/// `flatpak info --show-location` for each installed app and tests
-/// `files/bin/<program>`, which needs no table of ids here and keeps working
-/// when a binary moves between bundles.
+/// last segment, is deliberate, and `simd` is why. It used to ship inside
+/// monocoque's Flatpak, so its id ended in `.monocoque` and a suffix match
+/// found nothing — the log said "no installed Flatpak app id ends in `.simd`"
+/// while `simd` sat in that app's own bin directory.
+///
+/// simd has since moved to a Flatpak of its own, whose id *does* end in
+/// `.simd`, so a suffix match would now happen to work. The lookup stays as it
+/// is: it reads `flatpak info --show-location` for each installed app and
+/// tests `files/bin/<program>`, which needs no table of ids and survives the
+/// binary moving between bundles again — which it already has once. It is also
+/// the only form that copes with simd being installed from a .deb, .rpm or
+/// AppImage instead, where there is no app id to match at all.
 ///
 /// Anything already resolvable on the host is returned untouched, as is every
 /// command when not sandboxed.
@@ -217,9 +222,23 @@ mod tests {
         );
     }
 
-    /// simd ships inside monocoque's Flatpak, so nothing about the app id
-    /// mentions it -- the whole reason this asks which app provides a binary
-    /// rather than reading the id.
+    /// The ordinary case now that simd has a Flatpak of its own: the app id
+    /// ends in the program name, and asking the provider gets there directly.
+    #[test]
+    fn finds_a_binary_in_its_own_app() {
+        let provider =
+            |program: &str| (program == "simd").then(|| "io.github.spacefreak18.simd".to_string());
+        assert_eq!(
+            rewrite_for_flatpak("simd", |_| false, provider),
+            "flatpak run --command=simd io.github.spacefreak18.simd"
+        );
+    }
+
+    /// simd used to ship inside monocoque's Flatpak, where nothing about the
+    /// app id mentioned it -- the whole reason this asks which app provides a
+    /// binary rather than reading the id. Kept as a test because it is still
+    /// the case for anyone who has not upgraded, and because the next binary
+    /// to move bundles will land here again.
     #[test]
     fn finds_a_binary_bundled_under_an_unrelated_app_id() {
         let provider = |program: &str| {
