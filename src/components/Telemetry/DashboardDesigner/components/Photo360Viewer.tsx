@@ -138,31 +138,37 @@ const NECK_OFFSET_CLAMP_M = 0.25;
 // frame regardless, so this only paces the React updates behind it.
 const EMIT_INTERVAL_MS = 120;
 
-// Raised from 0.45 for an extra ~10% darkening at full night: night 360
+// Raised from 0.45 for an extra ~20% darkening at full night: night 360
 // photos are exposed to look correct on their own, so a car whose night photo
 // simply isn't dark enough has no other knob.
 //
 // The arithmetic, because the shader applies this as
 // `rgb *= 1.0 - nightDarken * 0.8`: 0.45 gave a multiplier of 0.64 at full
-// night, and 10% darker than that is 0.576, which needs 0.53. It is already
+// night, and 20% darker than that is 0.512, which needs 0.61. It is already
 // multiplied by the smoothed night level at the use site, so it scales with
 // the eased dawn/dusk blend rather than switching.
+//
+// Note that "20%" is a linear multiply in the shader; measured as sRGB pixels
+// on screen it reads smaller, because the encoding compresses it. Adjust by
+// eye against the sky, not against that number.
 //
 // This is the path that runs for a car WITH a night photo. The ambient tint
 // overlay carries the equivalent darkening for one without — Canvas renders
 // that overlay only when `!liveBackgroundHandlesNight`, i.e. exactly when
 // there is no night photo, so the two cases never both apply and never stack.
-const NIGHT_DARKEN_WITH_PHOTO = 0.53;
+const NIGHT_DARKEN_WITH_PHOTO = 0.61;
 
-// Extra night darkening applied over the 360 photo, at full night. 0.1 = the
-// tint colour pushed 10% toward black.
+// Extra night darkening applied over the 360 photo, at full night. 0.2 = the
+// tint colour pushed 20% toward black. Kept in step with
+// NIGHT_DARKEN_WITH_PHOTO above so a car with a night photo and one without
+// darken by the same amount.
 //
 // Exists because night 360 photos are exposed to read correctly on their own,
 // so one that simply isn't dark enough can't be fixed by
 // NIGHT_DARKEN_WITH_PHOTO above — that one deliberately backs OFF when a real
 // night photo is present. Scaled by the eased night blend at the use site, so
 // it fades out with everything else rather than switching.
-const NIGHT_DARKEN_AT_FULL_NIGHT = 0.1;
+const NIGHT_DARKEN_AT_FULL_NIGHT = 0.2;
 
 const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
   photoUrl, nightPhotoUrl, nightAmount = 0, ambientColor = null, ambientTintIntensity = 0,
