@@ -49,12 +49,16 @@ fn minute_of_day(sim_time_ms: f64) -> f64 {
 /// dashboard and one through the bulbs, so a divergence shows up as the
 /// screen and the lights disagreeing mid-transition.
 ///
-/// DUSK is measured, not chosen. Scrubbing the in-game clock down from 15:30
-/// on the equinox trajectory at the Nordschleife, the skybox was still fully
-/// lit at 18:25 and had stopped changing by 19:55 — -7.26 and -20.87 degrees.
-/// Both are BELOW the horizon: the game holds the sky lit for roughly 44
-/// minutes past sunset, then darkens through nautical twilight. No textbook
-/// threshold predicts that, which is why it is measured rather than derived.
+/// DUSK is measured, not chosen, and survived a correction that invalidated
+/// the first attempt: AC reports time-of-day in the track's CIVIL LOCAL time
+/// while the solar maths works in UTC, so elevations derived from clock
+/// observations were two hours wrong until
+/// `night_clock::clock_utc_offset_minutes` was applied.
+///
+/// Corrected, two independent sessions agree — 21 Sept began changing at
+/// +6.84 and stopped at -10.73; 22 June read fully dark at -11.27. Those
+/// end-points sit within half a degree of each other having been 11.5 degrees
+/// apart beforehand, which is the real evidence the offset is right.
 ///
 /// DAWN is NOT measured to the same standard and is known to disagree. It came
 /// from stepping up from 05:15 — already -3.9 degrees — so it is bounded by
@@ -66,8 +70,8 @@ pub const SUN_ELEVATION_NIGHT_DEG: f64 = -2.0;
 pub const SUN_ELEVATION_DAY_DEG: f64 = 15.0;
 
 /// Dusk's own bounds, from the measurement above.
-pub const SUN_ELEVATION_DUSK_NIGHT_DEG: f64 = -21.0;
-pub const SUN_ELEVATION_DUSK_DAY_DEG: f64 = -7.0;
+pub const SUN_ELEVATION_DUSK_NIGHT_DEG: f64 = -11.0;
+pub const SUN_ELEVATION_DUSK_DAY_DEG: f64 = 7.0;
 
 /// 0 = full day, 1 = full night, for a given sun elevation.
 ///
@@ -295,23 +299,32 @@ mod tests {
             night_amount_from_sun_elevation(SUN_ELEVATION_DUSK_NIGHT_DEG, false),
             1.0
         );
-        assert_eq!(night_amount_from_sun_elevation(0.0, false), 0.0);
+        // Well outside the band in both directions.
+        assert_eq!(night_amount_from_sun_elevation(30.0, false), 0.0);
         assert_eq!(night_amount_from_sun_elevation(-40.0, false), 1.0);
 
-        // The measured observations themselves, with a little tolerance for
-        // the rounding from -7.26/-20.87 to the -7/-21 bounds.
+        // The measured observations themselves (timezone-corrected), with a
+        // little tolerance for rounding +6.84/-10.73 to the +7/-11 bounds.
         assert!(
-            night_amount_from_sun_elevation(-7.26, false) < 0.02,
-            "sky was still fully lit at -7.26 deg"
+            night_amount_from_sun_elevation(6.84, false) < 0.02,
+            "sky was still fully lit at +6.84 deg (21 Sept)"
         );
         assert!(
-            night_amount_from_sun_elevation(-20.87, false) > 0.98,
-            "sky had stopped changing by -20.87 deg"
+            night_amount_from_sun_elevation(-10.73, false) > 0.97,
+            "sky had stopped changing by -10.73 deg (21 Sept)"
+        );
+        assert!(
+            night_amount_from_sun_elevation(-11.27, false) > 0.99,
+            "sky read fully dark at -11.27 deg (22 June) — the independent \
+             session that agrees with the one above"
         );
 
-        // At sunset itself the sky is still lit — the behaviour that a shared
-        // or mirrored band got wrong.
-        assert!(night_amount_from_sun_elevation(-0.833, false) < 0.01);
+        // Sunset itself now sits mid-fade rather than at either end.
+        let at_sunset = night_amount_from_sun_elevation(-0.833, false);
+        assert!(
+            (0.2..0.8).contains(&at_sunset),
+            "sunset should land mid-transition, got {at_sunset}"
+        );
 
         // NOT a mirror of dawn: asserting that was a real bug in an earlier
         // version of this test, and the bands are now independent by design.

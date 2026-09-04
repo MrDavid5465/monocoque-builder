@@ -54,12 +54,17 @@ export interface NightRampConfig {
 // Sun elevation (degrees) bounding each blend: full night at or below the
 // first, full day at or above the second.
 //
-// DUSK is measured, not chosen. Scrubbing the in-game clock down from 15:30
-// on the equinox trajectory at the Nordschleife, the skybox was still fully
-// lit at 18:25 and had stopped changing by 19:55 — which is -7.26 and -20.87
-// degrees. Note both are BELOW the horizon: the game holds the sky lit for
-// roughly 44 minutes past sunset, then darkens it through nautical twilight.
-// No textbook threshold predicts that, which is exactly why it is measured.
+// DUSK is measured, not chosen, and the numbers survived a correction that
+// invalidated the first attempt. AC reports time-of-day in the track's CIVIL
+// LOCAL time while the solar maths works in UTC, so every elevation derived
+// from a clock observation was initially two hours wrong (see
+// night_clock::clock_utc_offset_minutes).
+//
+// Corrected, two independent sessions agree: on 21 Sept the sky began
+// changing at +6.84 and stopped at -10.73, and on 22 June it read fully dark
+// at -11.27. Those two end-points are within half a degree of each other
+// having been 11.5 degrees apart before the correction, which is the real
+// evidence the offset is right. Hence full day at +7, full night at -11.
 //
 // DAWN is NOT measured to the same standard and is known to disagree. It came
 // from stepping up from 05:15 — already -3.9 degrees — and reporting the first
@@ -73,8 +78,8 @@ export const SUN_ELEVATION_NIGHT_DEG = -2;
 export const SUN_ELEVATION_DAY_DEG = 15;
 
 // Dusk's own bounds, from the measurement above.
-export const SUN_ELEVATION_DUSK_NIGHT_DEG = -21;
-export const SUN_ELEVATION_DUSK_DAY_DEG = -7;
+export const SUN_ELEVATION_DUSK_NIGHT_DEG = -11;
+export const SUN_ELEVATION_DUSK_DAY_DEG = 7;
 
 // 0 = full day, 1 = full night, for a given sun elevation.
 //

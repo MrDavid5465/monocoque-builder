@@ -96,6 +96,41 @@ async fn cached_track_location(
     Some(location)
 }
 
+/// Last track timezone offset (seconds) the game reported. Cached for the
+/// same reason as the equinox flag below: the Lua app stops sending during
+/// the CSP debug UI, and a track's timezone does not change because a script
+/// paused.
+static LAST_TIMEZONE_OFFSET_SEC: Mutex<Option<i32>> = Mutex::new(None);
+
+/// Seconds to subtract from the game's clock to get UTC.
+///
+/// AC reports time-of-day in the track's CIVIL LOCAL time, while
+/// `sun_position` computes in UTC, so without this every elevation is out by
+/// the whole offset — two hours at the Nordschleife in summer.
+///
+/// Established by observation, and it took two tries: an earlier reading
+/// concluded there was NO offset because "fully dark at 23:30" matched a
+/// computed solar midnight of 23:34. That was a four-minute coincidence on a
+/// single point. The check that settled it does not involve the horizon at
+/// all — at 20:30 the sun is either +6.6 degrees (local) or -5.75 (UTC), and
+/// the sky was plainly daylit. Re-deriving two sessions' sky measurements
+/// with the offset applied brought them from 11.5 degrees apart to within
+/// half a degree, which is the real confirmation.
+fn clock_utc_offset_minutes() -> f64 {
+    if let Some(frame) = crate::ac_telemetry::latest() {
+        if let Ok(mut guard) = LAST_TIMEZONE_OFFSET_SEC.lock() {
+            *guard = Some(frame.timezone_offset_sec);
+        }
+        return frame.timezone_offset_sec as f64 / 60.0;
+    }
+    LAST_TIMEZONE_OFFSET_SEC
+        .lock()
+        .ok()
+        .and_then(|guard| *guard)
+        .map(|secs| secs as f64 / 60.0)
+        .unwrap_or(0.0)
+}
+
 /// Last `equinox_sun_trajectory` the game reported.
 ///
 /// Cached because the Lua app stops sending whenever the player opens the CSP
@@ -170,7 +205,8 @@ pub async fn current_sun_elevation_deg(
     let location = cached_track_location(adapter, &track).await?;
     let (year, month, day) = effective_sun_date(record)?;
 
-    let minute_of_day = (sim_time_ms / 60_000.0).rem_euclid(1440.0);
+    // The clock is the track's LOCAL time; the solar maths wants UTC.
+    let minute_of_day = (sim_time_ms / 60_000.0 - clock_utc_offset_minutes()).rem_euclid(1440.0);
     let at = |minute: f64| {
         crate::sun_position::sun_elevation_deg(
             year,

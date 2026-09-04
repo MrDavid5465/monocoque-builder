@@ -146,20 +146,24 @@ describe('nightAmountFromSunElevation', () => {
     }
   });
 
-  it('uses its own MEASURED dusk band, not dawn mirrored', () => {
-    // From scrubbing the in-game clock: skybox still fully lit at 18:25
-    // (-7.26 deg) and finished changing by 19:55 (-20.87). Both below the
-    // horizon — the game holds the sky lit well past sunset, which no
-    // textbook threshold predicts, hence measured rather than derived.
-    expect(nightAmountFromSunElevation(-7, false)).toBe(0);
-    expect(nightAmountFromSunElevation(-21, false)).toBe(1);
-    expect(nightAmountFromSunElevation(0, false)).toBe(0);
+  it('uses its own MEASURED dusk band, timezone-corrected', () => {
+    // AC reports the track's CIVIL LOCAL time while the solar maths is UTC, so
+    // elevations derived from clock observations were two hours wrong until
+    // that was corrected. Afterwards two independent sessions agree: 21 Sept
+    // began changing at +6.84 and stopped at -10.73; 22 June read fully dark
+    // at -11.27 — half a degree apart, having been 11.5 apart before.
+    expect(nightAmountFromSunElevation(7, false)).toBe(0);
+    expect(nightAmountFromSunElevation(-11, false)).toBe(1);
+    expect(nightAmountFromSunElevation(30, false)).toBe(0);
     expect(nightAmountFromSunElevation(-40, false)).toBe(1);
-    expect(nightAmountFromSunElevation(-7.26, false)).toBeLessThan(0.02);
-    expect(nightAmountFromSunElevation(-20.87, false)).toBeGreaterThan(0.98);
-    // Still lit AT sunset — what a shared or mirrored band got wrong.
-    expect(nightAmountFromSunElevation(-0.833, false)).toBeLessThan(0.01);
-    // Dawn is untouched by this and still uses its own bounds.
+    expect(nightAmountFromSunElevation(6.84, false)).toBeLessThan(0.02);
+    expect(nightAmountFromSunElevation(-10.73, false)).toBeGreaterThan(0.97);
+    expect(nightAmountFromSunElevation(-11.27, false)).toBeGreaterThan(0.99);
+    // Sunset now lands mid-transition rather than at either end.
+    const atSunset = nightAmountFromSunElevation(-0.833, false);
+    expect(atSunset).toBeGreaterThan(0.2);
+    expect(atSunset).toBeLessThan(0.8);
+    // Dawn is untouched and still uses its own (unverified) bounds.
     expect(nightAmountFromSunElevation(-2, true)).toBe(1);
     expect(nightAmountFromSunElevation(15, true)).toBe(0);
   });
