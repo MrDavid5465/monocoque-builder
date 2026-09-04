@@ -260,7 +260,17 @@ const App: React.FC<Props> = ({
             return (
               <Route
                 key={i}
-                path={`/kiosk/${app.path}`}
+                // `/*`, matching the non-kiosk route above. Without it this
+                // matched ONLY the app root, so every kiosk deep link
+                // (/kiosk/dashboards/dashboards/963/show) fell through to the
+                // catch-all and rendered the default app instead.
+                //
+                // Bare /kiosk/dashboards was broken by the same thing, less
+                // obviously: it matched, then AppDefaultRedirect below sent it
+                // to /kiosk/dashboards/dashboards, which an exact-match route
+                // no longer matched — so the redirect walked it straight off
+                // the route it had just arrived on.
+                path={`/kiosk/${app.path}/*`}
                 element={
                     <Stack className={style.content} style={{ top: "0em" }}>
                       {app.defaultRoute && (
