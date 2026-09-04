@@ -9,7 +9,7 @@
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::response::IntoResponse;
 use futures_util::{SinkExt, StreamExt};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::sync::mpsc;
 
 /// How long to go without any message from the Lua app (its own periodic
@@ -47,16 +47,17 @@ async fn pump(socket: WebSocket) {
         }
     });
 
-    let mut last_seen = Instant::now();
+    // Each iteration starts a fresh `IDLE_TIMEOUT` window, so a timeout here
+    // already means "nothing arrived since the last message" — no separate
+    // last-seen clock is needed to decide the far end is gone.
     loop {
         match tokio::time::timeout(IDLE_TIMEOUT, stream.next()).await {
             Ok(Some(Ok(Message::Close(_)))) | Ok(None) => break,
-            Ok(Some(Ok(_))) => last_seen = Instant::now(),
+            // Any message at all is proof of life; the content is irrelevant
+            // (the Lua app sends a periodic heartbeat and nothing else).
+            Ok(Some(Ok(_))) => {}
             Ok(Some(Err(_))) => break,
-            // A single poll timing out isn't itself a dead connection —
-            // only silence across the *whole* window is.
-            Err(_) if last_seen.elapsed() >= IDLE_TIMEOUT => break,
-            Err(_) => {}
+            Err(_) => break,
         }
     }
 
