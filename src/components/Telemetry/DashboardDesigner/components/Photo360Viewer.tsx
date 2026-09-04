@@ -138,7 +138,31 @@ const NECK_OFFSET_CLAMP_M = 0.25;
 // frame regardless, so this only paces the React updates behind it.
 const EMIT_INTERVAL_MS = 120;
 
-const NIGHT_DARKEN_WITH_PHOTO = 0.45;
+// Raised from 0.45 for an extra ~10% darkening at full night: night 360
+// photos are exposed to look correct on their own, so a car whose night photo
+// simply isn't dark enough has no other knob.
+//
+// The arithmetic, because the shader applies this as
+// `rgb *= 1.0 - nightDarken * 0.8`: 0.45 gave a multiplier of 0.64 at full
+// night, and 10% darker than that is 0.576, which needs 0.53. It is already
+// multiplied by the smoothed night level at the use site, so it scales with
+// the eased dawn/dusk blend rather than switching.
+//
+// This is the path that runs for a car WITH a night photo. The ambient tint
+// overlay carries the equivalent darkening for one without — Canvas renders
+// that overlay only when `!liveBackgroundHandlesNight`, i.e. exactly when
+// there is no night photo, so the two cases never both apply and never stack.
+const NIGHT_DARKEN_WITH_PHOTO = 0.53;
+
+// Extra night darkening applied over the 360 photo, at full night. 0.1 = the
+// tint colour pushed 10% toward black.
+//
+// Exists because night 360 photos are exposed to read correctly on their own,
+// so one that simply isn't dark enough can't be fixed by
+// NIGHT_DARKEN_WITH_PHOTO above — that one deliberately backs OFF when a real
+// night photo is present. Scaled by the eased night blend at the use site, so
+// it fades out with everything else rather than switching.
+const NIGHT_DARKEN_AT_FULL_NIGHT = 0.1;
 
 const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
   photoUrl, nightPhotoUrl, nightAmount = 0, ambientColor = null, ambientTintIntensity = 0,
@@ -641,9 +665,35 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
         shaderRef.current.uniforms.ambientTint.value.copy(t);
         shaderRef.current.uniforms.ambientOpacity.value = overlayEl ? 0 : ambientOpacityRef.current;
         if (overlayEl) {
+          // Extra darkening at night, on top of whatever the tint is doing.
+          //
+          // Night 360 photos are exposed to look correct on their own, so a
+          // car whose night photo simply isn't dark enough has no other knob:
+          // NIGHT_DARKEN_WITH_PHOTO deliberately backs off precisely when a
+          // real night photo exists.
+          //
+          // Deliberately does NOT depend on the Huenicorn tint. Riding the
+          // tint's opacity was the first attempt and was silently inert:
+          // `ambient_tint_intensity` defaults to 0, so the overlay never
+          // renders and darkening its colour changed nothing at all.
+          //
+          // Two ways to reach the same overlay, because it can only hold one
+          // colour: with a tint present, push that colour toward black; with
+          // no tint, paint neutral black and use opacity alone. Both darken
+          // through Canvas's `mix-blend-mode: soft-light`.
           const to255 = (v: number) => Math.round(Math.min(1, Math.max(0, v)) * 255);
-          overlayEl.style.backgroundColor = `rgb(${to255(t.x)}, ${to255(t.y)}, ${to255(t.z)})`;
-          overlayEl.style.opacity = String(ambientOpacityRef.current);
+          const nightDarken = NIGHT_DARKEN_AT_FULL_NIGHT * nightLevelRef.current;
+          const tintOpacity = ambientOpacityRef.current;
+
+          if (tintOpacity > 0.001) {
+            const scale = 1 - nightDarken;
+            overlayEl.style.backgroundColor =
+              `rgb(${to255(t.x * scale)}, ${to255(t.y * scale)}, ${to255(t.z * scale)})`;
+            overlayEl.style.opacity = String(tintOpacity);
+          } else {
+            overlayEl.style.backgroundColor = 'rgb(0, 0, 0)';
+            overlayEl.style.opacity = String(nightDarken);
+          }
         }
       }
 
