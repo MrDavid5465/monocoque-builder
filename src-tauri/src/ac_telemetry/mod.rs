@@ -69,6 +69,19 @@ pub struct AcTelemetryFrame {
     /// fallback, where no such telemetry exists) should compute its
     /// sunrise/sunset for the equinox instead of the session date.
     pub equinox_sun_trajectory: bool,
+    /// Track timezone offset in seconds, as the game reports it.
+    ///
+    /// Present to settle whether `time_total_seconds` is civil LOCAL time or
+    /// UTC. `sun_position` computes in UTC, so if the clock is local every
+    /// elevation is wrong by this much — invisible with an equinox trajectory
+    /// (where the sun appeared to follow the clock directly and UTC matched
+    /// the observed sky) and up to an hour or two wrong with seasons on.
+    ///
+    /// Reported rather than derived from longitude: a civil timezone is a
+    /// political boundary, not a meridian.
+    pub timezone_offset_sec: i32,
+    pub timezone_base_offset_sec: i32,
+    pub timezone_dst_offset_sec: i32,
     /// 0→1, the active WeatherFX *style's* "time for headlights" judgement.
     ///
     /// Only as good as the style: measured against PURE it stayed pinned at

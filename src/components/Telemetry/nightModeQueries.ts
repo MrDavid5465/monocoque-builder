@@ -63,6 +63,8 @@ export interface NightClockTick {
    *  null when unknowable (no track loaded, or no location configured for
    *  it). Preferred over the sunrise/sunset clock ramp — see dayNightSim. */
   sunElevationDeg?: number | null;
+  /** Whether the sun is climbing — picks the dawn or dusk elevation band. */
+  sunRising?: boolean | null;
 }
 
 // ONE subscription for both record change events (manual isNight/simEnabled/
@@ -90,6 +92,7 @@ export const NIGHT_MODE_UPDATES = gql`
         realTimeMs
         fromGame
         sunElevationDeg
+        sunRising
       }
     }
   }
@@ -107,6 +110,7 @@ export const GET_NIGHT_CLOCK_SNAPSHOT = gql`
       realTimeMs
       fromGame
       sunElevationDeg
+      sunRising
     }
   }
 `;

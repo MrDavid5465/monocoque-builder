@@ -271,6 +271,9 @@ export const DASHBOARD_UPDATES_SUB = gql`
         # Omitting it silently degraded every dashboard to the clock ramp
         # while the standalone query looked correct.
         sunElevationDeg
+        # Which of the two mirrored elevation bands to use. Elevation alone
+        # cannot say whether the sun is climbing or falling.
+        sunRising
       }
       ... on PreviewCarChanged {
         operationName

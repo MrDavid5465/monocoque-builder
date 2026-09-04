@@ -36,6 +36,12 @@ pub struct AcTelemetry {
     /// True when AC swings the sun on a 20th-March trajectory regardless of
     /// the real date (seasons off, or no session date set).
     pub equinox_sun_trajectory: bool,
+    /// Track timezone offset in seconds, as the game reports it. Settles
+    /// whether `timeTotalSeconds` is civil local time or UTC — `sun_position`
+    /// computes UTC, so a local clock skews every elevation by this much.
+    pub timezone_offset_sec: i32,
+    pub timezone_base_offset_sec: i32,
+    pub timezone_dst_offset_sec: i32,
     /// 0→1, the active WeatherFX *style's* "time for headlights" judgement.
     /// Style-dependent: observed pinned at 1.000 through full daylight under
     /// PURE, so verify it moves before keying anything on it.
@@ -88,6 +94,9 @@ impl From<AcTelemetryFrame> for AcTelemetry {
             sun_angle_deg: frame.sun_angle_deg,
             sun_pitch_deg: frame.sun_pitch_deg,
             equinox_sun_trajectory: frame.equinox_sun_trajectory,
+            timezone_offset_sec: frame.timezone_offset_sec,
+            timezone_base_offset_sec: frame.timezone_base_offset_sec,
+            timezone_dst_offset_sec: frame.timezone_dst_offset_sec,
             light_suggestion: frame.light_suggestion,
             ambient_lighting_multiplier: frame.ambient_lighting_multiplier,
             ambient_occlusion: frame.ambient_occlusion,

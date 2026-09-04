@@ -165,20 +165,30 @@ pub async fn current_sun_elevation_deg(
     adapter: &Arc<dyn TypiQLAdapter>,
     record: &NightMode,
     sim_time_ms: f64,
-) -> Option<f64> {
+) -> Option<(f64, bool)> {
     let track = live_track()?;
     let location = cached_track_location(adapter, &track).await?;
     let (year, month, day) = effective_sun_date(record)?;
 
     let minute_of_day = (sim_time_ms / 60_000.0).rem_euclid(1440.0);
-    Some(crate::sun_position::sun_elevation_deg(
-        year,
-        month,
-        day,
-        location.latitude,
-        location.longitude,
-        minute_of_day,
-    ))
+    let at = |minute: f64| {
+        crate::sun_position::sun_elevation_deg(
+            year,
+            month,
+            day,
+            location.latitude,
+            location.longitude,
+            minute,
+        )
+    };
+    let elevation = at(minute_of_day);
+    // Rising or setting, sampled rather than reasoned about: the dawn and dusk
+    // blends use mirrored elevation bands (see night_state), and elevation
+    // alone cannot say which side of the day it is on. Ten minutes is long
+    // enough to clear floating-point noise near the solstice turn and short
+    // enough to be exact everywhere it matters.
+    let rising = at(minute_of_day + 10.0) > elevation;
+    Some((elevation, rising))
 }
 
 /// How far the internal clock may drift from the game's before it's rebased.

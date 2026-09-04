@@ -144,6 +144,11 @@ pub struct NightClockTick {
     /// neither the track's coordinates nor the solar code, and because the
     /// Huenicorn gamma pusher has to work with no frontend at all.
     pub sun_elevation_deg: Option<f64>,
+    /// Whether the sun is climbing at `sim_time_ms`. Decides which of the two
+    /// mirrored elevation bands the blend uses — elevation alone cannot say
+    /// which side of the day it is on, and the dawn band applied at dusk
+    /// darkens well before the sky does.
+    pub sun_rising: Option<bool>,
 }
 
 /// `nightModeUpdates` merges two logically-separate things (the record's
@@ -214,7 +219,7 @@ async fn night_clock_tick(adapter: &Arc<dyn TypiQLAdapter>) -> NightClockTick {
         .as_ref()
         .and_then(|record| night_clock::current_sim_ms(record, now))
         .unwrap_or(now);
-    let sun_elevation_deg = match record.as_ref() {
+    let sun = match record.as_ref() {
         Some(record) => night_clock::current_sun_elevation_deg(adapter, record, sim_time_ms).await,
         None => None,
     };
@@ -222,7 +227,8 @@ async fn night_clock_tick(adapter: &Arc<dyn TypiQLAdapter>) -> NightClockTick {
         sim_time_ms,
         real_time_ms: now,
         from_game: synced,
-        sun_elevation_deg,
+        sun_elevation_deg: sun.map(|(elevation, _)| elevation),
+        sun_rising: sun.map(|(_, rising)| rising),
     }
 }
 

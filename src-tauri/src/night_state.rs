@@ -43,12 +43,13 @@ fn minute_of_day(sim_time_ms: f64) -> f64 {
 
 /// 0 = full day, 1 = full night, continuous through the dawn/dusk ramp.
 /// `None` when sunrise/sunset aren't configured yet.
-/// Sun elevation (degrees) bounding the dawn/dusk blend — full night at or
-/// below the first, full day at or above the second. Must match
-/// `dayNightSim.ts`'s `SUN_ELEVATION_NIGHT_DEG`/`SUN_ELEVATION_DAY_DEG`; the
-/// two implementations light the same room, one through a dashboard and one
-/// through the bulbs, so a divergence here shows up as the screen and the
-/// lights disagreeing mid-dawn.
+/// Sun elevation (degrees) bounding the DAWN blend — full night at or below
+/// the first, full day at or above the second. Dusk mirrors these; see
+/// `night_amount_from_sun_elevation`. Must match `dayNightSim.ts`'s
+/// `SUN_ELEVATION_NIGHT_DEG`/`SUN_ELEVATION_DAY_DEG`; the two implementations
+/// light the same room, one through a dashboard and one through the bulbs, so
+/// a divergence here shows up as the screen and the lights disagreeing
+/// mid-dawn.
 ///
 /// Chosen against observed sky rather than a textbook threshold: stepping the
 /// in-game clock a minute at a time, the sky was not yet perceptibly lighter
@@ -57,12 +58,28 @@ fn minute_of_day(sim_time_ms: f64) -> f64 {
 pub const SUN_ELEVATION_NIGHT_DEG: f64 = -2.0;
 pub const SUN_ELEVATION_DAY_DEG: f64 = 15.0;
 
-/// 0 = full day, 1 = full night, for a given sun elevation. Smoothstep, not
-/// linear: a linear ramp moves fastest at the start, when the sky is changing
-/// least, and reads as the lighting running ahead of the game.
-pub fn night_amount_from_sun_elevation(elevation_deg: f64) -> f64 {
-    let span = SUN_ELEVATION_DAY_DEG - SUN_ELEVATION_NIGHT_DEG;
-    let t = ((elevation_deg - SUN_ELEVATION_NIGHT_DEG) / span).clamp(0.0, 1.0);
+/// 0 = full day, 1 = full night, for a given sun elevation.
+///
+/// `rising` picks the band. Sky brightness really is symmetric in elevation,
+/// so one shared band is physically honest — but perceptually backwards,
+/// because the constants above were tuned to put the transition AFTER
+/// sunrise. Reused unchanged at dusk that puts it BEFORE sunset: measured, the
+/// shared band read 52% night with the sun still 6 degrees up, and 99% night
+/// at the moment of sunset.
+///
+/// The dusk band is derived by negating the dawn one rather than declared
+/// separately, so the two cannot drift: dawn [night -2, day +15] mirrors onto
+/// dusk [night -15, day +2].
+///
+/// Smoothstep, not linear: a linear ramp moves fastest at the start, when the
+/// sky is changing least, and reads as the lighting running ahead of the game.
+pub fn night_amount_from_sun_elevation(elevation_deg: f64, rising: bool) -> f64 {
+    let (night_at, day_at) = if rising {
+        (SUN_ELEVATION_NIGHT_DEG, SUN_ELEVATION_DAY_DEG)
+    } else {
+        (-SUN_ELEVATION_DAY_DEG, -SUN_ELEVATION_NIGHT_DEG)
+    };
+    let t = ((elevation_deg - night_at) / (day_at - night_at)).clamp(0.0, 1.0);
     1.0 - t * t * (3.0 - 2.0 * t)
 }
 
@@ -112,10 +129,11 @@ pub fn night_amount(
     record: &NightMode,
     sim_time_ms: Option<f64>,
     sun_elevation_deg: Option<f64>,
+    sun_rising: bool,
 ) -> f64 {
     if record.sim_enabled.unwrap_or(false) {
         if let Some(elevation) = sun_elevation_deg.filter(|e| e.is_finite()) {
-            return night_amount_from_sun_elevation(elevation);
+            return night_amount_from_sun_elevation(elevation, sun_rising);
         }
         if let Some(amount) = sim_time_ms.and_then(|ms| simulated_night_amount(ms, record)) {
             return amount;
@@ -213,9 +231,9 @@ mod tests {
         assert_eq!(simulated_night_amount(at(12.0, 0.0), &r), None);
 
         r.is_night = true;
-        assert_eq!(night_amount(&r, Some(at(12.0, 0.0)), None), 1.0);
+        assert_eq!(night_amount(&r, Some(at(12.0, 0.0)), None, true), 1.0);
         r.is_night = false;
-        assert_eq!(night_amount(&r, Some(at(12.0, 0.0)), None), 0.0);
+        assert_eq!(night_amount(&r, Some(at(12.0, 0.0)), None, true), 0.0);
     }
 
     /// The elevation curve, which is what actually drives the blend whenever
@@ -223,24 +241,24 @@ mod tests {
     #[test]
     fn elevation_curve_matches_its_bounds_and_eases() {
         // Bounds are hard 1/0, and clamp beyond them rather than overshooting.
-        assert_eq!(night_amount_from_sun_elevation(-2.0), 1.0);
-        assert_eq!(night_amount_from_sun_elevation(-40.0), 1.0);
-        assert_eq!(night_amount_from_sun_elevation(15.0), 0.0);
-        assert_eq!(night_amount_from_sun_elevation(80.0), 0.0);
+        assert_eq!(night_amount_from_sun_elevation(-2.0, true), 1.0);
+        assert_eq!(night_amount_from_sun_elevation(-40.0, true), 1.0);
+        assert_eq!(night_amount_from_sun_elevation(15.0, true), 0.0);
+        assert_eq!(night_amount_from_sun_elevation(80.0, true), 0.0);
         // Midpoint of the band is exactly half, as smoothstep is symmetric.
-        let mid = night_amount_from_sun_elevation(6.5);
+        let mid = night_amount_from_sun_elevation(6.5, true);
         assert!((mid - 0.5).abs() < 1e-9, "midpoint {mid} should be 0.5");
         // Sunrise itself (-0.833 deg) is still essentially night: the whole
         // point of the band being weighted after sunrise rather than centred
         // on it.
-        let at_sunrise = night_amount_from_sun_elevation(-0.833);
+        let at_sunrise = night_amount_from_sun_elevation(-0.833, true);
         assert!(
             at_sunrise > 0.97,
             "at sunrise the blend should still read as night, got {at_sunrise}"
         );
         // Eased, not linear: a linear ramp would put the quarter-point at
         // exactly 0.75, and smoothstep must sit above it (still darker).
-        let quarter = night_amount_from_sun_elevation(-2.0 + 17.0 * 0.25);
+        let quarter = night_amount_from_sun_elevation(-2.0 + 17.0 * 0.25, true);
         assert!(
             quarter > 0.78,
             "smoothstep should lag a linear ramp early, got {quarter}"
@@ -248,23 +266,89 @@ mod tests {
         // Monotonic across the whole band — no wobble a blend would show.
         let mut prev = f64::MAX;
         for i in 0..=170 {
-            let v = night_amount_from_sun_elevation(-2.0 + i as f64 * 0.1);
+            let v = night_amount_from_sun_elevation(-2.0 + i as f64 * 0.1, true);
             assert!(v <= prev + 1e-12, "not monotonic at step {i}");
             prev = v;
         }
     }
 
     /// Elevation wins over the clock ramp when both are available.
+    /// Dusk gets its own band rather than sharing dawn's. Sharing it put the
+    /// transition BEFORE sunset instead of after: measured, 52% night with the
+    /// sun still 6 degrees up, and 99% night at the moment of sunset.
+    ///
+    /// What is reflected is the BOUNDS, not the curve — night sits at the low
+    /// end of both bands, necessarily, since a lower sun is always darker. So
+    /// dusk is dawn's band reflected about zero, which makes the curve a shift
+    /// rather than a mirror. Asserting `dawn(e) == dusk(-e)` looks right and
+    /// is false.
+    #[test]
+    fn dusk_band_reflects_dawns_bounds() {
+        // The reflection, stated on the bounds themselves.
+        assert_eq!(
+            night_amount_from_sun_elevation(-SUN_ELEVATION_DAY_DEG, false),
+            1.0
+        );
+        assert_eq!(
+            night_amount_from_sun_elevation(-SUN_ELEVATION_NIGHT_DEG, false),
+            0.0
+        );
+        assert_eq!(
+            night_amount_from_sun_elevation(SUN_ELEVATION_NIGHT_DEG, true),
+            1.0
+        );
+        assert_eq!(
+            night_amount_from_sun_elevation(SUN_ELEVATION_DAY_DEG, true),
+            0.0
+        );
+
+        // Equal spans, so dusk is dawn shifted by exactly the bound difference.
+        let shift = SUN_ELEVATION_NIGHT_DEG - (-SUN_ELEVATION_DAY_DEG);
+        for step in 0..=40 {
+            let e = -25.0 + step as f64;
+            let dusk = night_amount_from_sun_elevation(e, false);
+            let dawn_shifted = night_amount_from_sun_elevation(e + shift, true);
+            assert!(
+                (dusk - dawn_shifted).abs() < 1e-12,
+                "dusk at {e} should equal dawn at {}: {dusk} vs {dawn_shifted}",
+                e + shift
+            );
+        }
+
+        // The whole point of the split: still essentially lit AT sunset
+        // (-0.833 deg), where the shared band read 99% night.
+        let at_sunset = night_amount_from_sun_elevation(-0.833, false);
+        assert!(
+            at_sunset < 0.12,
+            "should still read as day at sunset, got {at_sunset}"
+        );
+        // And fully dark well after it, not before.
+        assert!(night_amount_from_sun_elevation(-16.0, false) > 0.99);
+        // Monotonic across the dusk band too.
+        let mut prev = f64::MAX;
+        for i in 0..=200 {
+            let v = night_amount_from_sun_elevation(-20.0 + i as f64 * 0.15, false);
+            assert!(v <= prev + 1e-12, "dusk not monotonic at step {i}");
+            prev = v;
+        }
+    }
+
     #[test]
     fn elevation_overrides_the_clock_ramp() {
         let r = sim_record();
         // Noon by the clock (the ramp alone would say full day), but the sun
         // is below the horizon — elevation must win.
-        assert_eq!(night_amount(&r, Some(at(12.0, 0.0)), Some(-10.0)), 1.0);
+        assert_eq!(
+            night_amount(&r, Some(at(12.0, 0.0)), Some(-10.0), true),
+            1.0
+        );
         // And with no elevation available it falls back to the clock ramp.
-        assert_eq!(night_amount(&r, Some(at(12.0, 0.0)), None), 0.0);
+        assert_eq!(night_amount(&r, Some(at(12.0, 0.0)), None, true), 0.0);
         // A non-finite reading is ignored rather than poisoning the blend.
-        assert_eq!(night_amount(&r, Some(at(12.0, 0.0)), Some(f64::NAN)), 0.0);
+        assert_eq!(
+            night_amount(&r, Some(at(12.0, 0.0)), Some(f64::NAN), true),
+            0.0
+        );
     }
 
     #[test]
@@ -273,13 +357,13 @@ mod tests {
         r.sim_enabled = Some(false);
         r.is_night = true;
         // Noon in sim terms, but simulation is off: the toggle wins.
-        assert_eq!(night_amount(&r, Some(at(12.0, 0.0)), None), 1.0);
+        assert_eq!(night_amount(&r, Some(at(12.0, 0.0)), None, true), 1.0);
     }
 
     #[test]
     fn simulated_mode_without_a_clock_tick_falls_back_to_the_toggle() {
         let mut r = sim_record();
         r.is_night = true;
-        assert_eq!(night_amount(&r, None, None), 1.0);
+        assert_eq!(night_amount(&r, None, None, true), 1.0);
     }
 }

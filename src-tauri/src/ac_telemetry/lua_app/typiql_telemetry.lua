@@ -238,6 +238,20 @@ local function buildFrame(sim, car)
     -- horizon, which is above the sun's maximum possible elevation at this
     -- latitude. Elevation is computed from this flag plus the clock instead.
     equinox_sun_trajectory = sim.equinoxSunTrajectory,
+
+    -- Track timezone, in seconds. Settles whether the clock this app reports
+    -- is civil LOCAL time or UTC, which decides whether sun elevation computed
+    -- from real-world coordinates lines up with the sky.
+    --
+    -- It matters only with seasons on: with a neutral/equinox trajectory the
+    -- game's sun appeared to track the clock directly and computed UTC matched
+    -- the observed sky, but with a real date set the two could be a full
+    -- timezone apart and every elevation would be silently wrong by that much.
+    -- Reported rather than guessed from longitude, because a civil timezone is
+    -- a political boundary, not a meridian.
+    timezone_offset_sec = ac.getTimeZoneOffset(),
+    timezone_base_offset_sec = ac.getTimeZoneBaseOffset(),
+    timezone_dst_offset_sec = ac.getTimeZoneDstOffset(),
     light_suggestion = sim.lightSuggestion,
     ambient_lighting_multiplier = sim.ambientLightingMultiplier,
     ambient_occlusion = car ~= nil and car.ambientOcclusion or 1,

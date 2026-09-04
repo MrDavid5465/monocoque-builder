@@ -51,8 +51,9 @@ export interface NightRampConfig {
   simTransitionMinutes?: number | null;
 }
 
-// Sun elevation (degrees) bounding the dawn/dusk blend: full night at or
-// below the first, full day at or above the second.
+// Sun elevation (degrees) bounding the DAWN blend: full night at or below the
+// first, full day at or above the second. Dusk mirrors these — see
+// `nightAmountFromSunElevation`.
 //
 // Chosen against what the driver actually reported seeing rather than from a
 // textbook threshold. Stepping the in-game clock a minute at a time, the sky
@@ -72,13 +73,28 @@ export const SUN_ELEVATION_DAY_DEG = 15;
 
 // 0 = full day, 1 = full night, for a given sun elevation.
 //
+// `rising` picks the band, and it matters more than it looks. Sky brightness
+// really is symmetric in elevation, so one shared band is physically honest —
+// but it is perceptually backwards, because the constants above were tuned to
+// put the transition AFTER sunrise. Reused unchanged at dusk that puts it
+// BEFORE sunset: measured on the equinox trajectory, the shared band read 52%
+// night with the sun still 6 degrees up, and 99% night at the moment of
+// sunset — dark well before the sky was.
+//
+// The dusk band is derived by negating the dawn one rather than declared
+// separately, so the two cannot drift: dawn [night -2, day +15] mirrors
+// exactly onto dusk [night -15, day +2]. That keeps sunset feeling like
+// sunrise — fully lit through the sunset itself, then darkening over the
+// following ~1.5 hours.
+//
 // Smoothstep rather than linear. A linear ramp changes brightness fastest at
 // the very start, when the sky is changing least, and the mismatch reads as
 // the dashboard running ahead of the game. Easing both ends starts slow,
 // moves quickest through the middle of the transition, and settles gently.
-export function nightAmountFromSunElevation(elevationDeg: number): number {
-  const span = SUN_ELEVATION_DAY_DEG - SUN_ELEVATION_NIGHT_DEG;
-  const t = Math.max(0, Math.min(1, (elevationDeg - SUN_ELEVATION_NIGHT_DEG) / span));
+export function nightAmountFromSunElevation(elevationDeg: number, rising = true): number {
+  const nightAt = rising ? SUN_ELEVATION_NIGHT_DEG : -SUN_ELEVATION_DAY_DEG;
+  const dayAt = rising ? SUN_ELEVATION_DAY_DEG : -SUN_ELEVATION_NIGHT_DEG;
+  const t = Math.max(0, Math.min(1, (elevationDeg - nightAt) / (dayAt - nightAt)));
   const lit = t * t * (3 - 2 * t);
   return 1 - lit;
 }
@@ -106,9 +122,10 @@ export function computeSimulatedNightState(
   simTimeMs: number,
   config: NightRampConfig,
   sunElevationDeg?: number | null,
+  sunRising?: boolean | null,
 ): SimulatedNightState | null {
   if (sunElevationDeg != null && Number.isFinite(sunElevationDeg)) {
-    return { nightAmount: nightAmountFromSunElevation(sunElevationDeg) };
+    return { nightAmount: nightAmountFromSunElevation(sunElevationDeg, sunRising ?? true) };
   }
   const sunriseMin = parseTimeOfDay(config.simSunrise);
   const sunsetMin = parseTimeOfDay(config.simSunset);
@@ -175,9 +192,10 @@ export function computeEffectiveNightState(
   record: { isNight: boolean; simEnabled?: boolean | null } & NightRampConfig,
   simTimeMs: number | null,
   sunElevationDeg?: number | null,
+  sunRising?: boolean | null,
 ): EffectiveNightState {
   if (record.simEnabled && simTimeMs != null) {
-    const sim = computeSimulatedNightState(simTimeMs, record, sunElevationDeg);
+    const sim = computeSimulatedNightState(simTimeMs, record, sunElevationDeg, sunRising);
     if (sim) return { isNight: sim.nightAmount >= 0.5, nightAmount: sim.nightAmount };
   }
   return { isNight: record.isNight, nightAmount: record.isNight ? 1 : 0 };

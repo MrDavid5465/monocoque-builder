@@ -140,6 +140,7 @@ export function useGlobalNightMode(externalHub?: LiveUpdatesHub, opts?: { liveCl
   // and said it doesn't know. The distinction is load-bearing — see where
   // this is resolved below.
   const [ownSunElevationDeg, setOwnSunElevationDeg] = useState<number | null | undefined>(undefined);
+  const [ownSunRising, setOwnSunRising] = useState<boolean | null | undefined>(undefined);
 
   // One-shot preload so a freshly-mounted popup shows the real current time
   // immediately instead of "—" until the subscription's first push arrives.
@@ -172,6 +173,7 @@ export function useGlobalNightMode(externalHub?: LiveUpdatesHub, opts?: { liveCl
     setOwnSunElevationDeg(
       typeof event.sunElevationDeg === 'number' ? event.sunElevationDeg : null,
     );
+    setOwnSunRising(typeof event.sunRising === 'boolean' ? event.sunRising : null);
   }, [tickThrottleMs]);
   useHubListener(hub, 'NightClockTick', liveClock ? onNightClockTick : undefined);
 
@@ -188,6 +190,10 @@ export function useGlobalNightMode(externalHub?: LiveUpdatesHub, opts?: { liveCl
     ownSunElevationDeg !== undefined
       ? ownSunElevationDeg
       : ((snapshotData as any)?.nightClockSnapshot?.sunElevationDeg ?? null);
+  const sunRising =
+    ownSunRising !== undefined
+      ? ownSunRising
+      : ((snapshotData as any)?.nightClockSnapshot?.sunRising ?? null);
   // `ownLive`, not `queried` — mirrors the old `live`/`current` split: stays
   // undefined until the first NightModeChanged event even though `queried`
   // (GET_NIGHT_MODES) already has the record, but every consumer of this
@@ -204,7 +210,7 @@ export function useGlobalNightMode(externalHub?: LiveUpdatesHub, opts?: { liveCl
   const resolvedFeed = useMemo<NightModeLiveFeed>(() => ({ record: current, simTimeMs }), [current, simTimeMs]);
 
   const effective = current
-    ? computeEffectiveNightState(current, simTimeMs, sunElevationDeg)
+    ? computeEffectiveNightState(current, simTimeMs, sunElevationDeg, sunRising)
     : { isNight: false, nightAmount: 0 };
 
   const save = useCallback((update: Partial<NightModeRecord>) => {

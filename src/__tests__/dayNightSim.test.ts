@@ -146,6 +146,27 @@ describe('nightAmountFromSunElevation', () => {
     }
   });
 
+  it('gives dusk its own band, reflecting dawn\'s bounds', () => {
+    // What's reflected is the BOUNDS, not the curve: night sits at the low end
+    // of both bands necessarily, since a lower sun is always darker. So dusk
+    // is dawn's band reflected about zero, which makes the curve a shift.
+    // Asserting dawn(e) === dusk(-e) looks right and is false.
+    expect(nightAmountFromSunElevation(-15, false)).toBe(1);
+    expect(nightAmountFromSunElevation(-40, false)).toBe(1);
+    expect(nightAmountFromSunElevation(2, false)).toBe(0);
+    expect(nightAmountFromSunElevation(30, false)).toBe(0);
+    // The point of the split: still essentially lit AT sunset (-0.833 deg),
+    // where the shared dawn band read 99% night.
+    expect(nightAmountFromSunElevation(-0.833, false)).toBeLessThan(0.12);
+    expect(nightAmountFromSunElevation(-0.833, true)).toBeGreaterThan(0.97);
+    // Equal spans, so dusk is dawn shifted by the bound difference.
+    for (let i = 0; i <= 40; i++) {
+      const e = -25 + i;
+      expect(nightAmountFromSunElevation(e, false)).toBeCloseTo(
+        nightAmountFromSunElevation(e + 13, true), 12);
+    }
+  });
+
   it('wins over the clock ramp, and a bad reading falls back to it', () => {
     const noon = Date.UTC(2026, 0, 1, 12, 0, 0);
     const c = config();

@@ -1188,11 +1188,16 @@ pub async fn run_gamma_pusher(adapter: Arc<dyn TypiQLAdapter>) {
                 let sim_ms = night_clock::current_sim_ms(&record, night_clock::now_ms());
                 // Same elevation the dashboards blend on, so the bulbs and
                 // the screen can't disagree partway through a dawn.
-                let elevation = match sim_ms {
+                let sun = match sim_ms {
                     Some(ms) => night_clock::current_sun_elevation_deg(&adapter, &record, ms).await,
                     None => None,
                 };
-                night_state::night_amount(&record, sim_ms, elevation) as f32
+                night_state::night_amount(
+                    &record,
+                    sim_ms,
+                    sun.map(|(elevation, _)| elevation),
+                    sun.map(|(_, rising)| rising).unwrap_or(true),
+                ) as f32
             }
             // No NightMode record yet (nothing has toggled day/night on this
             // install): treat it as full day rather than skipping, so the
