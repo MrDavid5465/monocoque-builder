@@ -43,33 +43,38 @@ fn minute_of_day(sim_time_ms: f64) -> f64 {
 
 /// 0 = full day, 1 = full night, continuous through the dawn/dusk ramp.
 /// `None` when sunrise/sunset aren't configured yet.
-/// Sun elevation (degrees) bounding the DAWN blend — full night at or below
-/// the first, full day at or above the second. Dusk mirrors these; see
-/// `night_amount_from_sun_elevation`. Must match `dayNightSim.ts`'s
-/// `SUN_ELEVATION_NIGHT_DEG`/`SUN_ELEVATION_DAY_DEG`; the two implementations
-/// light the same room, one through a dashboard and one through the bulbs, so
-/// a divergence here shows up as the screen and the lights disagreeing
-/// mid-dawn.
+/// Sun elevation (degrees) bounding each blend — full night at or below the
+/// first, full day at or above the second. Must match `dayNightSim.ts`'s
+/// equivalents; the two implementations light the same room, one through a
+/// dashboard and one through the bulbs, so a divergence shows up as the
+/// screen and the lights disagreeing mid-transition.
 ///
-/// Chosen against observed sky rather than a textbook threshold: stepping the
-/// in-game clock a minute at a time, the sky was not yet perceptibly lighter
-/// at -3.9 deg but clearly was by -1.6 deg. Civil twilight's -6 started the
-/// ramp roughly half an hour before anything visibly changed.
+/// DUSK is measured, not chosen. Scrubbing the in-game clock down from 15:30
+/// on the equinox trajectory at the Nordschleife, the skybox was still fully
+/// lit at 18:25 and had stopped changing by 19:55 — -7.26 and -20.87 degrees.
+/// Both are BELOW the horizon: the game holds the sky lit for roughly 44
+/// minutes past sunset, then darkens through nautical twilight. No textbook
+/// threshold predicts that, which is why it is measured rather than derived.
+///
+/// DAWN is NOT measured to the same standard and is known to disagree. It came
+/// from stepping up from 05:15 — already -3.9 degrees — so it is bounded by
+/// where the scrub began rather than by the sky. Taken at face value it says
+/// the sky is dark at -3.9 while the dusk pair says it is lit at -7.26, and
+/// both cannot hold. Pending a dawn re-measure by the dusk method, after which
+/// these will most likely collapse into one band.
 pub const SUN_ELEVATION_NIGHT_DEG: f64 = -2.0;
 pub const SUN_ELEVATION_DAY_DEG: f64 = 15.0;
 
+/// Dusk's own bounds, from the measurement above.
+pub const SUN_ELEVATION_DUSK_NIGHT_DEG: f64 = -21.0;
+pub const SUN_ELEVATION_DUSK_DAY_DEG: f64 = -7.0;
+
 /// 0 = full day, 1 = full night, for a given sun elevation.
 ///
-/// `rising` picks the band. Sky brightness really is symmetric in elevation,
-/// so one shared band is physically honest — but perceptually backwards,
-/// because the constants above were tuned to put the transition AFTER
-/// sunrise. Reused unchanged at dusk that puts it BEFORE sunset: measured, the
-/// shared band read 52% night with the sun still 6 degrees up, and 99% night
-/// at the moment of sunset.
-///
-/// The dusk band is derived by negating the dawn one rather than declared
-/// separately, so the two cannot drift: dawn [night -2, day +15] mirrors onto
-/// dusk [night -15, day +2].
+/// `rising` picks the band. The two are separate because they were arrived at
+/// separately: an earlier version derived dusk by mirroring dawn, which put
+/// the transition BEFORE sunset and assumed a symmetry the game does not
+/// obviously have. The bands should match the sky, not each other.
 ///
 /// Smoothstep, not linear: a linear ramp moves fastest at the start, when the
 /// sky is changing least, and reads as the lighting running ahead of the game.
@@ -77,7 +82,7 @@ pub fn night_amount_from_sun_elevation(elevation_deg: f64, rising: bool) -> f64 
     let (night_at, day_at) = if rising {
         (SUN_ELEVATION_NIGHT_DEG, SUN_ELEVATION_DAY_DEG)
     } else {
-        (-SUN_ELEVATION_DAY_DEG, -SUN_ELEVATION_NIGHT_DEG)
+        (SUN_ELEVATION_DUSK_NIGHT_DEG, SUN_ELEVATION_DUSK_DAY_DEG)
     };
     let t = ((elevation_deg - night_at) / (day_at - night_at)).clamp(0.0, 1.0);
     1.0 - t * t * (3.0 - 2.0 * t)
@@ -273,61 +278,54 @@ mod tests {
     }
 
     /// Elevation wins over the clock ramp when both are available.
-    /// Dusk gets its own band rather than sharing dawn's. Sharing it put the
-    /// transition BEFORE sunset instead of after: measured, 52% night with the
-    /// sun still 6 degrees up, and 99% night at the moment of sunset.
+    /// Dusk uses its own MEASURED band, not dawn's and not dawn's mirrored.
     ///
-    /// What is reflected is the BOUNDS, not the curve — night sits at the low
-    /// end of both bands, necessarily, since a lower sun is always darker. So
-    /// dusk is dawn's band reflected about zero, which makes the curve a shift
-    /// rather than a mirror. Asserting `dawn(e) == dusk(-e)` looks right and
-    /// is false.
+    /// The numbers come from scrubbing the in-game clock: skybox still fully
+    /// lit at 18:25 (-7.26 deg) and finished changing by 19:55 (-20.87). Both
+    /// below the horizon, so the game holds the sky lit well past sunset —
+    /// which is the whole reason this is measured rather than derived.
     #[test]
-    fn dusk_band_reflects_dawns_bounds() {
-        // The reflection, stated on the bounds themselves.
+    fn dusk_band_matches_the_measured_sky() {
+        // Bounds, as measured.
         assert_eq!(
-            night_amount_from_sun_elevation(-SUN_ELEVATION_DAY_DEG, false),
-            1.0
-        );
-        assert_eq!(
-            night_amount_from_sun_elevation(-SUN_ELEVATION_NIGHT_DEG, false),
+            night_amount_from_sun_elevation(SUN_ELEVATION_DUSK_DAY_DEG, false),
             0.0
         );
         assert_eq!(
-            night_amount_from_sun_elevation(SUN_ELEVATION_NIGHT_DEG, true),
+            night_amount_from_sun_elevation(SUN_ELEVATION_DUSK_NIGHT_DEG, false),
             1.0
         );
-        assert_eq!(
-            night_amount_from_sun_elevation(SUN_ELEVATION_DAY_DEG, true),
-            0.0
-        );
+        assert_eq!(night_amount_from_sun_elevation(0.0, false), 0.0);
+        assert_eq!(night_amount_from_sun_elevation(-40.0, false), 1.0);
 
-        // Equal spans, so dusk is dawn shifted by exactly the bound difference.
-        let shift = SUN_ELEVATION_NIGHT_DEG - (-SUN_ELEVATION_DAY_DEG);
-        for step in 0..=40 {
-            let e = -25.0 + step as f64;
-            let dusk = night_amount_from_sun_elevation(e, false);
-            let dawn_shifted = night_amount_from_sun_elevation(e + shift, true);
-            assert!(
-                (dusk - dawn_shifted).abs() < 1e-12,
-                "dusk at {e} should equal dawn at {}: {dusk} vs {dawn_shifted}",
-                e + shift
-            );
-        }
-
-        // The whole point of the split: still essentially lit AT sunset
-        // (-0.833 deg), where the shared band read 99% night.
-        let at_sunset = night_amount_from_sun_elevation(-0.833, false);
+        // The measured observations themselves, with a little tolerance for
+        // the rounding from -7.26/-20.87 to the -7/-21 bounds.
         assert!(
-            at_sunset < 0.12,
-            "should still read as day at sunset, got {at_sunset}"
+            night_amount_from_sun_elevation(-7.26, false) < 0.02,
+            "sky was still fully lit at -7.26 deg"
         );
-        // And fully dark well after it, not before.
-        assert!(night_amount_from_sun_elevation(-16.0, false) > 0.99);
-        // Monotonic across the dusk band too.
+        assert!(
+            night_amount_from_sun_elevation(-20.87, false) > 0.98,
+            "sky had stopped changing by -20.87 deg"
+        );
+
+        // At sunset itself the sky is still lit — the behaviour that a shared
+        // or mirrored band got wrong.
+        assert!(night_amount_from_sun_elevation(-0.833, false) < 0.01);
+
+        // NOT a mirror of dawn: asserting that was a real bug in an earlier
+        // version of this test, and the bands are now independent by design.
+        let mirrored_night = -SUN_ELEVATION_DAY_DEG;
+        assert!(
+            (SUN_ELEVATION_DUSK_NIGHT_DEG - mirrored_night).abs() > 1.0,
+            "dusk is measured, not derived from dawn — if these ever coincide \
+             it should be because the sky says so"
+        );
+
+        // Monotonic across the band.
         let mut prev = f64::MAX;
         for i in 0..=200 {
-            let v = night_amount_from_sun_elevation(-20.0 + i as f64 * 0.15, false);
+            let v = night_amount_from_sun_elevation(-25.0 + i as f64 * 0.15, false);
             assert!(v <= prev + 1e-12, "dusk not monotonic at step {i}");
             prev = v;
         }

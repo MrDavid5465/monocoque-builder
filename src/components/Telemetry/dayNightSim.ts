@@ -51,49 +51,46 @@ export interface NightRampConfig {
   simTransitionMinutes?: number | null;
 }
 
-// Sun elevation (degrees) bounding the DAWN blend: full night at or below the
-// first, full day at or above the second. Dusk mirrors these — see
-// `nightAmountFromSunElevation`.
+// Sun elevation (degrees) bounding each blend: full night at or below the
+// first, full day at or above the second.
 //
-// Chosen against what the driver actually reported seeing rather than from a
-// textbook threshold. Stepping the in-game clock a minute at a time, the sky
-// was NOT yet perceptibly lighter at -3.9 deg but clearly was by -1.6 deg, so
-// the ramp starts at -2 rather than at civil twilight's -6: starting at -6
-// began lightening the dashboard around half an hour before anything visibly
-// changed, which is the "bright too early" complaint that prompted all this.
+// DUSK is measured, not chosen. Scrubbing the in-game clock down from 15:30
+// on the equinox trajectory at the Nordschleife, the skybox was still fully
+// lit at 18:25 and had stopped changing by 19:55 — which is -7.26 and -20.87
+// degrees. Note both are BELOW the horizon: the game holds the sky lit for
+// roughly 44 minutes past sunset, then darkens it through nautical twilight.
+// No textbook threshold predicts that, which is exactly why it is measured.
 //
-// The top end is deliberately far past sunrise. Sunrise itself is only
-// -0.833 deg (refraction and the sun's disc), which lands about 7% along this
-// band and ~1% of the way through the eased curve below — so the dashboard is
-// still essentially dark as the disc breaks the horizon, then lifts over the
-// following couple of hours. That matches the original report that it was
-// "still very dark" at the calculated sunrise time.
+// DAWN is NOT measured to the same standard and is known to disagree. It came
+// from stepping up from 05:15 — already -3.9 degrees — and reporting the first
+// change seen after starting, so it is bounded by where the scrub began rather
+// than by the sky. Taken at face value it says the sky is dark at -3.9, while
+// the dusk pair says it is fully lit at -7.26; both cannot be true of a
+// symmetric sky. Left as-is pending a dawn re-measure using the dusk method
+// (scrub from well before anything is expected), at which point these two
+// bands will most likely collapse into one.
 export const SUN_ELEVATION_NIGHT_DEG = -2;
 export const SUN_ELEVATION_DAY_DEG = 15;
 
+// Dusk's own bounds, from the measurement above.
+export const SUN_ELEVATION_DUSK_NIGHT_DEG = -21;
+export const SUN_ELEVATION_DUSK_DAY_DEG = -7;
+
 // 0 = full day, 1 = full night, for a given sun elevation.
 //
-// `rising` picks the band, and it matters more than it looks. Sky brightness
-// really is symmetric in elevation, so one shared band is physically honest —
-// but it is perceptually backwards, because the constants above were tuned to
-// put the transition AFTER sunrise. Reused unchanged at dusk that puts it
-// BEFORE sunset: measured on the equinox trajectory, the shared band read 52%
-// night with the sun still 6 degrees up, and 99% night at the moment of
-// sunset — dark well before the sky was.
-//
-// The dusk band is derived by negating the dawn one rather than declared
-// separately, so the two cannot drift: dawn [night -2, day +15] mirrors
-// exactly onto dusk [night -15, day +2]. That keeps sunset feeling like
-// sunrise — fully lit through the sunset itself, then darkening over the
-// following ~1.5 hours.
+// `rising` picks the band. The two are separate because they were arrived at
+// separately, and an earlier version that derived dusk by mirroring dawn was
+// wrong twice over: it put the transition BEFORE sunset (52% night with the
+// sun still 6 degrees up), and mirroring assumed a symmetry the game does not
+// obviously have. The bands should match the sky, not each other.
 //
 // Smoothstep rather than linear. A linear ramp changes brightness fastest at
 // the very start, when the sky is changing least, and the mismatch reads as
 // the dashboard running ahead of the game. Easing both ends starts slow,
 // moves quickest through the middle of the transition, and settles gently.
 export function nightAmountFromSunElevation(elevationDeg: number, rising = true): number {
-  const nightAt = rising ? SUN_ELEVATION_NIGHT_DEG : -SUN_ELEVATION_DAY_DEG;
-  const dayAt = rising ? SUN_ELEVATION_DAY_DEG : -SUN_ELEVATION_NIGHT_DEG;
+  const nightAt = rising ? SUN_ELEVATION_NIGHT_DEG : SUN_ELEVATION_DUSK_NIGHT_DEG;
+  const dayAt = rising ? SUN_ELEVATION_DAY_DEG : SUN_ELEVATION_DUSK_DAY_DEG;
   const t = Math.max(0, Math.min(1, (elevationDeg - nightAt) / (dayAt - nightAt)));
   const lit = t * t * (3 - 2 * t);
   return 1 - lit;

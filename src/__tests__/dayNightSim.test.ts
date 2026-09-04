@@ -146,25 +146,22 @@ describe('nightAmountFromSunElevation', () => {
     }
   });
 
-  it('gives dusk its own band, reflecting dawn\'s bounds', () => {
-    // What's reflected is the BOUNDS, not the curve: night sits at the low end
-    // of both bands necessarily, since a lower sun is always darker. So dusk
-    // is dawn's band reflected about zero, which makes the curve a shift.
-    // Asserting dawn(e) === dusk(-e) looks right and is false.
-    expect(nightAmountFromSunElevation(-15, false)).toBe(1);
+  it('uses its own MEASURED dusk band, not dawn mirrored', () => {
+    // From scrubbing the in-game clock: skybox still fully lit at 18:25
+    // (-7.26 deg) and finished changing by 19:55 (-20.87). Both below the
+    // horizon — the game holds the sky lit well past sunset, which no
+    // textbook threshold predicts, hence measured rather than derived.
+    expect(nightAmountFromSunElevation(-7, false)).toBe(0);
+    expect(nightAmountFromSunElevation(-21, false)).toBe(1);
+    expect(nightAmountFromSunElevation(0, false)).toBe(0);
     expect(nightAmountFromSunElevation(-40, false)).toBe(1);
-    expect(nightAmountFromSunElevation(2, false)).toBe(0);
-    expect(nightAmountFromSunElevation(30, false)).toBe(0);
-    // The point of the split: still essentially lit AT sunset (-0.833 deg),
-    // where the shared dawn band read 99% night.
-    expect(nightAmountFromSunElevation(-0.833, false)).toBeLessThan(0.12);
-    expect(nightAmountFromSunElevation(-0.833, true)).toBeGreaterThan(0.97);
-    // Equal spans, so dusk is dawn shifted by the bound difference.
-    for (let i = 0; i <= 40; i++) {
-      const e = -25 + i;
-      expect(nightAmountFromSunElevation(e, false)).toBeCloseTo(
-        nightAmountFromSunElevation(e + 13, true), 12);
-    }
+    expect(nightAmountFromSunElevation(-7.26, false)).toBeLessThan(0.02);
+    expect(nightAmountFromSunElevation(-20.87, false)).toBeGreaterThan(0.98);
+    // Still lit AT sunset — what a shared or mirrored band got wrong.
+    expect(nightAmountFromSunElevation(-0.833, false)).toBeLessThan(0.01);
+    // Dawn is untouched by this and still uses its own bounds.
+    expect(nightAmountFromSunElevation(-2, true)).toBe(1);
+    expect(nightAmountFromSunElevation(15, true)).toBe(0);
   });
 
   it('wins over the clock ramp, and a bad reading falls back to it', () => {
