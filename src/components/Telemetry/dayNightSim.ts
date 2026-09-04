@@ -51,6 +51,38 @@ export interface NightRampConfig {
   simTransitionMinutes?: number | null;
 }
 
+// Sun elevation (degrees) bounding the dawn/dusk blend: full night at or
+// below the first, full day at or above the second.
+//
+// Chosen against what the driver actually reported seeing rather than from a
+// textbook threshold. Stepping the in-game clock a minute at a time, the sky
+// was NOT yet perceptibly lighter at -3.9 deg but clearly was by -1.6 deg, so
+// the ramp starts at -2 rather than at civil twilight's -6: starting at -6
+// began lightening the dashboard around half an hour before anything visibly
+// changed, which is the "bright too early" complaint that prompted all this.
+//
+// The top end is deliberately far past sunrise. Sunrise itself is only
+// -0.833 deg (refraction and the sun's disc), which lands about 7% along this
+// band and ~1% of the way through the eased curve below — so the dashboard is
+// still essentially dark as the disc breaks the horizon, then lifts over the
+// following couple of hours. That matches the original report that it was
+// "still very dark" at the calculated sunrise time.
+export const SUN_ELEVATION_NIGHT_DEG = -2;
+export const SUN_ELEVATION_DAY_DEG = 15;
+
+// 0 = full day, 1 = full night, for a given sun elevation.
+//
+// Smoothstep rather than linear. A linear ramp changes brightness fastest at
+// the very start, when the sky is changing least, and the mismatch reads as
+// the dashboard running ahead of the game. Easing both ends starts slow,
+// moves quickest through the middle of the transition, and settles gently.
+export function nightAmountFromSunElevation(elevationDeg: number): number {
+  const span = SUN_ELEVATION_DAY_DEG - SUN_ELEVATION_NIGHT_DEG;
+  const t = Math.max(0, Math.min(1, (elevationDeg - SUN_ELEVATION_NIGHT_DEG) / span));
+  const lit = t * t * (3 - 2 * t);
+  return 1 - lit;
+}
+
 export interface SimulatedNightState {
   // 0 = full day, 1 = full night, continuous through the dawn/dusk ramp.
   nightAmount: number;
@@ -59,7 +91,25 @@ export interface SimulatedNightState {
 // Turns a simulated-time instant (ms since epoch, as pushed by the
 // nightClock subscription) into a day/night blend. Returns null if
 // sunrise/sunset aren't configured yet.
-export function computeSimulatedNightState(simTimeMs: number, config: NightRampConfig): SimulatedNightState | null {
+//
+// `sunElevationDeg` — also from the nightClock tick, computed server-side —
+// wins whenever it's available, and the clock ramp below is the fallback for
+// when it isn't (no track loaded, or no location configured for it).
+//
+// Elevation is preferred because it cannot disagree with the sky. The clock
+// ramp has to assume where sunrise sits within the transition, and every
+// version of that assumption has been wrong: centred on sunrise was too
+// bright at sunrise, starting at sunrise was too bright too early, and both
+// were computed from a real-world date that AC ignores anyway when it swings
+// the sun on an equinox trajectory.
+export function computeSimulatedNightState(
+  simTimeMs: number,
+  config: NightRampConfig,
+  sunElevationDeg?: number | null,
+): SimulatedNightState | null {
+  if (sunElevationDeg != null && Number.isFinite(sunElevationDeg)) {
+    return { nightAmount: nightAmountFromSunElevation(sunElevationDeg) };
+  }
   const sunriseMin = parseTimeOfDay(config.simSunrise);
   const sunsetMin = parseTimeOfDay(config.simSunset);
   if (sunriseMin == null || sunsetMin == null) return null;
@@ -124,9 +174,10 @@ export interface EffectiveNightState {
 export function computeEffectiveNightState(
   record: { isNight: boolean; simEnabled?: boolean | null } & NightRampConfig,
   simTimeMs: number | null,
+  sunElevationDeg?: number | null,
 ): EffectiveNightState {
   if (record.simEnabled && simTimeMs != null) {
-    const sim = computeSimulatedNightState(simTimeMs, record);
+    const sim = computeSimulatedNightState(simTimeMs, record, sunElevationDeg);
     if (sim) return { isNight: sim.nightAmount >= 0.5, nightAmount: sim.nightAmount };
   }
   return { isNight: record.isNight, nightAmount: record.isNight ? 1 : 0 };

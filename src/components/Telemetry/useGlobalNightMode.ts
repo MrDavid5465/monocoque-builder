@@ -132,6 +132,10 @@ export function useGlobalNightMode(externalHub?: LiveUpdatesHub, opts?: { liveCl
   // simulated one — which also makes it the game's own calendar DATE, the
   // part DayNightSimPanel needs for its compute-from-date field.
   const [ownFromGame, setOwnFromGame] = useState<boolean | null>(null);
+  // Sun elevation rides the same tick as the clock for the same reason
+  // fromGame does: no extra subscription, and it can never disagree with the
+  // instant it arrived beside.
+  const [ownSunElevationDeg, setOwnSunElevationDeg] = useState<number | null>(null);
 
   // One-shot preload so a freshly-mounted popup shows the real current time
   // immediately instead of "—" until the subscription's first push arrives.
@@ -161,11 +165,16 @@ export function useGlobalNightMode(externalHub?: LiveUpdatesHub, opts?: { liveCl
     // Carried on the same tick as the clock, so it needs no separate
     // subscription and can never disagree with the time it arrived beside.
     setOwnFromGame(!!event.fromGame);
+    setOwnSunElevationDeg(
+      typeof event.sunElevationDeg === 'number' ? event.sunElevationDeg : null,
+    );
   }, [tickThrottleMs]);
   useHubListener(hub, 'NightClockTick', liveClock ? onNightClockTick : undefined);
 
   const ownSimTimeMsPreloaded = ownSimTimeMs ?? (snapshotData as any)?.nightClockSnapshot?.simTimeMs ?? null;
   const fromGame = ownFromGame ?? !!(snapshotData as any)?.nightClockSnapshot?.fromGame;
+  const sunElevationDeg =
+    ownSunElevationDeg ?? (snapshotData as any)?.nightClockSnapshot?.sunElevationDeg ?? null;
   // `ownLive`, not `queried` — mirrors the old `live`/`current` split: stays
   // undefined until the first NightModeChanged event even though `queried`
   // (GET_NIGHT_MODES) already has the record, but every consumer of this
@@ -182,7 +191,7 @@ export function useGlobalNightMode(externalHub?: LiveUpdatesHub, opts?: { liveCl
   const resolvedFeed = useMemo<NightModeLiveFeed>(() => ({ record: current, simTimeMs }), [current, simTimeMs]);
 
   const effective = current
-    ? computeEffectiveNightState(current, simTimeMs)
+    ? computeEffectiveNightState(current, simTimeMs, sunElevationDeg)
     : { isNight: false, nightAmount: 0 };
 
   const save = useCallback((update: Partial<NightModeRecord>) => {

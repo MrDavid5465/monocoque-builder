@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  nightAmountFromSunElevation,
   parseTimeOfDay,
   formatTimeOfDay,
   computeSimulatedNightState,
@@ -103,6 +104,57 @@ describe('computeSimulatedNightState', () => {
     )!;
     // 23:50 + 15min is still inside the 40-minute dusk ramp, well short of full night.
     expect(state.nightAmount).toBeCloseTo(0.375, 5);
+  });
+});
+
+// ─── nightAmountFromSunElevation ────────────────────────────────────────────
+// The curve that actually drives the blend whenever a track location is
+// known. Mirrors night_state.rs's elevation_curve_matches_its_bounds_and_eases
+// — the two light the same room (screen and bulbs) and must not diverge.
+
+describe('nightAmountFromSunElevation', () => {
+  it('is hard 1/0 at the bounds and clamps beyond them', () => {
+    expect(nightAmountFromSunElevation(-2)).toBe(1);
+    expect(nightAmountFromSunElevation(-40)).toBe(1);
+    expect(nightAmountFromSunElevation(15)).toBe(0);
+    expect(nightAmountFromSunElevation(80)).toBe(0);
+  });
+
+  it('is exactly half at the midpoint of the band', () => {
+    expect(nightAmountFromSunElevation(6.5)).toBeCloseTo(0.5, 9);
+  });
+
+  it('is still essentially night at sunrise itself', () => {
+    // Sunrise is -0.833 deg (refraction + the sun's disc). The band is
+    // deliberately weighted after sunrise rather than centred on it, so the
+    // dashboard stays dark as the disc breaks the horizon.
+    expect(nightAmountFromSunElevation(-0.833)).toBeGreaterThan(0.97);
+  });
+
+  it('eases rather than running linear', () => {
+    // A linear ramp would put the quarter point at exactly 0.75; smoothstep
+    // must sit above it, i.e. still darker early on.
+    expect(nightAmountFromSunElevation(-2 + 17 * 0.25)).toBeGreaterThan(0.78);
+  });
+
+  it('is monotonic across the band', () => {
+    let prev = Infinity;
+    for (let i = 0; i <= 170; i++) {
+      const v = nightAmountFromSunElevation(-2 + i * 0.1);
+      expect(v).toBeLessThanOrEqual(prev + 1e-12);
+      prev = v;
+    }
+  });
+
+  it('wins over the clock ramp, and a bad reading falls back to it', () => {
+    const noon = Date.UTC(2026, 0, 1, 12, 0, 0);
+    const c = config();
+    // Noon by the clock (ramp alone says full day) but the sun is below the
+    // horizon — elevation must win.
+    expect(computeSimulatedNightState(noon, c, -10)!.nightAmount).toBe(1);
+    // Absent or non-finite falls back to the clock ramp.
+    expect(computeSimulatedNightState(noon, c, null)!.nightAmount).toBe(0);
+    expect(computeSimulatedNightState(noon, c, NaN)!.nightAmount).toBe(0);
   });
 });
 
