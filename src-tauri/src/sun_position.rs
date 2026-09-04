@@ -175,12 +175,18 @@ pub fn compute_sunrise_sunset(
     let solar_dec = sun_declination(t);
     let ha_deg = hour_angle_deg(latitude, solar_dec, SUNRISE_ZENITH_DEG)?;
 
-    // NOAA's own formula takes longitude WEST-positive (opposite of the
-    // standard East-positive geographic convention this app/Nominatim use
-    // everywhere else) — negate at this boundary only.
-    let west_lon = -longitude;
-    let sunrise_min = 720.0 - 4.0 * (west_lon + ha_deg) - eq_time;
-    let sunset_min = 720.0 - 4.0 * (west_lon - ha_deg) - eq_time;
+    // Longitude goes in East-positive, exactly as stored — do NOT negate it.
+    //
+    // This previously negated to "west-positive, the convention NOAA's own
+    // formula takes". That was wrong, and it put solar noon out by
+    // 2 x 4 x longitude minutes: 56 min at the Nordschleife (7E), ~10 hours
+    // in New York (74W), and complete nonsense in Tokyo (sunrise landing
+    // after sunset). The sign is checkable against physics without any
+    // almanac: east of Greenwich the sun crosses the meridian EARLIER in
+    // UTC, so solar noon must be `720 - 4*longitude - eq_time`, which is
+    // what these two lines now produce at `ha_deg == 0`.
+    let sunrise_min = 720.0 - 4.0 * (longitude + ha_deg) - eq_time;
+    let sunset_min = 720.0 - 4.0 * (longitude - ha_deg) - eq_time;
 
     Some((
         sunrise_min.rem_euclid(1440.0),
@@ -275,7 +281,48 @@ mod tests {
             "day length {day_length_min} min not in expected 16.5-17h range"
         );
         // Solar noon (near-longitude-0 site) should fall near 12:00 UTC.
-        assert!((rise + set) / 2.0 - 12.0 * 60.0 < 15.0);
+        //
+        // The `.abs()` is load-bearing and was missing: without it this is a
+        // one-sided comparison that passes for ANY value below 12:15,
+        // including the wildly-early noons a longitude sign error produces.
+        // That is precisely how such a bug survived this suite — see
+        // `solar_noon_tracks_longitude_sign` below, which tests the thing
+        // this assertion only looked like it was testing.
+        assert!(((rise + set) / 2.0 - 12.0 * 60.0).abs() < 15.0);
+    }
+
+    /// The regression test for a real bug: `compute_sunrise_sunset` used to
+    /// negate longitude, putting solar noon out by `2 * 4 * longitude`
+    /// minutes — 56 min at the Nordschleife, ~10 hours in New York, and
+    /// sunrise-after-sunset in Tokyo.
+    ///
+    /// Deliberately asserts against *physics*, not recalled clock times, per
+    /// the warning above: east of Greenwich the sun crosses the meridian
+    /// earlier in UTC, west of it later, by 4 minutes per degree. Solar noon
+    /// is therefore `720 - 4*longitude - eq_time`, and the equation of time
+    /// is bounded by about +/-16 minutes all year, so a 25-minute tolerance
+    /// pins the sign and magnitude without pinning an almanac value.
+    #[test]
+    fn solar_noon_tracks_longitude_sign() {
+        for (name, lat, lon) in [
+            ("Nordschleife", 50.3526, 6.9830),
+            ("Tokyo", 35.68, 139.69),
+            ("New York", 40.71, -74.01),
+            ("Interlagos", -23.7036, -46.6997),
+        ] {
+            let (rise, set) = compute_sunrise_sunset(2026, 9, 4, lat, lon).unwrap();
+            // Unwrap the midpoint: a day spanning UTC midnight puts sunset
+            // numerically below sunrise, and the naive mean lands antipodal.
+            let set_unwrapped = if set < rise { set + 1440.0 } else { set };
+            let noon = ((rise + set_unwrapped) / 2.0).rem_euclid(1440.0);
+            let expected = (720.0 - 4.0 * lon).rem_euclid(1440.0);
+            let diff = (noon - expected + 720.0).rem_euclid(1440.0) - 720.0;
+            assert!(
+                diff.abs() < 25.0,
+                "{name} ({lon} deg E): solar noon {noon:.0} min, expected ~{expected:.0} \
+                 (off by {diff:.0} min — longitude sign or scale is wrong)"
+            );
+        }
     }
 
     #[test]
