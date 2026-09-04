@@ -132,6 +132,18 @@ pub struct NightClockTick {
     /// disciplining rather than switching sources. A UI that offers to
     /// configure the simulation can use it to say the game is driving it.
     pub from_game: bool,
+    /// Sun elevation in degrees at `sim_time_ms`, negative below the horizon,
+    /// or `None` when it can't be known (no track loaded, or no location
+    /// configured for it).
+    ///
+    /// The honest input for a dawn/dusk blend: elevation is what actually
+    /// sets sky brightness, so a ramp keyed on it needs no assumption about
+    /// where in the transition sunrise falls — which is the assumption that
+    /// kept being wrong. Computed server-side (see
+    /// `night_clock::current_sun_elevation_deg`) because the frontend has
+    /// neither the track's coordinates nor the solar code, and because the
+    /// Huenicorn gamma pusher has to work with no frontend at all.
+    pub sun_elevation_deg: Option<f64>,
 }
 
 /// `nightModeUpdates` merges two logically-separate things (the record's
@@ -201,10 +213,12 @@ async fn night_clock_tick(adapter: &Arc<dyn TypiQLAdapter>) -> NightClockTick {
     let sim_time_ms = record
         .and_then(|record| night_clock::current_sim_ms(&record, now))
         .unwrap_or(now);
+    let sun_elevation_deg = night_clock::current_sun_elevation_deg(adapter, sim_time_ms).await;
     NightClockTick {
         sim_time_ms,
         real_time_ms: now,
         from_game: synced,
+        sun_elevation_deg,
     }
 }
 

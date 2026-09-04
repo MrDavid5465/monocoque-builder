@@ -28,11 +28,17 @@ pub struct AcTelemetry {
     pub time_multiplier: f32,
 
     pub sun_angle_deg: f32,
-    /// Sun elevation; negative below the horizon.
+    /// From `ac.getSunPitchAngle()`, and NOT usable as sun elevation —
+    /// measured live it returns exact constants that never move while the
+    /// clock is scrubbed across a dawn. Compute elevation from the clock and
+    /// `equinoxSunTrajectory` instead — see `sun_position::sun_elevation_deg`.
     pub sun_pitch_deg: f32,
-    /// 0→1, WeatherFX's own "time for headlights" judgement. Intended as the
-    /// day→night cross-fade input, since it accounts for weather rather than
-    /// just the hour.
+    /// True when AC swings the sun on a 20th-March trajectory regardless of
+    /// the real date (seasons off, or no session date set).
+    pub equinox_sun_trajectory: bool,
+    /// 0→1, the active WeatherFX *style's* "time for headlights" judgement.
+    /// Style-dependent: observed pinned at 1.000 through full daylight under
+    /// PURE, so verify it moves before keying anything on it.
     pub light_suggestion: f32,
     pub ambient_lighting_multiplier: f32,
     /// 0 = under cover, 1 = open sky.
@@ -81,6 +87,7 @@ impl From<AcTelemetryFrame> for AcTelemetry {
             time_multiplier: frame.time_multiplier,
             sun_angle_deg: frame.sun_angle_deg,
             sun_pitch_deg: frame.sun_pitch_deg,
+            equinox_sun_trajectory: frame.equinox_sun_trajectory,
             light_suggestion: frame.light_suggestion,
             ambient_lighting_multiplier: frame.ambient_lighting_multiplier,
             ambient_occlusion: frame.ambient_occlusion,

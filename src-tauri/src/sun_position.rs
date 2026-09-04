@@ -194,6 +194,53 @@ pub fn compute_sunrise_sunset(
     ))
 }
 
+/// Date AC swings the sun on when `equinox_sun_trajectory` is set: it moves
+/// as though it were the 20th of March whatever the session date says.
+pub const EQUINOX_TRAJECTORY_DATE: (u32, u32) = (3, 20);
+
+/// Sun elevation above the horizon in degrees, negative below, for a given
+/// date, location and time of day (`minute_of_day`, minutes since midnight in
+/// the same frame the game's clock reports).
+///
+/// This is what a dawn/dusk ramp should key on, rather than interpolating
+/// between sunrise and sunset clock times. Elevation is the thing that
+/// actually sets sky brightness, it is monotonic through the interesting
+/// part, and it needs no assumption about where in the transition sunrise
+/// falls — which is exactly the assumption that kept being wrong.
+///
+/// Deliberately NOT read from telemetry. AC exposes `sim.lightDirection`, but
+/// the SDK documents it as "sun OR moon" and before dawn it is the moon:
+/// measured on this rig it reported 56 degrees of elevation at an hour when
+/// the sun was 6 degrees below the horizon — above the sun's maximum possible
+/// elevation at that latitude, which is how the substitution was caught.
+///
+/// The caller must pass the date the *game* is using, which is not always the
+/// session date: see `EQUINOX_TRAJECTORY_DATE`.
+pub fn sun_elevation_deg(
+    year: i32,
+    month: u32,
+    day: u32,
+    latitude: f64,
+    longitude: f64,
+    minute_of_day: f64,
+) -> f64 {
+    let t = time_julian_cent(julian_day_number(year, month, day));
+    let solar_dec = sun_declination(t);
+    let eq_time = equation_of_time(t);
+
+    // True solar time, then hour angle: 0 at solar noon, +/-180 at midnight,
+    // 4 minutes of clock per degree of rotation. Same East-positive longitude
+    // convention as `compute_sunrise_sunset` — see the note there about the
+    // sign error this used to have.
+    let true_solar_time = (minute_of_day + eq_time + 4.0 * longitude).rem_euclid(1440.0);
+    let hour_angle = true_solar_time / 4.0 - 180.0;
+
+    let lat = deg2rad(latitude);
+    let dec = deg2rad(solar_dec);
+    let cos_zenith = lat.sin() * dec.sin() + lat.cos() * dec.cos() * deg2rad(hour_angle).cos();
+    90.0 - rad2deg(cos_zenith.clamp(-1.0, 1.0).acos())
+}
+
 /// Width (minutes) of the dawn/dusk ramp for the given date and location —
 /// i.e. `NightMode.sim_transition_minutes`, derived rather than guessed.
 ///
@@ -346,6 +393,60 @@ mod tests {
         assert_eq!(format_hhmm(283.0), "04:43");
         assert_eq!(format_hhmm(1440.0), "00:00");
         assert_eq!(format_hhmm(-30.0), "23:30");
+    }
+
+    /// Elevation must agree with the sunrise/sunset the other function
+    /// computes, or the two describe different suns. Checks the crossing
+    /// rather than a remembered clock time: at sunrise the sun sits at
+    /// -0.833 degrees (the refraction/disc allowance baked into
+    /// SUNRISE_ZENITH_DEG), so elevation there must be within a whisker of
+    /// that, and must be rising.
+    #[test]
+    fn elevation_agrees_with_computed_sunrise() {
+        for (name, lat, lon, (y, mo, d)) in [
+            ("Nordschleife", 50.3526, 6.9830, (2026, 3, 20)),
+            ("Interlagos", -23.7036, -46.6997, (2026, 9, 4)),
+            ("Suzuka", 34.8431, 136.5407, (2026, 6, 21)),
+        ] {
+            let (rise, set) = compute_sunrise_sunset(y, mo, d, lat, lon).unwrap();
+            for (label, at) in [("sunrise", rise), ("sunset", set)] {
+                let elev = sun_elevation_deg(y, mo, d, lat, lon, at);
+                assert!(
+                    (elev + 0.833).abs() < 0.5,
+                    "{name} {label}: elevation {elev:.3} at the computed time, expected ~-0.833"
+                );
+            }
+            // Rising at sunrise, falling at sunset — pins the direction, so a
+            // sign slip in the hour angle cannot pass.
+            assert!(
+                sun_elevation_deg(y, mo, d, lat, lon, rise + 10.0)
+                    > sun_elevation_deg(y, mo, d, lat, lon, rise - 10.0),
+                "{name}: sun not rising at sunrise"
+            );
+            assert!(
+                sun_elevation_deg(y, mo, d, lat, lon, set + 10.0)
+                    < sun_elevation_deg(y, mo, d, lat, lon, set - 10.0),
+                "{name}: sun not setting at sunset"
+            );
+        }
+    }
+
+    /// Peak elevation is bounded by geometry: `90 - |latitude - declination|`.
+    /// This is what exposed AC's `lightDirection` as the moon before dawn --
+    /// it reported 56 degrees where the sun here cannot exceed ~39.6.
+    #[test]
+    fn peak_elevation_respects_the_latitude_ceiling() {
+        let (lat, lon) = (50.3526, 6.9830);
+        let (y, mo, d) = (2026, 3, 20);
+        let peak = (0..1440)
+            .map(|m| sun_elevation_deg(y, mo, d, lat, lon, m as f64))
+            .fold(f64::MIN, f64::max);
+        // Equinox: declination ~0, so the ceiling is 90 - latitude.
+        let ceiling = 90.0 - lat;
+        assert!(
+            peak <= ceiling + 0.5 && peak > ceiling - 2.0,
+            "peak elevation {peak:.2} not just under the {ceiling:.2} ceiling"
+        );
     }
 
     #[test]

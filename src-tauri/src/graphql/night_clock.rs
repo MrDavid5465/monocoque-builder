@@ -70,6 +70,62 @@ fn live_track() -> Option<String> {
         .filter(|t| !t.is_empty())
 }
 
+/// Sun elevation (degrees, negative below the horizon) at the current
+/// simulated instant for whatever track is live, or `None` when it can't be
+/// known — no track loaded, or no location configured for it.
+///
+/// Pushed on every clock tick so the dawn/dusk ramp can key on elevation
+/// rather than interpolating between sunrise and sunset clock times. Computed
+/// here, once, rather than in each consumer: the frontend has neither the
+/// track's coordinates nor the solar code, and the Huenicorn gamma pusher
+/// runs with no frontend at all.
+///
+/// The date is the one the GAME is using, which is not always the session's:
+/// when `equinox_sun_trajectory` is set, AC swings the sun as though it were
+/// the 20th of March whatever the date says. Measured on this rig, computing
+/// for the real date instead placed sunrise 43 minutes from where the game
+/// actually had it, while the equinox date landed within a couple of degrees
+/// of the observed sky.
+pub async fn current_sun_elevation_deg(
+    adapter: &Arc<dyn TypiQLAdapter>,
+    sim_time_ms: f64,
+) -> Option<f64> {
+    let track = live_track()?;
+    let location = find_track_location(adapter, &track).await?;
+    let frame = crate::ac_telemetry::latest();
+
+    // Year only shifts the equation of time by a minute or so, and the
+    // equinox declination is ~0 in every year, so the session's year is a
+    // nicety rather than load-bearing — but use it when the game offers one.
+    let session_date = frame
+        .as_ref()
+        .and_then(|f| f.session_timestamp())
+        .map(crate::sun_position::iso_date_from_epoch_seconds)
+        .and_then(|iso| crate::sun_position::parse_iso_date(&iso));
+
+    let (year, month, day) = match (&frame, session_date) {
+        (Some(f), date) if f.equinox_sun_trajectory => {
+            let (month, day) = crate::sun_position::EQUINOX_TRAJECTORY_DATE;
+            (date.map(|(y, _, _)| y).unwrap_or(2024), month, day)
+        }
+        (_, Some(date)) => date,
+        // No game frame at all (another sim, or AC not running): fall back to
+        // the date the user configured for sunrise/sunset, since that is the
+        // only statement of intent available.
+        _ => return None,
+    };
+
+    let minute_of_day = (sim_time_ms / 60_000.0).rem_euclid(1440.0);
+    Some(crate::sun_position::sun_elevation_deg(
+        year,
+        month,
+        day,
+        location.latitude,
+        location.longitude,
+        minute_of_day,
+    ))
+}
+
 /// How far the internal clock may drift from the game's before it's rebased.
 ///
 /// This is a correction threshold, not a poll interval. Once the anchor is set

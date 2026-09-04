@@ -56,11 +56,25 @@ pub struct AcTelemetryFrame {
     // ---- Sun and ambient light --------------------------------------
     /// Sun azimuth, degrees.
     pub sun_angle_deg: f32,
-    /// Sun elevation, degrees. Negative below the horizon.
+    /// Reported by `ac.getSunPitchAngle()`. Do NOT use this as sun
+    /// elevation: measured live, it returns suspiciously exact constants
+    /// (25.00, then 40.00) that do not move while the time of day is
+    /// scrubbed across a whole dawn, so it behaves like a configured
+    /// parameter rather than the sun's actual height. Compute elevation from
+    /// `sun_position::sun_elevation_deg` instead, using `equinox_sun_trajectory`
+    /// below to pick the date.
     pub sun_pitch_deg: f32,
-    /// 0→1, WeatherFX's own "time for headlights" judgement — a ready-made
-    /// scalar for cross-fading a day dashboard into a night one, and better
-    /// than thresholding the clock because it accounts for weather.
+    /// True when the sun follows a 20th-March trajectory rather than the
+    /// real date's. Decides whether a clock-based ramp (the cross-sim
+    /// fallback, where no such telemetry exists) should compute its
+    /// sunrise/sunset for the equinox instead of the session date.
+    pub equinox_sun_trajectory: bool,
+    /// 0→1, the active WeatherFX *style's* "time for headlights" judgement.
+    ///
+    /// Only as good as the style: measured against PURE it stayed pinned at
+    /// 1.000 across a two-hour scrub through full daylight, so it is not
+    /// safe to key a crossfade on without checking it actually moves.
+    /// Computed sun elevation does not depend on the style.
     pub light_suggestion: f32,
     pub ambient_lighting_multiplier: f32,
     /// 0 = fully shadowed (tunnel, under cover), 1 = open sky.

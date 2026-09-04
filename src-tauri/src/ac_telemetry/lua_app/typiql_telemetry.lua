@@ -225,6 +225,19 @@ local function buildFrame(sim, car)
 
     sun_angle_deg = ac.getSunAngle(),
     sun_pitch_deg = ac.getSunPitchAngle(),
+    -- True when AC swings the sun as though it were 20th March regardless of
+    -- the real date (seasons off, or no session date). Load-bearing: it
+    -- decides whether real-world astronomy for the actual date describes the
+    -- sky at all. Measured on this rig with it set, computing for the real
+    -- date put sunrise 43 minutes from where the game actually had it, while
+    -- computing for the equinox landed within a couple of degrees.
+    --
+    -- There is deliberately no sun-elevation field here. `sim.lightDirection`
+    -- is documented "sun OR moon", and before dawn it is the moon: it read
+    -- 56 degrees of elevation at an hour when the sun was 6 degrees BELOW the
+    -- horizon, which is above the sun's maximum possible elevation at this
+    -- latitude. Elevation is computed from this flag plus the clock instead.
+    equinox_sun_trajectory = sim.equinoxSunTrajectory,
     light_suggestion = sim.lightSuggestion,
     ambient_lighting_multiplier = sim.ambientLightingMultiplier,
     ambient_occlusion = car ~= nil and car.ambientOcclusion or 1,
