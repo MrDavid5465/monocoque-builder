@@ -294,6 +294,10 @@ pub async fn wait_for_result(
 ) -> Result<CaptureOutcome, String> {
     let result_path = paths.lua_out_dir().join("result.ini");
     let deadline = std::time::Instant::now() + timeout;
+    // Only meaningful once AC has actually appeared: it is not running yet at
+    // the moment this starts polling, and treating that as "it died" would
+    // fail every capture instantly.
+    let mut seen_running = false;
 
     while std::time::Instant::now() < deadline {
         if let Ok(text) = std::fs::read_to_string(&result_path) {
@@ -306,6 +310,23 @@ pub async fn wait_for_result(
                 return Ok(CaptureOutcome { ok, message });
             }
         }
+
+        // AC dying without writing a result used to be indistinguishable from
+        // it still working: this waited out the whole timeout, and only then
+        // did the caller restore the user's settings. A real crash took 1.7
+        // seconds and left the rig in 360 mode with the restore journal on
+        // disk for the rest of the timeout.
+        //
+        // The game records why it went, so say that instead of "timed out".
+        if is_ac_running() {
+            seen_running = true;
+        } else if seen_running {
+            return Err(match last_startup_error(paths) {
+                Some(reason) => format!("Assetto Corsa quit before capturing: {reason}"),
+                None => "Assetto Corsa quit before capturing, with no error logged.".to_string(),
+            });
+        }
+
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
 
@@ -313,6 +334,24 @@ pub async fn wait_for_result(
         "Assetto Corsa didn't report a finished capture within {}s.",
         timeout.as_secs()
     ))
+}
+
+/// The last error Assetto Corsa logged, if its log is readable.
+///
+/// Exists because AC is specific about startup failures and we were throwing
+/// that away. A real one: creating the D3D11 device failed at the capture's
+/// 8192x4096 window and the log said so in as many words, while this app
+/// reported only that nothing had happened for the length of the timeout.
+///
+/// Best-effort by design — a missing or unreadable log is not itself worth
+/// reporting, since the caller already has a perfectly good "it quit" message.
+fn last_startup_error(paths: &CapturePaths) -> Option<String> {
+    let log = paths.user_dir.join("logs").join("log.txt");
+    let text = std::fs::read_to_string(log).ok()?;
+    text.lines()
+        .rev()
+        .find(|line| line.starts_with("ERROR:"))
+        .map(|line| line.trim_start_matches("ERROR:").trim().to_string())
 }
 
 /// Waits for AC to close itself after a capture.
@@ -337,6 +376,44 @@ fn write(path: &Path, text: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    /// The startup-error extraction, which turns AC's own log line into the
+    /// message the user sees instead of a bare timeout.
+    #[test]
+    fn reads_the_last_logged_error() {
+        let dir = std::env::temp_dir().join(format!("cap-log-test-{}", std::process::id()));
+        let logs = dir.join("logs");
+        std::fs::create_dir_all(&logs).unwrap();
+        std::fs::write(
+            logs.join("log.txt"),
+            "CURRENT LOCALE en\n\
+             ERROR: TEMPORARY DX11 Device D3D11CreateDevice failed\n\
+             ERROR: DX11 Device creation FAILED\n\
+             CRASH in:\n",
+        )
+        .unwrap();
+        let paths = CapturePaths {
+            install_dir: dir.clone(),
+            user_dir: dir.clone(),
+        };
+        // The LAST error, not the first — the final one is the specific cause.
+        assert_eq!(
+            super::last_startup_error(&paths).as_deref(),
+            Some("DX11 Device creation FAILED")
+        );
+
+        // No log at all is not an error in itself: the caller already has a
+        // usable "it quit" message without one.
+        let empty = dir.join("empty");
+        std::fs::create_dir_all(&empty).unwrap();
+        let paths = CapturePaths {
+            install_dir: empty.clone(),
+            user_dir: empty,
+        };
+        assert_eq!(super::last_startup_error(&paths), None);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     use super::*;
     use crate::ac_capture::CaptureConfig;
 
