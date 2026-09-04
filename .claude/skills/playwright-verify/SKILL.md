@@ -4,7 +4,7 @@ description: Launch/drive this app (Tauri + React + Vite) in a real Chromium bro
 license: MIT
 ---
 
-# Playwright live verification for typiql-tauri
+# Playwright live verification for monocoque-builder
 
 This app is a Tauri desktop app, but its entire React frontend is *also* a plain
 web page served by Vite — Tauri's native window is just a webview pointed at

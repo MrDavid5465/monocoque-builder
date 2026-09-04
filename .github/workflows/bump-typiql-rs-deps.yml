@@ -46,7 +46,7 @@ jobs:
             echo "duckdb=${{ github.event.client_payload.typiql_adapter_duckdb }}" >> "$GITHUB_OUTPUT"
           else
             crate_version() {
-              curl -sf -H "User-Agent: typiql-tauri-ci (david@davidallanscott.ca)" \
+              curl -sf -H "User-Agent: monocoque-builder-ci (david@davidallanscott.ca)" \
                 "https://crates.io/api/v1/crates/$1" | jq -r '.crate.max_version'
             }
             echo "core=$(crate_version typiql-core)" >> "$GITHUB_OUTPUT"

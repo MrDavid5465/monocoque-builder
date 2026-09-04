@@ -28,7 +28,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          path: typiql-tauri/typiql
+          path: monocoque-builder
       - uses: actions/checkout@v4
         with:
           repository: MrDavid5465/typiql-rs
@@ -45,19 +45,19 @@ jobs:
         with:
           node-version: lts/*
           cache: npm
-          cache-dependency-path: typiql-tauri/typiql/package-lock.json
+          cache-dependency-path: monocoque-builder/package-lock.json
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: typiql-tauri/typiql/src-tauri -> target
+          workspaces: monocoque-builder/src-tauri -> target
 
-      - working-directory: typiql-tauri/typiql
+      - working-directory: monocoque-builder
         run: npm ci
 
       - uses: tauri-apps/tauri-action@v0
         with:
-          projectPath: typiql-tauri/typiql
+          projectPath: monocoque-builder
           tagName: ${{ needs.release-please.outputs.tag_name }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

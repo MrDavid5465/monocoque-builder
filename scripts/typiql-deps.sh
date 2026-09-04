@@ -7,7 +7,7 @@ set -euo pipefail
 #
 # Usage:
 #   scripts/typiql-deps.sh local
-#     Switch to path deps against ../../../typiql-rs (sibling checkout,
+#     Switch to path deps against ../../typiql-rs (sibling checkout,
 #     same layout CI reproduces via its two-checkout pattern). Marks
 #     Cargo.toml/Cargo.lock skip-worktree so day-to-day local dev never
 #     shows them as changed in `git status` / `git add`.
@@ -30,7 +30,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MANIFEST="$REPO_ROOT/src-tauri/Cargo.toml"
 
 crate_version() {
-  curl -sf -H "User-Agent: typiql-tauri-dev-script (david@davidallanscott.ca)" \
+  curl -sf -H "User-Agent: monocoque-builder-dev-script (david@davidallanscott.ca)" \
     "https://crates.io/api/v1/crates/$1" \
     | python3 -c 'import sys,json; print(json.load(sys.stdin)["crate"]["max_version"])'
 }
@@ -51,21 +51,21 @@ path = sys.argv[1]
 text = open(path).read()
 text = re.sub(
     r'typiql = \{ version = "[^"]+", package = "typiql-core" \}',
-    'typiql = { path = "../../../typiql-rs/crates/typiql-core", package = "typiql-core" }',
+    'typiql = { path = "../../typiql-rs/crates/typiql-core", package = "typiql-core" }',
     text)
 text = re.sub(
     r'typiql-adapter-json = "[^"]+"',
-    'typiql-adapter-json = { path = "../../../typiql-rs/crates/typiql-adapter-json" }',
+    'typiql-adapter-json = { path = "../../typiql-rs/crates/typiql-adapter-json" }',
     text)
 text = re.sub(
     r'typiql-adapter-duckdb = "[^"]+"',
-    'typiql-adapter-duckdb = { path = "../../../typiql-rs/crates/typiql-adapter-duckdb" }',
+    'typiql-adapter-duckdb = { path = "../../typiql-rs/crates/typiql-adapter-duckdb" }',
     text)
 open(path, 'w').write(text)
 PY
     (cd "$REPO_ROOT/src-tauri" && cargo check --quiet)
     git -C "$REPO_ROOT" update-index --skip-worktree src-tauri/Cargo.toml src-tauri/Cargo.lock
-    echo "Switched to local path deps (../../../typiql-rs). Cargo.toml/Cargo.lock are now skip-worktree."
+    echo "Switched to local path deps (../../typiql-rs). Cargo.toml/Cargo.lock are now skip-worktree."
     ;;
 
   published)

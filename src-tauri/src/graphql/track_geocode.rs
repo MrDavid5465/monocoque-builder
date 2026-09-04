@@ -41,7 +41,7 @@ impl TrackGeocodeQuery {
             .query(&[("q", query.as_str()), ("format", "json"), ("limit", "5")])
             .header(
                 "User-Agent",
-                "typiql-tauri-dashboard-designer/1.0 (local sim-rig admin tool, track location lookup)",
+                "monocoque-builder-dashboard-designer/1.0 (local sim-rig admin tool, track location lookup)",
             )
             .send()
             .await
