@@ -218,6 +218,10 @@ pub async fn build_router() -> Router {
         // of fragile work for nothing. The frontend still reads the result
         // through the `acTelemetry` GraphQL subscription.
         .route("/ac-telemetry", get(crate::ac_telemetry::ingest::handler))
+        // The reverse direction: TyPiQL pushes puppet frames down to the
+        // in-game Lua app over this socket. See `ac_puppet` for why it's a
+        // separate app/route rather than folded into `/ac-telemetry`.
+        .route("/ac-puppet", get(crate::ac_puppet::channel::handler))
         .nest(
             "/360-photos",
             Router::new()

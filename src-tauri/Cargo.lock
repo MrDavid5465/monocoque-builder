@@ -2926,6 +2926,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tokio",
  "tokio-stream",
+ "tokio-tungstenite",
  "tower",
  "tower-http",
  "typiql-adapter-duckdb",

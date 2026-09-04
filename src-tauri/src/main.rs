@@ -5,6 +5,7 @@
 // default query recursion limit (128).
 #![recursion_limit = "256"]
 mod ac_capture;
+mod ac_puppet;
 mod ac_telemetry;
 mod api;
 mod config_manager;

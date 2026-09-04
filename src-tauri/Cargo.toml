@@ -52,6 +52,12 @@ typiql-adapter-duckdb = { path = "../../../typiql-rs/crates/typiql-adapter-duckd
 evdev = "0.12"
 nusb = "0.2.7"
 
+[dev-dependencies]
+# Already in the tree transitively (pulled in under axum's `ws` feature);
+# only used to drive a real WebSocket client against `ac_puppet::channel` in
+# tests, standing in for the in-game Lua app.
+tokio-tungstenite = "0.29"
+
 [features]
 # Opt-in, not shipped: `cargo build --features devtools` enables the WebKit
 # inspector in a release build. Left off by default because on this hardware
