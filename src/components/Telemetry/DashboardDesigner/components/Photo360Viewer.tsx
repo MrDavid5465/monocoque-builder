@@ -99,6 +99,17 @@ const SWAY_PITCH_DEG_PER_G = 0.75;
 const SWAY_YAW_DEG_PER_M   = 33;
 const SWAY_PITCH_DEG_PER_M = 16.5;
 
+// Vertical head travel (heave) is its own gain rather than reusing the
+// longitudinal one: they're different motions with different ranges — a kerb
+// strike moves the head much further, and much faster, than braking does —
+// and keeping them separate means either can be tuned, or sign-flipped,
+// without disturbing the other.
+//
+// UNCALIBRATED. Every per-metre figure here is derived from an assumed few
+// centimetres of head travel per g, not from measured values. Sample the live
+// channel before trusting any of them.
+const SWAY_PITCH_DEG_PER_M_HEAVE = 25;
+
 // Head movement past this (metres) is treated as a glitch rather than a
 // reading — mirrors the ±3g/±4g clamps on the fallback path.
 const NECK_OFFSET_CLAMP_M = 0.25;
@@ -107,7 +118,15 @@ const NECK_OFFSET_CLAMP_M = 0.25;
 // effects can legitimately reach well past ten degrees when their multipliers
 // are turned up, and this only exists to reject a garbage frame — it is not a
 // taste control. Turn the gain down instead.
-const NECK_ANGLE_CLAMP_DEG = 45;
+//
+// Was 45 — measured live (right-click-drag free-look, recorded via
+// acTelemetrySnapshot) that a real 90-degree free-look reports very close to
+// a real +/-90 in neckYawDeg, so 45 was clamping legitimate free-look input
+// at HALF its actual range: the photo sphere stopped following a full 45
+// degrees before the player stopped turning their head. 100 clears AC's
+// observed ~90-degree free-look cap with headroom, while still catching an
+// actually-glitched frame.
+const NECK_ANGLE_CLAMP_DEG = 100;
 
 // Fraction of the full night darkening applied when the car HAS a night
 // photo. The photo already supplies the night *look*; this only takes the
@@ -408,10 +427,32 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
         // Position is added on top rather than ignored: it carries movement
         // the rotation cannot (heave over kerbs), and it is what responds if
         // the following effects are turned up in neck.ini.
+        //
+        // neck.yawDeg is negated: measured live via free-look (right-click-drag
+        // in AC, recorded through acTelemetrySnapshot) that AC reports a
+        // NEGATIVE neckYawDeg for a real rightward look and POSITIVE for
+        // leftward — opposite of this viewer's own yaw convention (see
+        // onPointerMove above), so passing it through unnegated panned the
+        // photo sphere the wrong way: turning your head right visibly panned
+        // left. clampNeck(neck.x) is untouched — its sign was deliberately
+        // matched to the g-derived fallback path (comment above) and nothing
+        // reported it as wrong.
         targetYaw =
-          (clampAngle(neck.yawDeg) + clampNeck(neck.x) * SWAY_YAW_DEG_PER_M) * swayGainX;
+          (-clampAngle(neck.yawDeg) + clampNeck(neck.x) * SWAY_YAW_DEG_PER_M) * swayGainX;
+        // Vertical head movement (heave over bumps and kerbs) was being
+        // dropped here entirely — only x and z were read — which threw away
+        // the most visible motion the game actually applies. Raising the head
+        // shows more of what's above, so +y pitches the view up.
+        //
+        // neck.pitchDeg is negated for the same reason neck.yawDeg is above:
+        // confirmed live that AC's pitch convention is also opposite this
+        // viewer's own (looking up panned the photo sphere down). z/y stay
+        // untouched — same reasoning as x on the yaw line.
         targetPitch =
-          (clampAngle(neck.pitchDeg) - clampNeck(neck.z) * SWAY_PITCH_DEG_PER_M) * swayGainY;
+          (-clampAngle(neck.pitchDeg)
+            - clampNeck(neck.z) * SWAY_PITCH_DEG_PER_M
+            + clampNeck(neck.y) * SWAY_PITCH_DEG_PER_M_HEAVE)
+          * swayGainY;
       } else {
         const gLat = active ? Math.max(-3, Math.min(3, t?.['gLat'] ?? 0)) : 0;
         const gLon = active ? Math.max(-4, Math.min(4, t?.['gLon'] ?? 0)) : 0;
