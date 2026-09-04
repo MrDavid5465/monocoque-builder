@@ -265,6 +265,12 @@ export const DASHBOARD_UPDATES_SUB = gql`
         simTimeMs
         realTimeMs
         fromGame
+        # Drives the dawn/dusk blend (see dayNightSim). Must be selected HERE,
+        # not only in nightModeQueries: dashboards receive ticks through the
+        # hub's own dashboardUpdates subscription, which is this document.
+        # Omitting it silently degraded every dashboard to the clock ramp
+        # while the standalone query looked correct.
+        sunElevationDeg
       }
       ... on PreviewCarChanged {
         operationName

@@ -96,73 +96,57 @@ async fn cached_track_location(
     Some(location)
 }
 
-/// Last date resolved from a LIVE game frame. Survives the gaps where the
-/// Lua app stops sending (CSP debug UI, setup menus) so a dropout freezes the
-/// trajectory instead of silently re-deciding it — see `effective_sun_date`.
-static LAST_GAME_SUN_DATE: Mutex<Option<(i32, u32, u32)>> = Mutex::new(None);
-
-/// The date the sun should be positioned for, given whatever the game is (or
-/// isn't) currently telling us.
+/// Last `equinox_sun_trajectory` the game reported.
 ///
-/// Split out so the fallback chain is visible in one place, because getting
-/// it wrong is not visibly wrong: an elevation computed for the wrong date is
-/// still a plausible-looking number, it just doesn't match the sky.
-fn effective_sun_date(record: &NightMode) -> Option<(i32, u32, u32)> {
-    let frame = crate::ac_telemetry::latest();
-    let session_date = frame
-        .as_ref()
-        .and_then(|f| f.session_timestamp())
-        .map(crate::sun_position::iso_date_from_epoch_seconds)
-        .and_then(|iso| crate::sun_position::parse_iso_date(&iso));
-    // What the user last computed sunrise/sunset against. The fallback for
-    // every case where the game isn't answering.
-    let configured = record
-        .sim_sunrise_sunset_date
-        .as_deref()
-        .and_then(crate::sun_position::parse_iso_date);
+/// Cached because the Lua app stops sending whenever the player opens the CSP
+/// debug UI or the setup menus, and whether the sun follows an equinox
+/// trajectory is a property of the SESSION, not of whether a script happens
+/// to be mid-frame. Re-deciding it during a gap swung elevation from +1.2 to
+/// +8.1 at one instant — a visible jump, fired exactly when someone was
+/// scrubbing the clock to watch the transition.
+static LAST_EQUINOX_FLAG: Mutex<Option<bool>> = Mutex::new(None);
 
-    let from_game = match frame {
-        // AC is swinging the sun on a 20th-March trajectory whatever the date
-        // says, so compute for that. Year only moves the equation of time by
-        // a minute or so; take it from whatever date we have.
-        Some(f) if f.equinox_sun_trajectory => {
-            let (month, day) = crate::sun_position::EQUINOX_TRAJECTORY_DATE;
-            let year = session_date
-                .or(configured)
-                .map(|(y, _, _)| y)
-                .unwrap_or(2024);
-            Some((year, month, day))
+/// Whether AC is currently swinging the sun on a 20th-March trajectory
+/// regardless of the session date (seasons off, or no date set).
+fn equinox_trajectory_active() -> bool {
+    if let Some(frame) = crate::ac_telemetry::latest() {
+        if let Ok(mut guard) = LAST_EQUINOX_FLAG.lock() {
+            *guard = Some(frame.equinox_sun_trajectory);
         }
-        // A live frame with a real session date: use it.
-        Some(_) if session_date.is_some() => session_date,
-        // A frame, but no plausible date in it.
-        Some(_) => configured,
-        // No frame at all — decided below, NOT here.
-        None => None,
-    };
-
-    if let Some(date) = from_game {
-        if let Ok(mut guard) = LAST_GAME_SUN_DATE.lock() {
-            *guard = Some(date);
-        }
-        return Some(date);
+        return frame.equinox_sun_trajectory;
     }
+    LAST_EQUINOX_FLAG
+        .lock()
+        .ok()
+        .and_then(|guard| *guard)
+        .unwrap_or(false)
+}
 
-    // The game has gone quiet. Reuse the last date it gave us rather than
-    // re-deciding, because re-deciding gets it WRONG: the Lua app stops
-    // sending whenever the player opens the CSP debug UI or the setup menus,
-    // and falling back to the configured (real-world) date there silently
-    // abandons the equinox trajectory. Measured: that swung elevation from
-    // +1.2 to +8.1 at the same instant — a visible jump in the blend, and it
-    // fired exactly when someone was scrubbing the clock to watch the
-    // transition, which is the worst possible moment.
-    //
-    // Whether the sun follows the equinox is a property of the session, not
-    // of whether a Lua script happens to be mid-frame, so freezing it is the
-    // honest behaviour. `configured` is only for a cold start that has never
-    // seen a frame at all.
-    let remembered = LAST_GAME_SUN_DATE.lock().ok().and_then(|g| *g);
-    remembered.or(configured)
+/// Swaps in the equinox date when AC is on that trajectory, keeping the year
+/// (which only moves the equation of time by a minute or so).
+///
+/// Everything that positions the sun must go through this. Computing for the
+/// real date while the game renders an equinox sun is not visibly wrong — it
+/// yields a plausible number that simply doesn't match the sky — and it put
+/// sunrise 43 minutes out at the Nordschleife.
+fn apply_sun_trajectory(date: (i32, u32, u32)) -> (i32, u32, u32) {
+    if !equinox_trajectory_active() {
+        return date;
+    }
+    let (month, day) = crate::sun_position::EQUINOX_TRAJECTORY_DATE;
+    (date.0, month, day)
+}
+
+/// The date the sun should be positioned for.
+///
+/// Built on `clock_date` rather than the telemetry frame's own timestamp: the
+/// internal clock is disciplined from the game, so it IS the game's date
+/// while the game is running and stays so through a telemetry gap, which the
+/// frame cannot.
+fn effective_sun_date(record: &NightMode) -> Option<(i32, u32, u32)> {
+    let iso = clock_date(record).or_else(|| record.sim_sunrise_sunset_date.clone())?;
+    let parsed = crate::sun_position::parse_iso_date(&iso)?;
+    Some(apply_sun_trajectory(parsed))
 }
 
 /// Sun elevation (degrees, negative below the horizon) at the current
@@ -315,20 +299,16 @@ pub async fn maybe_auto_recompute_sun_times(adapter: &Arc<dyn TypiQLAdapter>, re
     let Some(date) = clock_date(record).or_else(|| record.sim_sunrise_sunset_date.clone()) else {
         return;
     };
-    let Some((year, month, day)) = crate::sun_position::parse_iso_date(&date) else {
+    let Some(parsed) = crate::sun_position::parse_iso_date(&date) else {
         return;
     };
+    // Same trajectory correction the elevation path applies. Without it the
+    // stored sunrise/sunset describe a different sun than the one being
+    // rendered — measured at the Nordschleife, 04:53 stored against a real
+    // sunrise of about 05:34.
+    let (year, month, day) = apply_sun_trajectory(parsed);
     let Some(track) = live_track() else { return };
-    // Nothing to redo while both inputs still match what's already stored.
-    // The date is part of the guard, not just the track: with the game
-    // supplying it, it changes on its own as the in-game clock rolls past
-    // midnight (or the user loads a session set on another day).
-    if record.sim_last_computed_track.as_deref() == Some(track.as_str())
-        && record.sim_sunrise_sunset_date.as_deref() == Some(date.as_str())
-    {
-        return;
-    }
-    let Some(location) = find_track_location(adapter, &track).await else {
+    let Some(location) = cached_track_location(adapter, &track).await else {
         return;
     };
     let Some((sunrise_min, sunset_min)) = crate::sun_position::compute_sunrise_sunset(
@@ -341,9 +321,27 @@ pub async fn maybe_auto_recompute_sun_times(adapter: &Arc<dyn TypiQLAdapter>, re
         return;
     };
 
+    let sunrise = crate::sun_position::format_hhmm(sunrise_min);
+    let sunset = crate::sun_position::format_hhmm(sunset_min);
+
+    // Compare the RESULT, not the inputs. Guarding on track+date looked
+    // equivalent and wasn't: the trajectory correction above can change the
+    // answer while both inputs stay put, so a session that switched to an
+    // equinox sun kept its stale real-date sunrise forever (04:53 stored
+    // against an actual 05:34). Comparing what we computed is self-correcting
+    // for any input we forget to include, and the maths is pure -- the only
+    // read it needs is the track location, which is cached.
+    if record.sim_last_computed_track.as_deref() == Some(track.as_str())
+        && record.sim_sunrise.as_deref() == Some(sunrise.as_str())
+        && record.sim_sunset.as_deref() == Some(sunset.as_str())
+        && record.sim_sunrise_sunset_date.as_deref() == Some(date.as_str())
+    {
+        return;
+    }
+
     let mut patch = json!({
-        "sim_sunrise": crate::sun_position::format_hhmm(sunrise_min),
-        "sim_sunset": crate::sun_position::format_hhmm(sunset_min),
+        "sim_sunrise": sunrise,
+        "sim_sunset": sunset,
         "sim_sunrise_sunset_date": date,
         "sim_last_computed_track": track,
     });
