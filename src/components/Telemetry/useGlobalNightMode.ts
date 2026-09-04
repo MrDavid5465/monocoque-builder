@@ -135,7 +135,11 @@ export function useGlobalNightMode(externalHub?: LiveUpdatesHub, opts?: { liveCl
   // Sun elevation rides the same tick as the clock for the same reason
   // fromGame does: no extra subscription, and it can never disagree with the
   // instant it arrived beside.
-  const [ownSunElevationDeg, setOwnSunElevationDeg] = useState<number | null>(null);
+  //
+  // `undefined` means no tick has arrived yet; `null` means a tick arrived
+  // and said it doesn't know. The distinction is load-bearing — see where
+  // this is resolved below.
+  const [ownSunElevationDeg, setOwnSunElevationDeg] = useState<number | null | undefined>(undefined);
 
   // One-shot preload so a freshly-mounted popup shows the real current time
   // immediately instead of "—" until the subscription's first push arrives.
@@ -173,8 +177,17 @@ export function useGlobalNightMode(externalHub?: LiveUpdatesHub, opts?: { liveCl
 
   const ownSimTimeMsPreloaded = ownSimTimeMs ?? (snapshotData as any)?.nightClockSnapshot?.simTimeMs ?? null;
   const fromGame = ownFromGame ?? !!(snapshotData as any)?.nightClockSnapshot?.fromGame;
+  // Once ANY tick has arrived, its value wins outright — including when that
+  // value is null. This used to be a `??` chain, which silently fell through
+  // to the snapshot whenever a tick reported null; since the snapshot is a
+  // one-shot query that never re-polls, the blend then froze at whatever
+  // elevation happened to exist at page load while the clock kept ticking.
+  // That showed up as the dashboard's time advancing while its day/night
+  // state sat still.
   const sunElevationDeg =
-    ownSunElevationDeg ?? (snapshotData as any)?.nightClockSnapshot?.sunElevationDeg ?? null;
+    ownSunElevationDeg !== undefined
+      ? ownSunElevationDeg
+      : ((snapshotData as any)?.nightClockSnapshot?.sunElevationDeg ?? null);
   // `ownLive`, not `queried` — mirrors the old `live`/`current` split: stays
   // undefined until the first NightModeChanged event even though `queried`
   // (GET_NIGHT_MODES) already has the record, but every consumer of this

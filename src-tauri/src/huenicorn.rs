@@ -1189,7 +1189,7 @@ pub async fn run_gamma_pusher(adapter: Arc<dyn TypiQLAdapter>) {
                 // Same elevation the dashboards blend on, so the bulbs and
                 // the screen can't disagree partway through a dawn.
                 let elevation = match sim_ms {
-                    Some(ms) => night_clock::current_sun_elevation_deg(&adapter, ms).await,
+                    Some(ms) => night_clock::current_sun_elevation_deg(&adapter, &record, ms).await,
                     None => None,
                 };
                 night_state::night_amount(&record, sim_ms, elevation) as f32

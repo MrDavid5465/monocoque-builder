@@ -211,9 +211,13 @@ async fn night_clock_tick(adapter: &Arc<dyn TypiQLAdapter>) -> NightClockTick {
 
     let synced = crate::ac_telemetry::latest().is_some();
     let sim_time_ms = record
-        .and_then(|record| night_clock::current_sim_ms(&record, now))
+        .as_ref()
+        .and_then(|record| night_clock::current_sim_ms(record, now))
         .unwrap_or(now);
-    let sun_elevation_deg = night_clock::current_sun_elevation_deg(adapter, sim_time_ms).await;
+    let sun_elevation_deg = match record.as_ref() {
+        Some(record) => night_clock::current_sun_elevation_deg(adapter, record, sim_time_ms).await,
+        None => None,
+    };
     NightClockTick {
         sim_time_ms,
         real_time_ms: now,
