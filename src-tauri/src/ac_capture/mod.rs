@@ -156,6 +156,19 @@ pub async fn run(
         );
     }
 
+    // Checked separately from the game, and worth its own message: an idle
+    // Content Manager is invisible to every signal above, and a capture
+    // started alongside it dies at D3D11 device creation with nothing in our
+    // logs pointing at CM.
+    if launch::is_launcher_running() {
+        return Err(
+            "Content Manager is running. Close it first — a capture starts the game \
+             directly inside its Proton prefix, and a second process in that prefix \
+             fails to create a graphics device."
+                .to_string(),
+        );
+    }
+
     set_stage(&config.car_id, "Preparing Assetto Corsa");
 
     launch::install_lua_app(&paths)?;

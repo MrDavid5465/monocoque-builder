@@ -21,6 +21,13 @@ const ICON: &[u8] = include_bytes!("lua_app/icon.png");
 /// AC's process name, as `pgrep -x` sees it under Proton.
 const AC_PROCESS: &str = "acs.exe";
 
+/// What Steam launches, and therefore what Content Manager renames itself to
+/// on a CM install (see `start_ac`). Tracked separately from `AC_PROCESS`
+/// because CM sitting idle in its UI is invisible to every other signal:
+/// `acs.exe` is absent and no telemetry is being published, so a capture
+/// happily starts a SECOND process inside a Proton prefix CM already holds.
+const AC_LAUNCHER_PROCESS: &str = "AssettoCorsa.exe";
+
 /// How long to wait for AC to exit on its own after the script asks it to.
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(30);
 
@@ -130,6 +137,23 @@ pub fn is_ac_running() -> bool {
         });
 
     sim_is_live || crate::process_liveness::is_running(AC_PROCESS)
+}
+
+/// Whether the launcher — Content Manager, on an install where it has taken
+/// over `AssettoCorsa.exe` — is running.
+///
+/// Separate from `is_ac_running` because it needs its own message: the game
+/// is not running in any sense the user would recognise, so "close the game
+/// first" is unhelpful and looks wrong.
+///
+/// Worth guarding at all because a capture launched alongside a resident CM
+/// fails in a way that points nowhere near the cause: the second process into
+/// the prefix cannot create a D3D11 device, and AC dies 1.7 seconds in having
+/// logged only `DX11 Device creation FAILED`. Starting the same capture again
+/// with CM closed succeeds at the identical resolution, which is what rules
+/// out the settings themselves.
+pub fn is_launcher_running() -> bool {
+    crate::process_liveness::is_running(AC_LAUNCHER_PROCESS)
 }
 
 /// Starts Assetto Corsa.
