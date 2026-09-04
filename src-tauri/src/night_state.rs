@@ -34,17 +34,6 @@ pub fn parse_time_of_day(hhmm: &str) -> Option<f64> {
     Some((h * 60 + m) as f64)
 }
 
-/// Shortest signed distance (minutes, -720..720) travelling from `from` to
-/// `to` around a 24h clock — positive means `to` is ahead of `from`.
-fn shortest_signed_distance(from: f64, to: f64) -> f64 {
-    let d = wrap_minutes(to - from);
-    if d > DAY_MIN / 2.0 {
-        d - DAY_MIN
-    } else {
-        d
-    }
-}
-
 /// Minutes-since-UTC-midnight of a ms-since-epoch instant. Seconds are
 /// truncated before the division to match the TS version's
 /// `getUTCSeconds() / 60` (which likewise ignores the sub-second part).
@@ -57,21 +46,27 @@ fn minute_of_day(sim_time_ms: f64) -> f64 {
 pub fn simulated_night_amount(sim_time_ms: f64, record: &NightMode) -> Option<f64> {
     let sunrise_min = parse_time_of_day(record.sim_sunrise.as_deref()?)?;
     let sunset_min = parse_time_of_day(record.sim_sunset.as_deref()?)?;
-    let half_t = (record.sim_transition_minutes.unwrap_or(40.0) / 2.0).max(0.0);
+    // The ramp starts AT the sunrise/sunset clock time and runs forward for
+    // the full configured duration — it isn't centred on it. In-game, the
+    // sky is still fully dark right at the calculated "sunrise" time;
+    // daylight only arrives progressively over the following
+    // `sim_transition_minutes`, and the same holds in reverse for sunset. A
+    // centred ramp made both transitions appear to start too early (still
+    // dark well past the sunrise time).
+    let t = record.sim_transition_minutes.unwrap_or(40.0).max(0.0);
 
     let min_of_day = minute_of_day(sim_time_ms);
-    let d_sunrise = shortest_signed_distance(sunrise_min, min_of_day);
-    let d_sunset = shortest_signed_distance(sunset_min, min_of_day);
-    let in_dawn_ramp = half_t > 0.0 && d_sunrise.abs() <= half_t;
-    let in_dusk_ramp = half_t > 0.0 && d_sunset.abs() <= half_t;
+    let since_sunrise = wrap_minutes(min_of_day - sunrise_min);
+    let since_sunset = wrap_minutes(min_of_day - sunset_min);
+    let in_dawn_ramp = t > 0.0 && since_sunrise <= t;
+    let in_dusk_ramp = t > 0.0 && since_sunset <= t;
 
     let night_amount = if in_dawn_ramp {
-        0.5 - d_sunrise / (2.0 * half_t)
+        1.0 - since_sunrise / t
     } else if in_dusk_ramp {
-        0.5 + d_sunset / (2.0 * half_t)
+        since_sunset / t
     } else {
         let day_length = wrap_minutes(sunset_min - sunrise_min);
-        let since_sunrise = wrap_minutes(min_of_day - sunrise_min);
         if since_sunrise < day_length {
             0.0
         } else {
@@ -146,24 +141,35 @@ mod tests {
     #[test]
     fn ramps_through_dawn_and_dusk() {
         let r = sim_record();
-        // Centre of each ramp is exactly half-blended.
-        assert_eq!(simulated_night_amount(at(6.0, 0.0), &r), Some(0.5));
-        assert_eq!(simulated_night_amount(at(18.0, 0.0), &r), Some(0.5));
-        // Dawn runs night -> day, dusk runs day -> night.
-        assert_eq!(simulated_night_amount(at(5.0, 50.0), &r), Some(0.75));
-        assert_eq!(simulated_night_amount(at(6.0, 10.0), &r), Some(0.25));
-        assert_eq!(simulated_night_amount(at(17.0, 50.0), &r), Some(0.25));
-        assert_eq!(simulated_night_amount(at(18.0, 10.0), &r), Some(0.75));
+        // The ramp starts (full night/day, not half-blended) exactly at the
+        // configured sunrise/sunset clock time.
+        assert_eq!(simulated_night_amount(at(6.0, 0.0), &r), Some(1.0));
+        assert_eq!(simulated_night_amount(at(18.0, 0.0), &r), Some(0.0));
+        // Midpoint of the following 40-minute transition is half-blended.
+        assert_eq!(simulated_night_amount(at(6.0, 20.0), &r), Some(0.5));
+        assert_eq!(simulated_night_amount(at(18.0, 20.0), &r), Some(0.5));
+        // Dawn runs night -> day, dusk runs day -> night, over that window.
+        assert_eq!(simulated_night_amount(at(6.0, 10.0), &r), Some(0.75));
+        assert_eq!(simulated_night_amount(at(6.0, 30.0), &r), Some(0.25));
+        assert_eq!(simulated_night_amount(at(18.0, 10.0), &r), Some(0.25));
+        assert_eq!(simulated_night_amount(at(18.0, 30.0), &r), Some(0.75));
+        // The ramp completes exactly at sunrise/sunset + transition minutes.
+        assert_eq!(simulated_night_amount(at(6.0, 40.0), &r), Some(0.0));
+        assert_eq!(simulated_night_amount(at(18.0, 40.0), &r), Some(1.0));
     }
 
     #[test]
     fn ramp_wraps_around_midnight() {
         let mut r = sim_record();
-        r.sim_sunrise = Some("00:10".into());
-        // 23:50 is 20 minutes before a 00:10 sunrise: still full night at the
-        // edge of the ramp, i.e. the distance is computed the short way round.
+        r.sim_sunrise = Some("23:50".into());
+        // Dawn ramp runs 23:50 -> 00:30 the next day; the minutes-since
+        // calculation has to wrap through midnight to land inside it.
         assert_eq!(simulated_night_amount(at(23.0, 50.0), &r), Some(1.0));
-        assert_eq!(simulated_night_amount(at(0.0, 0.0), &r), Some(0.75));
+        assert_eq!(simulated_night_amount(at(0.0, 10.0), &r), Some(0.5));
+        assert_eq!(simulated_night_amount(at(0.0, 30.0), &r), Some(0.0));
+        // Well before the ramp starts, still deep night from the previous
+        // sunset.
+        assert_eq!(simulated_night_amount(at(23.0, 0.0), &r), Some(1.0));
     }
 
     #[test]
