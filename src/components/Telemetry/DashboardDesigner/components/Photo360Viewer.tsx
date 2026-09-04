@@ -119,14 +119,30 @@ const NECK_OFFSET_CLAMP_M = 0.25;
 // are turned up, and this only exists to reject a garbage frame — it is not a
 // taste control. Turn the gain down instead.
 //
-// Was 45 — measured live (right-click-drag free-look, recorded via
-// acTelemetrySnapshot) that a real 90-degree free-look reports very close to
-// a real +/-90 in neckYawDeg, so 45 was clamping legitimate free-look input
-// at HALF its actual range: the photo sphere stopped following a full 45
-// degrees before the player stopped turning their head. 100 clears AC's
-// observed ~90-degree free-look cap with headroom, while still catching an
-// actually-glitched frame.
-const NECK_ANGLE_CLAMP_DEG = 100;
+// Sized from the CSP setting that actually bounds this, not from an observed
+// peak. Measured live (recorded via acTelemetrySnapshot): a full look-left and
+// look-right report exactly -130.00 and +130.00, which is precisely
+// `LOOK_BACK_ANGLE` in CSP's `extension/config/neck.ini`. CSP documents that
+// setting's range as 60-150, so 150 is the ceiling on legitimate input for ANY
+// user's config, and rotation effects that stack on top of a look-back
+// (STEERING_MULT and friends) can add a few degrees beyond it — hence 160.
+//
+// Two earlier values were both too low, each sized off one observed peak
+// rather than the governing config: 45 (clipped free-look at half its range)
+// and then 100 (still clipped the 130 look-back). Anything past ~180 is
+// physically meaningless for head rotation, so 160 still rejects a garbage
+// frame, which is this clamp's only job — it is not a taste control.
+//
+// Measured ranges on this rig, confirmed against what the driver actually saw:
+//
+//   yaw    -130 .. +130   symmetric, set by LOOK_BACK_ANGLE
+//   pitch   -50 .. +5     ASYMMETRIC, and correct — not a bug
+//   centre  yaw 0.000, pitch +0.063, roll 0.000 (bias too small to correct)
+//
+// The pitch asymmetry is genuine: AC lets you look down ~50 degrees but barely
+// 5 up. Nothing here compensates for that, deliberately — this viewer mirrors
+// the angle the game applied, so a lopsided range is the honest result.
+const NECK_ANGLE_CLAMP_DEG = 160;
 
 // Fraction of the full night darkening applied when the car HAS a night
 // photo. The photo already supplies the night *look*; this only takes the
@@ -437,8 +453,14 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
         // left. clampNeck(neck.x) is untouched — its sign was deliberately
         // matched to the g-derived fallback path (comment above) and nothing
         // reported it as wrong.
+        //
+        // No swayGainX here, deliberately: this is the game's own applied
+        // angle, not an approximation to be scaled — the sensitivity slider
+        // exists to tame the g-derived fallback's invented degrees-per-g
+        // gain below, and applying it here too would detune a value that's
+        // already correct 1:1.
         targetYaw =
-          (-clampAngle(neck.yawDeg) + clampNeck(neck.x) * SWAY_YAW_DEG_PER_M) * swayGainX;
+          -clampAngle(neck.yawDeg) + clampNeck(neck.x) * SWAY_YAW_DEG_PER_M;
         // Vertical head movement (heave over bumps and kerbs) was being
         // dropped here entirely — only x and z were read — which threw away
         // the most visible motion the game actually applies. Raising the head
@@ -447,12 +469,12 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
         // neck.pitchDeg is negated for the same reason neck.yawDeg is above:
         // confirmed live that AC's pitch convention is also opposite this
         // viewer's own (looking up panned the photo sphere down). z/y stay
-        // untouched — same reasoning as x on the yaw line.
+        // untouched — same reasoning as x on the yaw line. No swayGainY here
+        // either, same reasoning as swayGainX above.
         targetPitch =
-          (-clampAngle(neck.pitchDeg)
+          -clampAngle(neck.pitchDeg)
             - clampNeck(neck.z) * SWAY_PITCH_DEG_PER_M
-            + clampNeck(neck.y) * SWAY_PITCH_DEG_PER_M_HEAVE)
-          * swayGainY;
+            + clampNeck(neck.y) * SWAY_PITCH_DEG_PER_M_HEAVE;
       } else {
         const gLat = active ? Math.max(-3, Math.min(3, t?.['gLat'] ?? 0)) : 0;
         const gLon = active ? Math.max(-4, Math.min(4, t?.['gLon'] ?? 0)) : 0;
