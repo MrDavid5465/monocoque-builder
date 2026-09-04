@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useImperativeHandle, forwardRef, useCallback } from 'react';
 import * as THREE from 'three';
-import { NeckFxSample, neckFxIsLive } from '../../useAcNeckFx';
+import { NeckFxSample, neckFxIsLive, clampNeckAngle } from '../../useAcNeckFx';
 
 export interface Photo360Handle {
   capture: (captureWidth: number, captureHeight: number) => Promise<string>;
@@ -114,35 +114,20 @@ const SWAY_PITCH_DEG_PER_M_HEAVE = 25;
 // reading — mirrors the ±3g/±4g clamps on the fallback path.
 const NECK_OFFSET_CLAMP_M = 0.25;
 
-// Same idea for the rotation channel. Generous: NeckFX's look-into-the-corner
-// effects can legitimately reach well past ten degrees when their multipliers
-// are turned up, and this only exists to reject a garbage frame — it is not a
-// taste control. Turn the gain down instead.
-//
-// Sized from the CSP setting that actually bounds this, not from an observed
-// peak. Measured live (recorded via acTelemetrySnapshot): a full look-left and
-// look-right report exactly -130.00 and +130.00, which is precisely
-// `LOOK_BACK_ANGLE` in CSP's `extension/config/neck.ini`. CSP documents that
-// setting's range as 60-150, so 150 is the ceiling on legitimate input for ANY
-// user's config, and rotation effects that stack on top of a look-back
-// (STEERING_MULT and friends) can add a few degrees beyond it — hence 160.
-//
-// Two earlier values were both too low, each sized off one observed peak
-// rather than the governing config: 45 (clipped free-look at half its range)
-// and then 100 (still clipped the 130 look-back). Anything past ~180 is
-// physically meaningless for head rotation, so 160 still rejects a garbage
-// frame, which is this clamp's only job — it is not a taste control.
+// The rotation-channel equivalent (NECK_ANGLE_CLAMP_DEG) is imported from
+// useAcNeckFx rather than declared here — it bounds what the SOURCE can
+// legitimately report, so it has to be identical in every consumer. It used to
+// be a literal in each, and they drifted. See that file for how 160 was sized.
 //
 // Measured ranges on this rig, confirmed against what the driver actually saw:
 //
-//   yaw    -130 .. +130   symmetric, set by LOOK_BACK_ANGLE
+//   yaw    -130 .. +130   symmetric, set by CSP's LOOK_BACK_ANGLE
 //   pitch   -50 .. +5     ASYMMETRIC, and correct — not a bug
 //   centre  yaw 0.000, pitch +0.063, roll 0.000 (bias too small to correct)
 //
 // The pitch asymmetry is genuine: AC lets you look down ~50 degrees but barely
 // 5 up. Nothing here compensates for that, deliberately — this viewer mirrors
 // the angle the game applied, so a lopsided range is the honest result.
-const NECK_ANGLE_CLAMP_DEG = 160;
 
 // Fraction of the full night darkening applied when the car HAS a night
 // photo. The photo already supplies the night *look*; this only takes the
@@ -424,8 +409,7 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
       const neckLive = neckFxIsLive(neck);
       const clampNeck = (v: number) =>
         Math.max(-NECK_OFFSET_CLAMP_M, Math.min(NECK_OFFSET_CLAMP_M, v));
-      const clampAngle = (v: number) =>
-        Math.max(-NECK_ANGLE_CLAMP_DEG, Math.min(NECK_ANGLE_CLAMP_DEG, v));
+      const clampAngle = clampNeckAngle;
 
       let targetYaw: number;
       let targetPitch: number;

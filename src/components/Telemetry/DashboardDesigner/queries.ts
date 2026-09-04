@@ -10,6 +10,10 @@ const DASHBOARD_CONTENT_FIELDS = `
   background
   dayNight
   neckFx
+  neckFxGainX
+  neckFxGainY
+  neckFxDisableX
+  neckFxDisableY
   elements
   kioskX
   kioskY

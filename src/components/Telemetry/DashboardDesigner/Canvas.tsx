@@ -10,7 +10,7 @@ import ClockSpriteNode from './ClockSpriteNode';
 import TransformOverlay from './TransformOverlay';
 import CropOverlay from './CropOverlay';
 import DayNightSimPanel from '../DayNightSimPanel';
-import { NeckFxSample, neckFxIsLive } from '../useAcNeckFx';
+import { NeckFxSample, neckFxIsLive, clampNeckAngle } from '../useAcNeckFx';
 import { useGamepadIO, useHeldGamepadButton } from './useGamepadIO';
 
 interface SpriteFile { file: string; thumbnail: string; }
@@ -115,11 +115,16 @@ const NECK_PX_PER_M_X = 555;
 const NECK_PX_PER_M_Y = 267;
 const NECK_CLAMP_M = 0.25;
 
-// Rotation channel. Pixels per degree of head turn for the 2D shift, and the
-// same glitch clamp the 360 viewer uses. Roll maps to rotation 1:1 — the head
-// tilting IS the dash tilting, so there is no gain to invent there.
+// Rotation channel. Pixels per degree of head turn for the 2D shift. Roll maps
+// to rotation 1:1 — the head tilting IS the dash tilting, so there is no gain
+// to invent there.
+//
+// The glitch clamp is imported from useAcNeckFx, not declared here. It was a
+// local literal that claimed to be "the same glitch clamp the 360 viewer uses"
+// and then stopped being: the 360 viewer's copy was corrected to 160 after a
+// full look-back was measured at 130 degrees, while this one sat at 45,
+// clipping dash sway at a third of the real travel.
 const NECK_PX_PER_DEG = 6;
-const NECK_ANGLE_CLAMP_DEG = 45;
 
 // ---------------------------------------------------------------------------
 // ButtonControlNode — button-control component with state machine
@@ -1343,8 +1348,7 @@ const Canvas = React.memo(forwardRef<CanvasHandle, Props>(({
         // typical look-into-the-corner config (see useAcNeckFx). Position is
         // added on top for the movement rotation can't express: heave over
         // kerbs, and whatever the following effects contribute when enabled.
-        const clampDeg = (v: number) =>
-          Math.max(-NECK_ANGLE_CLAMP_DEG, Math.min(NECK_ANGLE_CLAMP_DEG, v));
+        const clampDeg = clampNeckAngle;
         targetX =
           (clampDeg(neck.yawDeg) * NECK_PX_PER_DEG + clamp(neck.x) * NECK_PX_PER_M_X) * gainX;
         targetY =

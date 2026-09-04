@@ -53,6 +53,31 @@ export function neckFxIsLive(sample: NeckFxSample | null | undefined): boolean {
   );
 }
 
+/// Beyond this many degrees a rotation reading is a garbage frame, not a
+/// look. Lives here, next to `neckFxIsLive`, for the same reason: it is a
+/// property of the SOURCE — the range CSP can legitimately report — not of
+/// either consumer, so both must apply the identical bound.
+///
+/// Sized from the setting that actually governs the range, not from an
+/// observed peak. Measured live: a full look left/right reports exactly
+/// -130.00/+130.00, which is `LOOK_BACK_ANGLE` in CSP's
+/// `extension/config/neck.ini`. CSP documents that setting as 60-150, so 150
+/// bounds legitimate input for any user's config, and effects that stack on
+/// top of a look-back (STEERING_MULT and friends) can add a few degrees —
+/// hence 160. Past ~180 is physically meaningless for head rotation, so this
+/// still rejects a genuinely bad frame, which is its only job.
+///
+/// It previously lived as a separate literal in each consumer, and they
+/// drifted: Photo360Viewer was corrected 45 -> 160 while Canvas sat at 45,
+/// silently clipping dash sway at a third of the real travel. Hence one
+/// exported constant rather than two.
+export const NECK_ANGLE_CLAMP_DEG = 160;
+
+/// Clamps a rotation reading to `NECK_ANGLE_CLAMP_DEG`.
+export function clampNeckAngle(deg: number): number {
+  return Math.max(-NECK_ANGLE_CLAMP_DEG, Math.min(NECK_ANGLE_CLAMP_DEG, deg));
+}
+
 /// Assetto Corsa's applied head movement, for the NeckFX sway loops.
 ///
 /// Rides the shared hub rather than opening its own subscription — the hub is

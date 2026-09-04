@@ -55,6 +55,26 @@ pub struct Dashboard {
     pub background: Option<String>,
     pub day_night: bool,
     pub neck_fx: bool,
+    /// Sensitivity for the NeckFX sway, per axis. Applies ONLY to the
+    /// g-derived fallback path in `Photo360Viewer`/`Canvas`, which converts
+    /// g-forces through an invented degrees-per-g gain that needs taming;
+    /// live AC NeckFX telemetry is passed through 1:1, because there the
+    /// game is reporting the angle it actually applied and scaling it would
+    /// detune a correct value.
+    ///
+    /// `Option`, not a bare `f32`, and that matters: the macro puts
+    /// `#[serde(default)]` on every non-key field, so a stored dashboard
+    /// written before these existed deserializes the key as missing. A bare
+    /// `f32` would default that to `0.0` — a zero gain, i.e. sway silently
+    /// dead on every pre-existing dashboard. `None` instead lets the
+    /// frontend's existing `?? 1` supply the real default.
+    pub neck_fx_gain_x: Option<f32>,
+    pub neck_fx_gain_y: Option<f32>,
+    /// Kills one axis outright, independent of its gain. Same `Option`
+    /// reasoning as the gains above, and matches the frontend's own
+    /// `neckFxDisableX?: boolean` optionality.
+    pub neck_fx_disable_x: Option<bool>,
+    pub neck_fx_disable_y: Option<bool>,
     /// JSON-serialized Vec<SpriteElement> / ComponentNode tree.
     pub elements: String,
     pub kiosk_x: i32,
