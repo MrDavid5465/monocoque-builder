@@ -38,10 +38,10 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
-          path: typiql-tauri/typiql
+          path: monocoque-builder
 
       - name: Set pkgver and real sha256sum against the release .deb
-        working-directory: typiql-tauri/typiql/pkg/aur
+        working-directory: monocoque-builder/pkg/aur
         run: |
           sed -i "s/^pkgver=.*/pkgver=${{ inputs.pkgver }}/" PKGBUILD
           # release-please tags releases as {package-name}-v{version}
@@ -58,8 +58,8 @@ jobs:
         run: chown -R builder:builder "$GITHUB_WORKSPACE"
 
       - name: Generate .SRCINFO
-        working-directory: typiql-tauri/typiql/pkg/aur
-        run: su builder -c "cd '$GITHUB_WORKSPACE/typiql-tauri/typiql/pkg/aur' && makepkg --printsrcinfo > .SRCINFO"
+        working-directory: monocoque-builder/pkg/aur
+        run: su builder -c "cd '$GITHUB_WORKSPACE/monocoque-builder/pkg/aur' && makepkg --printsrcinfo > .SRCINFO"
 
       - name: Set up SSH for the AUR
         # Two real runs' worth of ssh -vvv output showed the actual root
@@ -87,7 +87,7 @@ jobs:
       - name: Push PKGBUILD to the AUR
         run: |
           git clone ssh://aur@aur.archlinux.org/monocoque-builder.git /tmp/aur-monocoque-builder
-          cp typiql-tauri/typiql/pkg/aur/PKGBUILD typiql-tauri/typiql/pkg/aur/.SRCINFO /tmp/aur-monocoque-builder/
+          cp monocoque-builder/pkg/aur/PKGBUILD monocoque-builder/pkg/aur/.SRCINFO /tmp/aur-monocoque-builder/
           cd /tmp/aur-monocoque-builder
           git config user.name "David Scott"
           git config user.email "david@davidallanscott.ca"

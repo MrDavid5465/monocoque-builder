@@ -64,7 +64,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          path: typiql-tauri/typiql
+          path: monocoque-builder
           # Needed for the frontend half of `tauri build` (its
           # beforeBuildCommand runs `npm run build`): per-form and
           # typical-admin-fabric are submodules, and without them the build
@@ -86,30 +86,30 @@ jobs:
         with:
           node-version: lts/*
           cache: npm
-          cache-dependency-path: typiql-tauri/typiql/package-lock.json
+          cache-dependency-path: monocoque-builder/package-lock.json
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: typiql-tauri/typiql/src-tauri -> target
+          workspaces: monocoque-builder/src-tauri -> target
 
-      - working-directory: typiql-tauri/typiql
+      - working-directory: monocoque-builder
         run: npm ci
 
       - name: Build (release + deb bundle)
-        working-directory: typiql-tauri/typiql
+        working-directory: monocoque-builder
         run: npm run tauri build -- --bundles deb
 
       - uses: actions/upload-artifact@v4
         with:
           name: monocoque-builder-binary
-          path: typiql-tauri/typiql/src-tauri/target/release/monocoque-builder
+          path: monocoque-builder/src-tauri/target/release/monocoque-builder
           if-no-files-found: error
 
       - uses: actions/upload-artifact@v4
         with:
           name: monocoque-builder-deb
-          path: typiql-tauri/typiql/src-tauri/target/release/bundle/deb/*.deb
+          path: monocoque-builder/src-tauri/target/release/bundle/deb/*.deb
           if-no-files-found: error
 
   integration-test:
@@ -164,7 +164,7 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
-          path: typiql-tauri/typiql
+          path: monocoque-builder
           # This job does more than run the prebuilt binary: Playwright's
           # webServer boots `npm run dev`, so it needs the two submodules
           # like any other frontend build. Without them vite cannot resolve
@@ -186,9 +186,9 @@ jobs:
 
       - name: Stage the downloaded binary where the smoke test expects it
         run: |
-          mkdir -p "$GITHUB_WORKSPACE/typiql-tauri/typiql/src-tauri/target/release"
-          cp /tmp/monocoque-builder-binary/monocoque-builder "$GITHUB_WORKSPACE/typiql-tauri/typiql/src-tauri/target/release/monocoque-builder"
-          chmod +x "$GITHUB_WORKSPACE/typiql-tauri/typiql/src-tauri/target/release/monocoque-builder"
+          mkdir -p "$GITHUB_WORKSPACE/monocoque-builder/src-tauri/target/release"
+          cp /tmp/monocoque-builder-binary/monocoque-builder "$GITHUB_WORKSPACE/monocoque-builder/src-tauri/target/release/monocoque-builder"
+          chmod +x "$GITHUB_WORKSPACE/monocoque-builder/src-tauri/target/release/monocoque-builder"
 
       - name: Stage the downloaded .deb where the PKGBUILD expects it
         # Pre-seeding makepkg's local source cache with a file matching the
@@ -198,7 +198,7 @@ jobs:
         # actual release cycle, so without this the PKGBUILD validation step
         # would fail trying to fetch one.
         run: |
-          cd "$GITHUB_WORKSPACE/typiql-tauri/typiql/pkg/aur"
+          cd "$GITHUB_WORKSPACE/monocoque-builder/pkg/aur"
           pkgver=$(grep -oP '^pkgver=\K.*' PKGBUILD)
           cp /tmp/monocoque-builder-deb/*.deb "./monocoque-builder_${pkgver}_amd64.deb"
 
@@ -227,7 +227,7 @@ jobs:
       - name: npm ci
         # Still needed here even though the app itself isn't compiled in
         # this container: the Playwright e2e suite below needs node_modules.
-        run: su builder -c "cd '$GITHUB_WORKSPACE/typiql-tauri/typiql' && npm ci"
+        run: su builder -c "cd '$GITHUB_WORKSPACE/monocoque-builder' && npm ci"
 
       - name: Write smoke-test script
         run: |
@@ -235,7 +235,7 @@ jobs:
           #!/usr/bin/env bash
           set -e
           export DISPLAY=:99
-          cd "$1/typiql-tauri/typiql/src-tauri"
+          cd "$1/monocoque-builder/src-tauri"
 
           ./target/release/monocoque-builder &
           app_pid=$!
@@ -296,7 +296,7 @@ jobs:
         run: |
           su builder -c "
             set -e
-            cd '$GITHUB_WORKSPACE/typiql-tauri/typiql'
+            cd '$GITHUB_WORKSPACE/monocoque-builder'
             npx playwright install chromium
             npm run test:e2e
           "
@@ -304,7 +304,7 @@ jobs:
       - name: Validate AUR PKGBUILD (build + install in this same environment)
         run: |
           su builder -c "
-            cd '$GITHUB_WORKSPACE/typiql-tauri/typiql/pkg/aur'
+            cd '$GITHUB_WORKSPACE/monocoque-builder/pkg/aur'
             makepkg --printsrcinfo > .SRCINFO
             makepkg -si --noconfirm
             command -v monocoque-builder
