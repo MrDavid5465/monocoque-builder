@@ -1,11 +1,13 @@
 use crate::telemetry::recording as rec;
 use crate::telemetry::types::{TelemetryFrame, TyreData};
-use crate::typiql_types::{Recording, RecordingFrame, RecordingFrameInput, RecordingInput};
+use crate::typiql_types::{
+    Recording, RecordingChanged, RecordingFrame, RecordingFrameInput, RecordingInput,
+};
 use async_graphql::{Context, MaybeUndefined, Object, Result as GqlResult};
 use std::time::{SystemTime, UNIX_EPOCH};
 use typiql::{
     resolve_add, resolve_add_many, resolve_list, resolve_remove, resolve_update, FieldFilter,
-    FilterOp, Location,
+    FilterOp, Location, TypiQLBroker,
 };
 
 fn now_unix_secs() -> String {
@@ -484,6 +486,16 @@ impl RecordingControlMutation {
         let updated = adapter
             .update(Location::Named("recordings".into()), "id", &id, patch)
             .await;
-        Ok(updated.and_then(|v| serde_json::from_value(v).ok()))
+        let updated: Option<Recording> = updated.and_then(|v| serde_json::from_value(v).ok());
+        // Written through the adapter, so the macro's own announcement is
+        // bypassed — a recordings list open elsewhere kept the pre-crop
+        // duration and frame count.
+        if let Some(updated) = &updated {
+            TypiQLBroker::publish(RecordingChanged {
+                operation_name: "update".to_string(),
+                value: updated.clone(),
+            });
+        }
+        Ok(updated)
     }
 }
