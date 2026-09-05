@@ -122,13 +122,13 @@ modules:
     buildsystem: simple
     sources:
       # Populated at CI-generation time from the two sibling checkouts
-      # (typiql-tauri/typiql + typiql-rs) via flatpak-node-generator and
+      # (monocoque-builder + typiql-rs) via flatpak-node-generator and
       # flatpak-cargo-generator.py, run against src-tauri/Cargo.lock and
-      # package-lock.json. Path deps in Cargo.lock (the ../../../typiql-rs
+      # package-lock.json. Path deps in Cargo.lock (the ../../typiql-rs
       # crates) resolve locally and need no generated source entries;
       # only registry/git deps do.
       - type: dir
-        path: ../../..
+        path: ../..
         dest: src
       - generated-node-sources.json
       - generated-cargo-sources.json
@@ -148,11 +148,11 @@ modules:
       - type: git
         url: https://github.com/MrDavid5465/per-form.git
         commit: 1bbbf36ffbecab67ddd1375b4d9b35f2b6cd6a3f
-        dest: src/typiql-tauri/typiql/src/lib/per-form
+        dest: src/monocoque-builder/src/lib/per-form
       - type: git
         url: https://github.com/MrDavid5465/typical-admin-fabric.git
         commit: e99b6f06edfdf1480c558927028d8c718ac8cf16
-        dest: src/typiql-tauri/typiql/src/lib/typical-admin-fabric
+        dest: src/monocoque-builder/src/lib/typical-admin-fabric
       - type: archive
         url: https://github.com/duckdb/duckdb/releases/download/v1.5.5/libduckdb-linux-amd64.zip
         sha256: 1fb8ce388157d84a25abe685a8a2520bf00c00321821968e4bb398fd766e7abb
@@ -162,26 +162,26 @@ modules:
       - type: file
         path: io.github.mrdavid5465.MonocoqueBuilder.metainfo.xml
     build-commands:
-      - cd src/typiql-tauri/typiql && npm ci --offline
-      - cd src/typiql-tauri/typiql && npm run build
+      - cd src/monocoque-builder && npm ci --offline
+      - cd src/monocoque-builder && npm run build
       # --locked (without --offline's own tolerance for reconciling a small
       # Cargo.lock drift using only already-vendored crates) hard-fails here
       # with "cannot update the lock file... because --locked was passed" --
       # confirmed locally that plain --offline resolves the same drift fine,
       # using only what's already cached, and still makes zero network calls.
-      - cd src/typiql-tauri/typiql/src-tauri && cargo build --release --offline --no-default-features --features custom-protocol
+      - cd src/monocoque-builder/src-tauri && cargo build --release --offline --no-default-features --features custom-protocol
       # Dynamically linked now rather than statically embedded, so the library
       # has to ship inside the bundle.
       - install -Dm755 duckdb-prebuilt/libduckdb.so /app/lib/libduckdb.so
-      - install -Dm755 src/typiql-tauri/typiql/src-tauri/target/release/monocoque-builder /app/bin/monocoque-builder
+      - install -Dm755 src/monocoque-builder/src-tauri/target/release/monocoque-builder /app/bin/monocoque-builder
       # The Vite build, for the browsers on other devices that load their
       # dashboards over HTTP. The window itself uses the copy embedded in the
       # binary, so this is easy to forget -- and its absence is silent: the API
       # answers normally while every page request 404s. api.rs looks for it
       # next to the executable, hence /app/share/monocoque-builder/dist.
       - mkdir -p /app/share/monocoque-builder
-      - cp -r src/typiql-tauri/typiql/dist /app/share/monocoque-builder/dist
+      - cp -r src/monocoque-builder/dist /app/share/monocoque-builder/dist
       - install -Dm644 io.github.mrdavid5465.MonocoqueBuilder.desktop /app/share/applications/io.github.mrdavid5465.MonocoqueBuilder.desktop
       - install -Dm644 io.github.mrdavid5465.MonocoqueBuilder.metainfo.xml /app/share/metainfo/io.github.mrdavid5465.MonocoqueBuilder.metainfo.xml
-      - install -Dm644 src/typiql-tauri/typiql/src-tauri/icons/128x128.png /app/share/icons/hicolor/128x128/apps/io.github.mrdavid5465.MonocoqueBuilder.png
-      - install -Dm644 src/typiql-tauri/typiql/src-tauri/icons/128x128@2x.png /app/share/icons/hicolor/256x256/apps/io.github.mrdavid5465.MonocoqueBuilder.png
+      - install -Dm644 src/monocoque-builder/src-tauri/icons/128x128.png /app/share/icons/hicolor/128x128/apps/io.github.mrdavid5465.MonocoqueBuilder.png
+      - install -Dm644 src/monocoque-builder/src-tauri/icons/128x128@2x.png /app/share/icons/hicolor/256x256/apps/io.github.mrdavid5465.MonocoqueBuilder.png

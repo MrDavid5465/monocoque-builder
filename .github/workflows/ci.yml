@@ -13,11 +13,11 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: typiql-tauri/typiql
+        working-directory: monocoque-builder
     steps:
       - uses: actions/checkout@v4
         with:
-          path: typiql-tauri/typiql
+          path: monocoque-builder
           # per-form and typical-admin-fabric are git submodules, so without
           # this their paths arrive empty and both tsc and eslint fail with
           # TS2307 "Cannot find module '../per-form'". The flatpak manifest
@@ -29,7 +29,7 @@ jobs:
         with:
           node-version: lts/*
           cache: npm
-          cache-dependency-path: typiql-tauri/typiql/package-lock.json
+          cache-dependency-path: monocoque-builder/package-lock.json
 
       - run: npm ci
       - run: npx eslint .
@@ -41,7 +41,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          path: typiql-tauri/typiql
+          path: monocoque-builder
       - uses: actions/checkout@v4
         with:
           repository: MrDavid5465/typiql-rs
@@ -59,7 +59,7 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: typiql-tauri/typiql/src-tauri -> target
+          workspaces: monocoque-builder/src-tauri -> target
 
       # tauri::generate_context! embeds the frontend bundle whenever
       # custom-protocol is enabled, and --all-features below enables it, so the
@@ -74,19 +74,19 @@ jobs:
       # coverage, so a placeholder satisfies the macro instead. The frontend is
       # built for real in the build job and in every packaging workflow.
       - name: Placeholder frontend bundle for generate_context!
-        working-directory: typiql-tauri/typiql
+        working-directory: monocoque-builder
         run: |
           mkdir -p dist
           printf '<!doctype html><title>ci placeholder</title>' > dist/index.html
 
       - name: cargo fmt --check
-        working-directory: typiql-tauri/typiql/src-tauri
+        working-directory: monocoque-builder/src-tauri
         run: cargo fmt --all -- --check
 
       - name: cargo clippy
-        working-directory: typiql-tauri/typiql/src-tauri
+        working-directory: monocoque-builder/src-tauri
         run: cargo clippy --all-targets --all-features -- -D warnings
 
       - name: cargo test
-        working-directory: typiql-tauri/typiql/src-tauri
+        working-directory: monocoque-builder/src-tauri
         run: cargo test --all-features

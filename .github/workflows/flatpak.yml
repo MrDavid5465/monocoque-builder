@@ -16,8 +16,9 @@ name: Flatpak (best effort)
 # Getting there took ten iterations against real GitHub Actions runs (plus
 # local flatpak-builder runs where the failure didn't need CI to reproduce),
 # fixing real bugs nobody had hit before:
-#  - the `dir` source's `path: ../..` was one level too shallow to reach the
-#    sibling typiql-rs checkout (needed `../../..`)
+#  - the `dir` source's `path` was too shallow to reach the sibling typiql-rs
+#    checkout (needed `../../..` back when this repo was checked out to
+#    a nested two-segment path; now `../..`, the checkout being one directory)
 #  - `npm ci --offline` had no XDG_CACHE_HOME/npm_config_cache pointed at
 #    flatpak-node-generator's cache, so it always fell through to the real
 #    registry
@@ -74,7 +75,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          path: typiql-tauri/typiql
+          path: monocoque-builder
       - uses: actions/checkout@v4
         with:
           repository: MrDavid5465/typiql-rs
@@ -125,14 +126,14 @@ jobs:
 
       - name: Generate offline npm sources
         run: |
-          ~/.local/bin/flatpak-node-generator npm typiql-tauri/typiql/package-lock.json \
-            -o typiql-tauri/typiql/flatpak/generated-node-sources.json
+          ~/.local/bin/flatpak-node-generator npm monocoque-builder/package-lock.json \
+            -o monocoque-builder/flatpak/generated-node-sources.json
 
       - name: Generate offline cargo sources
         run: |
           python3 /tmp/flatpak-builder-tools/cargo/flatpak-cargo-generator.py \
-            typiql-tauri/typiql/src-tauri/Cargo.lock \
-            -o typiql-tauri/typiql/flatpak/generated-cargo-sources.json
+            monocoque-builder/src-tauri/Cargo.lock \
+            -o monocoque-builder/flatpak/generated-cargo-sources.json
 
       # flatpak-builder keys its cache per module and per source checksum, so
       # this survives runs where only the app source changed. Restore-keys
@@ -142,8 +143,8 @@ jobs:
       - name: Cache flatpak-builder state
         uses: actions/cache@v4
         with:
-          path: typiql-tauri/typiql/flatpak/.flatpak-builder
-          key: flatpak-builder-${{ runner.os }}-${{ hashFiles('typiql-tauri/typiql/flatpak/io.github.mrdavid5465.MonocoqueBuilder.yml', 'typiql-tauri/typiql/src-tauri/Cargo.lock', 'typiql-tauri/typiql/package-lock.json') }}
+          path: monocoque-builder/flatpak/.flatpak-builder
+          key: flatpak-builder-${{ runner.os }}-${{ hashFiles('monocoque-builder/flatpak/io.github.mrdavid5465.MonocoqueBuilder.yml', 'monocoque-builder/src-tauri/Cargo.lock', 'monocoque-builder/package-lock.json') }}
           restore-keys: |
             flatpak-builder-${{ runner.os }}-
 
@@ -151,7 +152,7 @@ jobs:
       # --ccache reuses compiled C/C++ objects across runs for anything still
       # built from source.
       - name: Build .flatpak (network-isolated, offline sources only)
-        working-directory: typiql-tauri/typiql/flatpak
+        working-directory: monocoque-builder/flatpak
         run: |
           flatpak-builder --ccache --repo=repo build-dir io.github.mrdavid5465.MonocoqueBuilder.yml
           flatpak build-bundle repo monocoque-builder.flatpak io.github.mrdavid5465.MonocoqueBuilder
@@ -164,12 +165,12 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: monocoque-builder.flatpak
-          path: typiql-tauri/typiql/flatpak/monocoque-builder.flatpak
+          path: monocoque-builder/flatpak/monocoque-builder.flatpak
 
       - name: Upload .flatpak to the matching (draft) release
         if: success() && startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          files: typiql-tauri/typiql/flatpak/monocoque-builder.flatpak
+          files: monocoque-builder/flatpak/monocoque-builder.flatpak
           draft: true
