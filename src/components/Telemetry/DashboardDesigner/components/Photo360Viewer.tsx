@@ -138,37 +138,39 @@ const NECK_OFFSET_CLAMP_M = 0.25;
 // frame regardless, so this only paces the React updates behind it.
 const EMIT_INTERVAL_MS = 120;
 
-// Raised from 0.45 for an extra ~20% darkening at full night: night 360
-// photos are exposed to look correct on their own, so a car whose night photo
-// simply isn't dark enough has no other knob.
+// Night darkening for a car that HAS a night photo, at full night. Night 360
+// photos are exposed to look correct on their own, so one that simply reads
+// too bright has no other knob.
 //
-// The arithmetic, because the shader applies this as
-// `rgb *= 1.0 - nightDarken * 0.8`: 0.45 gave a multiplier of 0.64 at full
-// night, and 20% darker than that is 0.512, which needs 0.61. It is already
-// multiplied by the smoothed night level at the use site, so it scales with
-// the eased dawn/dusk blend rather than switching.
+// 0.25 gives exactly 20% darker than the untouched photo, because the shader
+// applies this as `rgb *= 1.0 - nightDarken * 0.8`: 1 - 0.25*0.8 = 0.8.
 //
-// Note that "20%" is a linear multiply in the shader; measured as sRGB pixels
-// on screen it reads smaller, because the encoding compresses it. Adjust by
-// eye against the sky, not against that number.
+// Worth stating plainly, since the arithmetic misled once already: this is a
+// fraction of the UNTOUCHED photo, not of some previous setting. An earlier
+// 0.61 was chosen as "20% darker than the original 0.45", which compounded
+// to x0.512 — 49% darker than untouched, not 20%.
 //
-// This is the path that runs for a car WITH a night photo. The ambient tint
-// overlay carries the equivalent darkening for one without — Canvas renders
-// that overlay only when `!liveBackgroundHandlesNight`, i.e. exactly when
-// there is no night photo, so the two cases never both apply and never stack.
-const NIGHT_DARKEN_WITH_PHOTO = 0.61;
+// Multiplied by the smoothed night level at the use site, so it fades in with
+// the eased dawn/dusk blend rather than switching, and it is direction-
+// agnostic: dusk drives it through the same nightAmount that dawn does.
+const NIGHT_DARKEN_WITH_PHOTO = 0.25;
 
-// Extra night darkening applied over the 360 photo, at full night. 0.2 = the
-// tint colour pushed 20% toward black. Kept in step with
-// NIGHT_DARKEN_WITH_PHOTO above so a car with a night photo and one without
-// darken by the same amount.
+// The same darkening for a car with NO night photo, which reaches the screen
+// through Canvas's soft-light tint overlay instead of the shader.
+//
+// Expressed as overlay opacity, which is NOT the same scale as
+// NIGHT_DARKEN_WITH_PHOTO above: soft-light against black darkens mid-tones
+// by roughly half the opacity (base -> base*(1-a) + base^2*a, i.e. ~a/2 at
+// base 0.5). So 0.4 here lands near the same ~20% the shader path gets from
+// 0.25, and the two are kept in step by that reasoning rather than by sharing
+// a number — setting them equal would silently halve this one.
 //
 // Exists because night 360 photos are exposed to read correctly on their own,
 // so one that simply isn't dark enough can't be fixed by
 // NIGHT_DARKEN_WITH_PHOTO above — that one deliberately backs OFF when a real
 // night photo is present. Scaled by the eased night blend at the use site, so
 // it fades out with everything else rather than switching.
-const NIGHT_DARKEN_AT_FULL_NIGHT = 0.2;
+const NIGHT_DARKEN_AT_FULL_NIGHT = 0.4;
 
 const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
   photoUrl, nightPhotoUrl, nightAmount = 0, ambientColor = null, ambientTintIntensity = 0,
