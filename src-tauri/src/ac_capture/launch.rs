@@ -18,18 +18,74 @@ const SCRIPT: &str = include_str!("lua_app/typiql_360_capture.lua");
 /// Needed for the app to appear in AC's drawer at all — see manifest.ini.
 const ICON: &[u8] = include_bytes!("lua_app/icon.png");
 
-/// AC's process name, as `pgrep -x` sees it under Proton.
+/// AC's process name for the first few seconds after launch.
 const AC_PROCESS: &str = "acs.exe";
+
+/// What AC is called for the rest of its life.
+///
+/// The game calls `prctl(PR_SET_NAME)` on its main thread once it's up, and
+/// for a thread-group leader that IS `/proc/<pid>/comm` — so the process
+/// stops answering to `acs.exe` about 2.7 seconds in and, to anything looking
+/// for that name, simply vanishes while running perfectly.
+///
+/// This wasted three sessions. Every symptom pointed at a crash: "quit before
+/// capturing" fired like clockwork a few seconds after launch while the game
+/// was demonstrably alive and logging. What finally settled it was dumping the
+/// `comm` of everything matching `assettocorsa` at the moment of the first
+/// miss, which printed `AC: main thread` sitting there the whole time.
+///
+/// Exactly fifteen characters, so it fits `comm` without truncation — but see
+/// `process_liveness::MAX_COMM_LEN`, since that is luck rather than design.
+/// Both names are checked, because the early seconds really are `acs.exe` and
+/// a capture is launched into exactly that window.
+const AC_PROCESS_RUNNING: &str = "AC: main thread";
 
 /// What Steam launches, and therefore what Content Manager renames itself to
 /// on a CM install (see `start_ac`). Tracked separately from `AC_PROCESS`
 /// because CM sitting idle in its UI is invisible to every other signal:
 /// `acs.exe` is absent and no telemetry is being published, so a capture
 /// happily starts a SECOND process inside a Proton prefix CM already holds.
+///
+/// Sixteen characters, one over what `/proc/<pid>/comm` holds — which made
+/// this constant match nothing at all until `process_liveness` learned to
+/// truncate. See `MAX_COMM_LEN` there; the bug is invisible from here because
+/// a permanent "no launcher running" looks exactly like the ordinary case.
 const AC_LAUNCHER_PROCESS: &str = "AssettoCorsa.exe";
 
 /// How long to wait for AC to exit on its own after the script asks it to.
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(30);
+
+/// How often `wait_for_result` looks for a result and checks the game is alive.
+const POLL_INTERVAL: Duration = Duration::from_millis(500);
+
+/// Consecutive checks that must agree the game is gone before believing it,
+/// once the capture is actually under way.
+///
+/// Three seconds at `POLL_INTERVAL` — a real crash is still reported promptly
+/// rather than waiting out the half-hour timeout, which was the point of
+/// checking at all.
+const DEATH_CONFIRMATIONS: u32 = 6;
+
+/// The same, while the game is still starting up. Sixty seconds.
+///
+/// Startup is where every false positive so far has happened, and where one
+/// costs the most. Two things make it the wrong place to be decisive:
+///
+/// * The process-liveness signal is demonstrably unreliable there. Measured on
+///   7 Sept: `acs.exe` was found 0.6s after launch, then went missing for the
+///   next twelve seconds while CSP logged continuously — the game was plainly
+///   alive and the name simply stopped matching.
+/// * Declaring death is destructive. The caller immediately clears `job.ini`
+///   and restores AC's config, and the game does not read either of those
+///   until well into its own startup — the Lua app loaded about eleven seconds
+///   after launch in that same run, five seconds AFTER the job had been
+///   deleted out from under it. So an early false positive doesn't just report
+///   a failure, it causes one.
+///
+/// AC's own startup is minutes with a large mod folder, so this is still well
+/// inside the overall timeout and only delays the report of a genuine
+/// early crash.
+const DEATH_CONFIRMATIONS_WHILE_STARTING: u32 = 120;
 
 /// What the Lua app reported back.
 #[derive(Debug, Clone)]
@@ -76,6 +132,7 @@ pub fn write_job(paths: &CapturePaths, config: &CaptureConfig, job_id: &str) -> 
         "[JOB]\n\
          ID={job_id}\n\
          CAR_ID={car}\n\
+         DAY_HOUR={day_hour}\n\
          NIGHT_OFFSET_SECONDS={night_offset}\n\
          DAY_SETTLE_SECONDS={day_settle}\n\
          NIGHT_SETTLE_SECONDS={night_settle}\n\
@@ -86,6 +143,7 @@ pub fn write_job(paths: &CapturePaths, config: &CaptureConfig, job_id: &str) -> 
          SHUTDOWN_WHEN_DONE={shutdown}\n",
         job_id = job_id,
         car = config.car_id,
+        day_hour = config.day_hour,
         night_offset = config.night_offset_seconds,
         day_settle = config.day_settle_seconds,
         night_settle = config.night_settle_seconds,
@@ -136,7 +194,10 @@ pub fn is_ac_running() -> bool {
             frame.simon || frame.sim_status != crate::telemetry::types::SimStatus::Off
         });
 
-    sim_is_live || crate::process_liveness::is_running(AC_PROCESS)
+    // Both of AC's names, or this would answer "no" for a game that has been
+    // running longer than about three seconds — which is most of them, and
+    // would let a capture start on top of a live session.
+    sim_is_live || ac_process_is_running().unwrap_or(false)
 }
 
 /// Whether the launcher — Content Manager, on an install where it has taken
@@ -154,6 +215,30 @@ pub fn is_ac_running() -> bool {
 /// out the settings themselves.
 pub fn is_launcher_running() -> bool {
     crate::process_liveness::is_running(AC_LAUNCHER_PROCESS)
+}
+
+/// Whether AC's own process is alive — deliberately narrower than
+/// `is_ac_running`.
+///
+/// `is_ac_running` ORs the process check with SIMAPI.DAT and is built to fail
+/// safe in ONE direction: a false positive there only produces "close the game
+/// first", while a false negative would start a second copy on top of a live
+/// session. Polling for the game to *die* inverts that polarity — a false
+/// negative aborts a capture that is working — so the shared-memory half is
+/// left out. SIMAPI.DAT is written by simd rather than by the game, and
+/// neither its contents nor its timing are this app's to reason about.
+///
+/// `None` means the check couldn't be made, which is not the same answer as
+/// "the game is gone".
+fn ac_process_is_running() -> Option<bool> {
+    let early = crate::process_liveness::is_running_checked(AC_PROCESS);
+    let running = crate::process_liveness::is_running_checked(AC_PROCESS_RUNNING);
+    // `None` only when BOTH checks failed to run — one name being absent is an
+    // answer, two failed lookups are not.
+    match (early, running) {
+        (None, None) => None,
+        (early, running) => Some(early.unwrap_or(false) || running.unwrap_or(false)),
+    }
 }
 
 /// Starts Assetto Corsa.
@@ -240,6 +325,11 @@ fn launch_via_proton(
     } else {
         "run"
     };
+    super::log::line(&format!(
+        "launching via proton `{verb}` (launcher={}, game={})",
+        is_launcher_running(),
+        is_ac_running()
+    ));
     let steam_client = paths.steam_client_dir().ok_or_else(|| {
         "Found Proton but not Steam's own directory, which it needs to run.".to_string()
     })?;
@@ -347,8 +437,32 @@ pub async fn wait_for_result(
     // the moment this starts polling, and treating that as "it died" would
     // fail every capture instantly.
     let mut seen_running = false;
+    // Consecutive checks that agreed the game was gone.
+    let mut misses: u32 = 0;
+    // The Lua app deletes `job.ini` the moment it claims the job, which makes
+    // the file's disappearance a precise "the game has read our instructions"
+    // marker — and the point after which being decisive about death is safe.
+    let job_path = paths.lua_app_dir().join("job.ini");
+    let mut job_claimed = false;
 
     while std::time::Instant::now() < deadline {
+        if !job_claimed && !job_path.exists() {
+            job_claimed = true;
+            // Start the stricter count from scratch. Carrying the startup
+            // tally across the threshold change killed a capture that had just
+            // succeeded: 16 misses accumulated harmlessly against a limit of
+            // 120, then the job was claimed, the limit dropped to 6, and the
+            // already-banked 16 tripped it 45 milliseconds later. The counts
+            // answer different questions and must not be shared.
+            misses = 0;
+            super::log::line("job claimed by the game; capture is under way");
+        }
+        let allowed_misses = if job_claimed {
+            DEATH_CONFIRMATIONS
+        } else {
+            DEATH_CONFIRMATIONS_WHILE_STARTING
+        };
+
         if let Ok(text) = std::fs::read_to_string(&result_path) {
             // A result from an earlier run can still be on disk if clearing
             // it failed; only this job's own result counts.
@@ -356,6 +470,18 @@ pub async fn wait_for_result(
                 let ok = super::ini::get_value(&text, "RESULT", "STATUS").as_deref() == Some("ok");
                 let message = super::ini::get_value(&text, "RESULT", "MESSAGE")
                     .unwrap_or_else(|| "No message".to_string());
+                // The whole result, not just the verdict: the Lua app reports
+                // how the car actually got started and what its lights did,
+                // and a capture that "worked" with the wrong answer to either
+                // is the kind of thing only visible in hindsight.
+                super::log::line(&format!(
+                    "result from game: ok={ok} — {}",
+                    text.lines()
+                        .map(str::trim)
+                        .filter(|line| !line.is_empty() && *line != "[RESULT]")
+                        .collect::<Vec<_>>()
+                        .join(" | ")
+                ));
                 return Ok(CaptureOutcome { ok, message });
             }
         }
@@ -367,18 +493,77 @@ pub async fn wait_for_result(
         // disk for the rest of the timeout.
         //
         // The game records why it went, so say that instead of "timed out".
-        if is_ac_running() {
-            seen_running = true;
-        } else if seen_running {
-            return Err(match last_startup_error(paths) {
-                Some(reason) => format!("Assetto Corsa quit before capturing: {reason}"),
-                None => "Assetto Corsa quit before capturing, with no error logged.".to_string(),
-            });
+        //
+        // Confirmed over several checks rather than one, because the first
+        // version of this fired on a single reading and killed a capture that
+        // was working: it declared the game dead 3.4 seconds after the Lua app
+        // was installed, while AC went on running for another ten seconds and
+        // exited cleanly. Worse than a spurious error message, the caller
+        // restores AC's config the moment this returns — so the restore landed
+        // in the middle of the game's own startup, and AC read back the
+        // ORIGINAL race.ini and loaded the user's previous car instead of the
+        // one being captured. Startup is exactly when these signals are least
+        // stable, so a single miss cannot be allowed to mean anything.
+        match ac_process_is_running() {
+            Some(true) => {
+                if !seen_running {
+                    super::log::line(&format!("`{AC_PROCESS}` is up; watching for it to finish"));
+                }
+                seen_running = true;
+                misses = 0;
+            }
+            Some(false) if seen_running => {
+                misses += 1;
+                // Every miss while running would be 120 lines of nothing; the
+                // first and then every fifth is enough to see the shape.
+                if misses == 1 || misses.is_multiple_of(5) {
+                    super::log::line(&format!(
+                        "`{AC_PROCESS}` not found ({misses}/{allowed_misses}, \
+                         job_claimed={job_claimed}); still waiting"
+                    ));
+                }
+                // Once per run, on the first miss, record what the game is
+                // actually called — so a run that RECOVERS still answers the
+                // question, rather than only the ones that fail.
+                if misses == 1 {
+                    let others = crate::process_liveness::comms_matching_cmdline("assettocorsa");
+                    super::log::line(&format!("  live `assettocorsa` processes: {others:?}"));
+                }
+                if misses >= allowed_misses {
+                    super::log::line(&format!(
+                        "`{AC_PROCESS}` gone for {misses} consecutive checks, giving up"
+                    ));
+                    // What IS running, since the name we were looking for
+                    // isn't. This is the open question from 7 Sept: the game
+                    // was alive and `acs.exe` had stopped matching, and only
+                    // the real comm can say why.
+                    let others = crate::process_liveness::comms_matching_cmdline("assettocorsa");
+                    super::log::line(&if others.is_empty() {
+                        "nothing matching `assettocorsa` is running either".to_string()
+                    } else {
+                        format!("but these are running: {}", others.join(", "))
+                    });
+                    return Err(match last_startup_error(paths) {
+                        Some(reason) => format!("Assetto Corsa quit before capturing: {reason}"),
+                        None => {
+                            "Assetto Corsa quit before capturing, with no error logged.".to_string()
+                        }
+                    });
+                }
+            }
+            // Either it hasn't appeared yet, or the check itself couldn't run.
+            // Neither is evidence that anything died, so neither resets nor
+            // advances the count.
+            _ => {}
         }
 
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        tokio::time::sleep(POLL_INTERVAL).await;
     }
 
+    super::log::line(&format!(
+        "timed out after {}s (game seen running: {seen_running})",
+        timeout.as_secs()
+    ));
     Err(format!(
         "Assetto Corsa didn't report a finished capture within {}s.",
         timeout.as_secs()
@@ -399,8 +584,29 @@ fn last_startup_error(paths: &CapturePaths) -> Option<String> {
     let text = std::fs::read_to_string(log).ok()?;
     text.lines()
         .rev()
-        .find(|line| line.starts_with("ERROR:"))
+        .find(|line| line.starts_with("ERROR:") && !is_benign_ac_error(line))
         .map(|line| line.trim_start_matches("ERROR:").trim().to_string())
+}
+
+/// Errors AC logs during a perfectly healthy session.
+///
+/// Without this the "why did it quit" message is worse than none at all: a run
+/// was reported as `quit before capturing: NO STAT FOR ks_nordschleife`, which
+/// names a real log line, sounds authoritative, and has nothing to do with
+/// anything — it appears in sessions that finish normally. Every pattern here
+/// was observed in a session the user confirmed working.
+fn is_benign_ac_error(line: &str) -> bool {
+    const BENIGN: [&str; 5] = [
+        // Missing leaderboard stats for a car or track.
+        "NO STAT FOR",
+        // Force feedback probing every effect the wheel might support.
+        "InputDevice::initFF",
+        "DAMPER CREATION FAILED",
+        // Python apps that aren't installed; AC lists them regardless.
+        "Python [ERROR] File",
+        "TrackIR DLL Location key not present",
+    ];
+    BENIGN.iter().any(|pattern| line.contains(pattern))
 }
 
 /// Waits for AC to close itself after a capture.
@@ -458,6 +664,50 @@ mod tests {
             install_dir: empty.clone(),
             user_dir: empty,
         };
+        assert_eq!(super::last_startup_error(&paths), None);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Noise AC logs in a healthy session must not be offered as a cause.
+    ///
+    /// The regression: a capture was reported as "quit before capturing: NO
+    /// STAT FOR ks_nordschleife". That line is real, it is the last `ERROR:`
+    /// in the log, and it is completely irrelevant — it appears in sessions
+    /// that finish normally. A confident wrong answer sent the investigation
+    /// after the track files instead of the process name.
+    #[test]
+    fn ignores_errors_a_healthy_session_also_logs() {
+        let dir = std::env::temp_dir().join(format!("cap-benign-test-{}", std::process::id()));
+        let logs = dir.join("logs");
+        std::fs::create_dir_all(&logs).unwrap();
+        std::fs::write(
+            logs.join("log.txt"),
+            "ERROR: DX11 Device creation FAILED\n\
+             ERROR: InputDevice::initFF(), lpDirectInputDevice->SetProperty failed\n\
+             ERROR: DAMPER CREATION FAILED\n\
+             ERROR: Python [ERROR] File apps/python/SimHub/SimHub.py not found\n\
+             ERROR: TrackIR DLL Location key not present\n\
+             ERROR: NO STAT FOR ks_nordschleife\n",
+        )
+        .unwrap();
+        let paths = CapturePaths {
+            install_dir: dir.clone(),
+            user_dir: dir.clone(),
+        };
+        // Reaches past five lines of noise to the one that actually matters.
+        assert_eq!(
+            super::last_startup_error(&paths).as_deref(),
+            Some("DX11 Device creation FAILED")
+        );
+
+        // Noise alone yields nothing rather than something misleading.
+        std::fs::write(
+            logs.join("log.txt"),
+            "ERROR: NO STAT FOR ks_nordschleife\n\
+             ERROR: DAMPER CREATION FAILED\n",
+        )
+        .unwrap();
         assert_eq!(super::last_startup_error(&paths), None);
 
         std::fs::remove_dir_all(&dir).ok();

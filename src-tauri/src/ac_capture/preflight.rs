@@ -74,8 +74,18 @@ pub struct CaptureConfig {
     /// giving up — but only up to the point where it starts changing how
     /// the car itself looks (see `apply_quality_edits`).
     pub reduce_world_quality: bool,
+    /// Hour of day the DAY frame is shot at, 24h clock.
+    ///
+    /// Fixed rather than inherited from whatever `race.ini` was last left on.
+    /// Nothing here rewrites AC's session clock, so before this existed the
+    /// capture simply used the leftover time — which decided the sun position
+    /// for both frames, and (because the Lua app shot whichever phase the
+    /// session opened on) even decided their order. A session left at night
+    /// produced the night frame first.
+    pub day_hour: u32,
     /// How far to jump the clock for the night frame, in seconds. 12h by
-    /// default, matching the "+12h" button in CSP's debug app.
+    /// default, so 13:00 becomes 01:00, matching the "+12h" button in CSP's
+    /// debug app.
     pub night_offset_seconds: u32,
     /// Seconds to let the car come to rest after being teleported.
     ///
@@ -84,10 +94,24 @@ pub struct CaptureConfig {
     /// needs time to land and stop bouncing before anything is photographed.
     pub place_settle_seconds: f32,
     /// Seconds to let the scene settle before the day frame.
+    ///
+    /// BOTH frames now follow a jump in the clock, which is why this is no
+    /// longer the short one. It was 1.5s, sized for a day frame shot at
+    /// whatever time the session happened to open on — no change in light, so
+    /// nothing to adapt to. Pinning the capture to a fixed 13:00 put a jump
+    /// immediately before this settle, and a capture that began at 19:00
+    /// jumped from evening to midday with 1.5 seconds to adjust. AC's
+    /// auto-exposure was still set for the evening when the shutter fired and
+    /// the day photo came out visibly overexposed — the exact failure the
+    /// night settle below was already written to avoid.
     pub day_settle_seconds: f32,
-    /// Seconds to settle before the night frame. Longer than the day one:
-    /// auto-exposure has to adapt to the light collapsing, and shooting
-    /// early yields a frame caught mid-adaptation.
+    /// Seconds to settle before the night frame.
+    ///
+    /// Auto-exposure has to adapt to the light collapsing, and shooting early
+    /// yields a frame caught mid-adaptation. Raised alongside the day one
+    /// because the jump is now always 13:00 -> 01:00 — full midday to deep
+    /// night, the largest change either frame can be asked to absorb. It used
+    /// to be the session's own time plus twelve hours, often a gentler step.
     pub night_settle_seconds: f32,
     /// Guard inside the game, after which the Lua app gives up and reports
     /// rather than leaving AC running with the user's config swapped out.
@@ -167,10 +191,13 @@ impl CaptureConfig {
             frame_resolution: 2048,
             disable_upscaling: true,
             reduce_world_quality: true,
+            // 13:00 then 01:00 — the sun high enough for a clean day frame,
+            // and an hour genuinely dark for the night one.
+            day_hour: 13,
             night_offset_seconds: 12 * 60 * 60,
             place_settle_seconds: 3.0,
-            day_settle_seconds: 1.5,
-            night_settle_seconds: 4.0,
+            day_settle_seconds: 6.0,
+            night_settle_seconds: 6.0,
             // Generous because a supersampled capture is genuinely slow:
             // every accumulation sample is a full 16384×8192 render, and
             // there are two frames to take. CSP expects this too — it offers
@@ -414,6 +441,18 @@ fn write_race_ini(path: &Path, config: &CaptureConfig) -> Result<(), String> {
         ),
         ("RACE", "MODEL", config.car_id.as_str()),
         ("RACE", "CARS", "1"),
+        // Freeze the session clock for the duration of the capture.
+        //
+        // Whatever the user last raced with carries over otherwise — 12x
+        // here, which is about eight minutes of sun movement across a
+        // capture, so the day and night frames were each shot at a slightly
+        // different sun position than asked for and no two captures matched.
+        // The Lua app sets the two times it wants explicitly; this stops
+        // them drifting between being set and being photographed.
+        //
+        // Restored with the rest of `race.ini` from the journal, so a
+        // player's own setting survives.
+        ("LIGHTING", "TIME_MULT", "0"),
         ("RACE", "AI_LEVEL", "100"),
         ("RACE", "DRIFT_MODE", "0"),
         ("RACE", "RACE_LAPS", "0"),

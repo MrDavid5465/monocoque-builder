@@ -19,6 +19,7 @@
 pub mod content;
 pub mod ini;
 pub mod launch;
+pub mod log;
 pub mod paths;
 pub mod preflight;
 
@@ -148,7 +149,24 @@ pub async fn run(
 ) -> Result<CaptureImages, String> {
     let paths = CapturePaths::resolve(install_override, user_override)?;
 
+    log::begin(&config.car_id);
+    log::line(&format!("install: {}", paths.install_dir.display()));
+    log::line(&format!("user:    {}", paths.user_dir.display()));
+    log::line(&format!(
+        "track:   {} {}   output: {}x{}",
+        config.track_id,
+        config.track_layout.as_deref().unwrap_or("(no layout)"),
+        config.width,
+        config.height
+    ));
+    log::line(&format!(
+        "before launch: game={} launcher={}",
+        launch::is_ac_running(),
+        launch::is_launcher_running()
+    ));
+
     if launch::is_ac_running() {
+        log::line("refusing: Assetto Corsa is already running");
         return Err(
             "Assetto Corsa is already running. Close it first — a capture has to start \
              the game itself with its own session settings."
@@ -173,8 +191,21 @@ pub async fn run(
     let outcome = run_session(&paths, config).await;
 
     set_stage(&config.car_id, "Restoring Assetto Corsa settings");
+    match &outcome {
+        Ok(_) => log::line("session finished OK"),
+        Err(err) => log::line(&format!("session failed: {err}")),
+    }
     launch::clear_job(&paths);
+    // Logged around the restore because its timing is what corrupted a run
+    // once: AC reads `race.ini` several seconds into its own startup, so a
+    // restore that lands inside that window is invisible here and shows up
+    // only as the game loading the wrong car. See `wait_for_result`.
+    log::line("restoring AC config");
     let restored = preflight::finish(&journal);
+    match &restored {
+        Ok(_) => log::line("restore done"),
+        Err(err) => log::line(&format!("restore FAILED: {err}")),
+    }
 
     let images = outcome?;
     // A restore failure is reported even when the capture itself worked —

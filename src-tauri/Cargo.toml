@@ -29,6 +29,11 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 dirs = "6.0.0"
 regex = "1.12.3"
+# Local wall-clock timestamps for the capture log (ac_capture::log), so its
+# lines line up against the ones AC and CSP write in their own logs. Already
+# in the tree via other dependencies; `clock` is the feature that provides
+# `Local`, and the rest are off since nothing here needs them.
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 # `ws` is not a default feature: the AC telemetry Lua app streams frames in
 # over a plain WebSocket (see ac_telemetry::ingest).
 axum = { version = "0.8.9", features = ["ws"] }

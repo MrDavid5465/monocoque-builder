@@ -79,6 +79,11 @@ local function claimJob()
     -- this replaces. Seconds, because that's the unit
     -- ac.setWeatherTimeOffset takes.
     nightOffset = num(values, 'NIGHT_OFFSET_SECONDS', 12 * 60 * 60),
+    -- Hour of day the DAY frame is shot at, the night frame following
+    -- nightOffset later — 13:00 then 01:00 by default. Fixed rather than
+    -- inherited from the session so both frames are reproducible, and so the
+    -- day frame is unambiguously the first one taken.
+    dayHour = num(values, 'DAY_HOUR', 13),
     -- Where to put the car before shooting. Defaults to the hotlap start:
     -- pit lane is usually floodlit, which washes out the night frame and
     -- defeats the point of turning the headlights on. Somewhere out on
@@ -92,12 +97,17 @@ local function claimJob()
     teleport = (values.TELEPORT or '0') ~= '0',
     -- Time to let the car land and stop moving after being teleported.
     placeSettle = num(values, 'PLACE_SETTLE_SECONDS', 3.0),
-    -- Time for the scene to stabilise before a shot. The night settle is
-    -- much longer than the day one because auto-exposure has to adapt to
-    -- the light level collapsing; shooting too early yields a frame that is
-    -- still mid-adaptation and far too bright.
-    daySettle = num(values, 'DAY_SETTLE_SECONDS', 1.5),
-    nightSettle = num(values, 'NIGHT_SETTLE_SECONDS', 4.0),
+    -- Time for the scene to stabilise before a shot. Both are generous
+    -- because BOTH frames now follow a jump in the clock: the day frame is
+    -- pinned to job.dayHour and the night frame to that plus nightOffset, so
+    -- each lands after a large change in light level and auto-exposure needs
+    -- time to catch up. Shot too early, a frame is still mid-adaptation and
+    -- exposed for wherever the clock came FROM — which is how a day frame
+    -- taken 1.5s after an evening-to-midday jump came out overexposed. The
+    -- day frame used to be shot at the session's own time with nothing to
+    -- adapt to, and 1.5s was enough; it isn't any more.
+    daySettle = num(values, 'DAY_SETTLE_SECONDS', 6.0),
+    nightSettle = num(values, 'NIGHT_SETTLE_SECONDS', 6.0),
     -- Whole-run guard. If any step wedges (session never starts, a
     -- screenshot callback never fires), give up and report rather than
     -- leaving AC running forever with the user's config still swapped out.
@@ -118,6 +128,12 @@ local shotError = nil
 --- here because writeResult below closes over it, and a local declared
 --- later would be a different (global, nil) name inside that function.
 local lightsReport = ''
+
+--- What times the two frames were actually shot at. Reported because the
+--- ordering and the sun position used to depend on the leftover session
+--- clock, silently — the only way that was noticed was a user watching the
+--- screen and seeing night come first.
+local timeReport = ''
 
 --- How the car actually got into a drivable state.
 ---
@@ -152,6 +168,7 @@ local function writeResult(ok, message)
     'DAY=' .. (io.exists(DAY_FILE) and DAY_FILE or ''),
     'NIGHT=' .. (io.exists(NIGHT_FILE) and NIGHT_FILE or ''),
     'LIGHTS=' .. lightsReport,
+    'TIMES=' .. timeReport,
     'START=' .. startReport,
     'PLACEMENT=' .. placementReport,
   }, '\n'))
@@ -193,22 +210,26 @@ end
 
 local pendingShot = nil
 
---- Whether the frame captured first is the night one. Decided once the
---- session is up, from its actual clock — see where it's set.
-local shootingNightFirst = false
-
---- Whether the session's current time of day counts as night.
+--- Both frames are shot at FIXED times (job.dayHour, then that plus
+--- job.nightOffset) rather than at whatever the session happened to start on.
+--- Adapting to the session clock was the previous behaviour and it was wrong
+--- twice over: the order of the two frames depended on the user's leftover
+--- race.ini — a session left at night shot the night frame first — and
+--- neither frame had a predictable sun position, so two cars captured on
+--- different evenings didn't match.
 ---
---- Deliberately generous at both ends: the point is only to work out which
---- of the two frames the session is starting on, and a +12h jump from
---- anywhere in this range lands comfortably in daylight.
-local function isNightTime(sim)
-  local hour = sim.timeHours
-  return hour < 7 or hour >= 19
-end
+--- Nothing configures AC's session time on the way in (preflight rewrites the
+--- car, track and video mode, but never the clock), so it is set here, from
+--- inside the session, where the current time can simply be read.
+---
+--- Both jumps go through ac.setWeatherTimeOffset, which ACCUMULATES: each
+--- call shifts the clock by the amount passed, it does not set an absolute
+--- offset from the session's base time. So each is computed against the clock
+--- as it reads at that moment.
 
-local function phaseName(isNight)
-  return isNight and 'night' or 'day'
+--- Seconds to add to `fromHours` to land on `targetHour`, going forwards.
+local function offsetToHour(fromHours, targetHour)
+  return ((targetHour - fromHours) % 24) * 3600
 end
 
 local function fileFor(isNight)
@@ -339,21 +360,26 @@ function script.update(dt)
         tostring(physics.allowed()), stateTime)
     end
 
-    -- Which frame gets shot first depends on what time the session actually
-    -- starts at, rather than assuming daylight. A session configured to
-    -- begin near midnight (a sensible choice, since it gets the night frame
-    -- somewhere genuinely dark) would otherwise have its two frames saved
-    -- under each other's names. The +12h jump flips whichever it is, so the
-    -- second phase is always the opposite of the first.
-    shootingNightFirst = isNightTime(sim)
-    setState('settle_first', 'Settling (' .. phaseName(shootingNightFirst) .. ')')
+    -- Day frame always first, at a fixed hour. Jumped to before the settle
+    -- below, so auto-exposure adapts to the target light level rather than
+    -- the one the session opened on.
+    timeReport = string.format('started=%05.2fh asked day=%02dh night=%02dh',
+      sim.timeHours, job.dayHour, (job.dayHour + job.nightOffset / 3600) % 24)
+    ac.setWeatherTimeOffset(offsetToHour(sim.timeHours, job.dayHour), true)
+    setState('settle_first', 'Settling (day)')
 
   elseif state == 'settle_first' then
-    preparePhase(shootingNightFirst)
-    if stateTime >= settleFor(shootingNightFirst) then
-      pendingShot = shoot(fileFor(shootingNightFirst),
+    preparePhase(false)
+    if stateTime >= settleFor(false) then
+      -- The time each frame was ACTUALLY shot at, not just the one asked
+      -- for. That difference is the whole point of pinning TIME_MULT, and
+      -- without recording it the pin either working or silently not working
+      -- looks identical from out here.
+      timeReport = timeReport .. string.format(' | shot day=%05.2fh after %.1fs settle',
+        sim.timeHours, stateTime)
+      pendingShot = shoot(fileFor(false),
         { state = 'flip_time', text = 'Changing time of day' },
-        { state = 'shooting_first', text = 'Capturing ' .. phaseName(shootingNightFirst) .. ' frame' })
+        { state = 'shooting_first', text = 'Capturing day frame' })
     end
 
   elseif state == 'shooting_first' then
@@ -362,15 +388,30 @@ function script.update(dt)
   elseif state == 'flip_time' then
     -- One instant jump rather than a smooth transition: nothing is being
     -- watched here, and a gradual change would only add settle time.
-    ac.setWeatherTimeOffset(job.nightOffset, true)
-    setState('settle_second', 'Settling (' .. phaseName(not shootingNightFirst) .. ')')
+    --
+    -- ac.setWeatherTimeOffset ACCUMULATES — each call shifts the clock by the
+    -- amount given, rather than setting an absolute offset from the session's
+    -- base time. Asserting the opposite here (and so passing the day offset
+    -- again alongside the night one) applied the day jump twice: a session
+    -- starting at 18:00 took a 19h offset to reach 13:00, then a further
+    -- 19+12h, landing at 20:00 for a "night" frame that was still daylight.
+    --
+    -- Derived from the clock as it reads NOW rather than from a fixed delta,
+    -- so the jump is measured from where the day frame actually ended up. If
+    -- anything nudges the clock between the two frames, this still lands on
+    -- the requested hour instead of inheriting the error.
+    local nightHour = (job.dayHour + job.nightOffset / 3600) % 24
+    ac.setWeatherTimeOffset(offsetToHour(sim.timeHours, nightHour), true)
+    setState('settle_second', 'Settling (night)')
 
   elseif state == 'settle_second' then
-    preparePhase(not shootingNightFirst)
-    if stateTime >= settleFor(not shootingNightFirst) then
-      pendingShot = shoot(fileFor(not shootingNightFirst),
+    preparePhase(true)
+    if stateTime >= settleFor(true) then
+      timeReport = timeReport .. string.format(' | night=%05.2fh after %.1fs settle',
+        sim.timeHours, stateTime)
+      pendingShot = shoot(fileFor(true),
         { state = 'finished', text = 'Captured' },
-        { state = 'shooting_second', text = 'Capturing ' .. phaseName(not shootingNightFirst) .. ' frame' })
+        { state = 'shooting_second', text = 'Capturing night frame' })
     end
 
   elseif state == 'shooting_second' then
