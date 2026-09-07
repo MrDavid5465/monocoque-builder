@@ -217,11 +217,29 @@ local function buildFrame(sim, car)
   local neckYaw, neckPitch, neckRoll = neckRotation(car)
   local position = car ~= nil and car.position or nil
 
+  -- The track's own geotag, straight from the game. Guarded because
+  -- ac.getTrackCoordinatesDeg arrived in CSP 0.2.8 and this app stays
+  -- installed for ordinary play on whatever build the user has.
+  local coords = nil
+  if ac.getTrackCoordinatesDeg ~= nil then
+    local ok, v = pcall(ac.getTrackCoordinatesDeg)
+    if ok and v ~= nil then coords = v end
+  end
+
   return {
     time_total_seconds = sim.timeTotalSeconds,
     day_of_year = sim.dayOfYear,
     timestamp = sim.timestamp,
     time_multiplier = sim.timeMultiplier,
+
+    -- Where the game itself thinks the track is (vec2: x latitude, y
+    -- longitude). Preferred over a hand-entered Track Location because it is
+    -- the position AC places the sun FROM, so computing elevation with it
+    -- agrees with the sky by construction rather than by the entered figure
+    -- happening to be right — and a track nobody has configured still gets a
+    -- correct dawn/dusk.
+    track_latitude = coords ~= nil and coords.x or nil,
+    track_longitude = coords ~= nil and coords.y or nil,
 
     sun_angle_deg = ac.getSunAngle(),
     sun_pitch_deg = ac.getSunPitchAngle(),

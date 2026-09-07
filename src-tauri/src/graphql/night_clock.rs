@@ -131,6 +131,67 @@ fn clock_utc_offset_minutes() -> f64 {
         .unwrap_or(0.0)
 }
 
+/// The track's coordinates as the GAME reports them, keyed by track name.
+///
+/// Cached like the timezone offset above and for the same reason: the Lua app
+/// stops sending while the CSP debug UI is open, and a track does not move
+/// because a script paused. Keyed by track so a stale reading can never be
+/// applied to a different one — including a track loaded by a different sim,
+/// where no AC frame exists at all.
+static LAST_TRACK_COORDS: Mutex<Option<(String, f64, f64)>> = Mutex::new(None);
+
+/// Where to place the sun, preferring what the game itself reports.
+///
+/// AC derives the sun from the track's own geotag, so computing elevation from
+/// that same figure agrees with the sky by construction, rather than by a
+/// hand-entered Track Location happening to be right. It also means a track
+/// nobody has configured still gets a real dawn/dusk instead of dropping to
+/// the clock ramp — which is the fallback that was found to be two hours out.
+///
+/// The configured location stays as the fallback: other sims publish no such
+/// telemetry, and an older CSP has no `ac.getTrackCoordinatesDeg`.
+async fn sun_coordinates(adapter: &Arc<dyn TypiQLAdapter>, track: &str) -> Option<(f64, f64)> {
+    if let Some(frame) = crate::ac_telemetry::latest() {
+        if let (Some(lat), Some(lon)) = (frame.track_latitude, frame.track_longitude) {
+            if let Ok(mut guard) = LAST_TRACK_COORDS.lock() {
+                *guard = Some((track.to_string(), lat, lon));
+            }
+            return Some((lat, lon));
+        }
+    }
+    if let Ok(guard) = LAST_TRACK_COORDS.lock() {
+        if let Some((cached, lat, lon)) = guard.as_ref() {
+            if cached == track {
+                return Some((*lat, *lon));
+            }
+        }
+    }
+    let location = cached_track_location(adapter, track).await?;
+    Some((location.latitude, location.longitude))
+}
+
+/// UTC minutes-of-day from `sun_position` expressed on the track's CIVIL LOCAL
+/// clock, which is the only frame the stored times are ever compared against.
+///
+/// `compute_sunrise_sunset` works in UTC, correctly — it is a solar library.
+/// But `sim_sunrise`/`sim_sunset` are read back by the clock ramp in
+/// `dayNightSim.ts` and `night_state.rs`, both of which take the minute-of-day
+/// straight off the GAME's clock, and AC reports that as the track's local
+/// time. Storing UTC left them two hours out at the Nordschleife in summer:
+/// 03:21/19:46 against an actual 05:22/21:46.
+///
+/// This only bites when the elevation path is unavailable — the ramp is the
+/// fallback — which is why it survived so long. With no AC frame the offset is
+/// unknown and reads 0, so a value computed with the game closed is still UTC;
+/// that is the best available answer rather than a guess, and it corrects
+/// itself on the next automatic recompute once a session is live.
+///
+/// Pure, and separate from `clock_utc_offset_minutes`, so it can be tested
+/// without reaching into the process-global offset cache.
+fn to_track_local(utc_minutes: f64, offset_minutes: f64) -> f64 {
+    (utc_minutes + offset_minutes).rem_euclid(1440.0)
+}
+
 /// Last `equinox_sun_trajectory` the game reported.
 ///
 /// Cached because the Lua app stops sending whenever the player opens the CSP
@@ -202,20 +263,13 @@ pub async fn current_sun_elevation_deg(
     sim_time_ms: f64,
 ) -> Option<(f64, bool)> {
     let track = live_track()?;
-    let location = cached_track_location(adapter, &track).await?;
+    let (latitude, longitude) = sun_coordinates(adapter, &track).await?;
     let (year, month, day) = effective_sun_date(record)?;
 
     // The clock is the track's LOCAL time; the solar maths wants UTC.
     let minute_of_day = (sim_time_ms / 60_000.0 - clock_utc_offset_minutes()).rem_euclid(1440.0);
     let at = |minute: f64| {
-        crate::sun_position::sun_elevation_deg(
-            year,
-            month,
-            day,
-            location.latitude,
-            location.longitude,
-            minute,
-        )
+        crate::sun_position::sun_elevation_deg(year, month, day, latitude, longitude, minute)
     };
     let elevation = at(minute_of_day);
     // Rising or setting, sampled rather than reasoned about: the dawn and dusk
@@ -367,8 +421,9 @@ pub async fn maybe_auto_recompute_sun_times(adapter: &Arc<dyn TypiQLAdapter>, re
         return;
     };
 
-    let sunrise = crate::sun_position::format_hhmm(sunrise_min);
-    let sunset = crate::sun_position::format_hhmm(sunset_min);
+    let offset = clock_utc_offset_minutes();
+    let sunrise = crate::sun_position::format_hhmm(to_track_local(sunrise_min, offset));
+    let sunset = crate::sun_position::format_hhmm(to_track_local(sunset_min, offset));
 
     // Compare the RESULT, not the inputs. Guarding on track+date looked
     // equivalent and wasn't: the trajectory correction above can change the
@@ -568,8 +623,12 @@ impl NightClockMutation {
         // automatically redo this same computation later if the live track
         // changes — see `maybe_auto_recompute_sun_times`.
         let mut patch_value = json!({
-            "sim_sunrise": crate::sun_position::format_hhmm(sunrise_min),
-            "sim_sunset": crate::sun_position::format_hhmm(sunset_min),
+            "sim_sunrise": crate::sun_position::format_hhmm(
+                to_track_local(sunrise_min, clock_utc_offset_minutes()),
+            ),
+            "sim_sunset": crate::sun_position::format_hhmm(
+                to_track_local(sunset_min, clock_utc_offset_minutes()),
+            ),
             "sim_sunrise_sunset_date": date,
             "sim_last_computed_track": track,
         });
@@ -595,5 +654,46 @@ impl NightClockMutation {
             value: updated.clone(),
         });
         Ok(updated)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::to_track_local;
+
+    /// The stored sunrise/sunset are compared against the GAME's clock, which
+    /// AC reports as the track's civil local time. Storing the solar library's
+    /// UTC answer put them two hours out at the Nordschleife in summer.
+    #[test]
+    fn converts_utc_sun_times_onto_the_tracks_local_clock() {
+        // The real case: computed 03:21 UTC / 19:46 UTC at the Nordschleife on
+        // 19 June, against an actual local 05:21 / 21:46. CEST is +120.
+        assert_eq!(to_track_local(3.0 * 60.0 + 21.0, 120.0), 5.0 * 60.0 + 21.0);
+        assert_eq!(
+            to_track_local(19.0 * 60.0 + 46.0, 120.0),
+            21.0 * 60.0 + 46.0
+        );
+    }
+
+    /// A track east enough to push sunrise past midnight, and one west enough
+    /// to pull it back before it — both have to land inside the day rather
+    /// than going negative or past 1440, since the result is formatted as a
+    /// plain "HH:MM" with no date attached.
+    #[test]
+    fn wraps_around_midnight_in_both_directions() {
+        // 23:30 UTC + 2h -> 01:30 the next local day.
+        assert_eq!(to_track_local(23.0 * 60.0 + 30.0, 120.0), 90.0);
+        // 00:30 UTC - 5h -> 19:30 the previous local day.
+        assert_eq!(to_track_local(30.0, -300.0), 19.0 * 60.0 + 30.0);
+        // A whole day of offset is a no-op, not a wrap off the end.
+        assert_eq!(to_track_local(600.0, 1440.0), 600.0);
+    }
+
+    /// With no AC frame the offset reads 0, and the value stays UTC rather
+    /// than being shifted by a guess. Documented rather than desirable — it
+    /// self-corrects on the next recompute once a session is live.
+    #[test]
+    fn an_unknown_offset_leaves_the_time_untouched() {
+        assert_eq!(to_track_local(321.0, 0.0), 321.0);
     }
 }

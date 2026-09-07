@@ -27,6 +27,10 @@ pub struct AcTelemetry {
     pub timestamp: i64,
     pub time_multiplier: f32,
 
+    /// The track's geotag as the game reports it, degrees. `None` on a CSP
+    /// without `ac.getTrackCoordinatesDeg`, or before the first frame.
+    pub track_latitude: Option<f64>,
+    pub track_longitude: Option<f64>,
     pub sun_angle_deg: f32,
     /// From `ac.getSunPitchAngle()`, and NOT usable as sun elevation —
     /// measured live it returns exact constants that never move while the
@@ -91,6 +95,8 @@ impl From<AcTelemetryFrame> for AcTelemetry {
             day_of_year: frame.day_of_year,
             timestamp: frame.timestamp,
             time_multiplier: frame.time_multiplier,
+            track_latitude: frame.track_latitude,
+            track_longitude: frame.track_longitude,
             sun_angle_deg: frame.sun_angle_deg,
             sun_pitch_deg: frame.sun_pitch_deg,
             equinox_sun_trajectory: frame.equinox_sun_trajectory,

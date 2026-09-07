@@ -53,6 +53,14 @@ pub struct AcTelemetryFrame {
     /// Race time acceleration. Can be 0, or negative online.
     pub time_multiplier: f32,
 
+    // ---- Track position ---------------------------------------------
+    /// The track's geotag as the GAME reports it
+    /// (`ac.getTrackCoordinatesDeg`), degrees. `None` on a CSP too old to
+    /// expose it, which is why the configured Track Location stays as the
+    /// fallback rather than being replaced.
+    pub track_latitude: Option<f64>,
+    pub track_longitude: Option<f64>,
+
     // ---- Sun and ambient light --------------------------------------
     /// Sun azimuth, degrees.
     pub sun_angle_deg: f32,
