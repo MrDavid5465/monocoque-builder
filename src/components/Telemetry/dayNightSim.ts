@@ -54,50 +54,102 @@ export interface NightRampConfig {
 // Sun elevation (degrees) bounding each blend: full night at or below the
 // first, full day at or above the second.
 //
-// DUSK is measured, not chosen, and the numbers survived a correction that
+// MEASURED, in game, not chosen — and they survived a correction that
 // invalidated the first attempt. AC reports time-of-day in the track's CIVIL
 // LOCAL time while the solar maths works in UTC, so every elevation derived
 // from a clock observation was initially two hours wrong (see
 // night_clock::clock_utc_offset_minutes).
 //
-// Corrected, two independent sessions agree: on 21 Sept the sky began
-// changing at +6.84 and stopped at -10.73, and on 22 June it read fully dark
-// at -11.27. Those two end-points are within half a degree of each other
-// having been 11.5 degrees apart before the correction, which is the real
-// evidence the offset is right. Hence full day at +7, full night at -11.
+// Three independent sessions at the Nurburgring agree on where the sky stops
+// changing, approached from both directions:
 //
-// DAWN is NOT measured to the same standard and is known to disagree. It came
-// from stepping up from 05:15 — already -3.9 degrees — and reporting the first
-// change seen after starting, so it is bounded by where the scrub began rather
-// than by the sky. Taken at face value it says the sky is dark at -3.9, while
-// the dusk pair says it is fully lit at -7.26; both cannot be true of a
-// symmetric sky. Left as-is pending a dawn re-measure using the dusk method
-// (scrub from well before anything is expected), at which point these two
-// bands will most likely collapse into one.
-export const SUN_ELEVATION_NIGHT_DEG = -2;
-export const SUN_ELEVATION_DAY_DEG = 15;
+//   21 Sept dusk   stopped changing 20:36 local  ->  -11.09
+//   21 Sept dusk   (earlier session, same end)   ->  -10.73
+//   22 June dawn   began brightening 03:30 local ->  -11.89
+//
+// Mean -11.24, hence full night at -11. The day end is measured the same way:
+// 21 Sept the sky began changing at 18:45 local, which is +6.84, hence +7.
+//
+// A physically-derived curve was tried in place of this and REJECTED on the
+// rig. It interpolated published horizontal-illuminance figures (100k lux in
+// full sun, 3.4 at the end of civil twilight, 0.008 at nautical) in log space,
+// and it agreed impressively about where night ARRIVES — reaching full dark at
+// nautical twilight, within a degree of all three measurements above, and
+// landing within 5 points of this band at sunset itself.
+//
+// Where it failed was the middle of twilight, and the gap is one-directional:
+//
+//   elev    this band   physical
+//    -3       0.58        0.40
+//    -6       0.81        0.61
+//    -9       0.97        0.79
+//
+// Up to 20 points too bright through exactly the stretch that reads as "it's
+// getting dark", which is what showed up in game as overexposed.
+//
+// The lesson is worth keeping. The model describes open air; the game renders
+// its own sky, and that sky collapses toward dark faster than real twilight
+// does once the sun is down. Where the two disagree, the measurements win —
+// they were taken by watching the actual thing being modelled.
+export const SUN_ELEVATION_NIGHT_DEG = -11;
+export const SUN_ELEVATION_DAY_DEG = 7;
 
-// Dusk's own bounds, from the measurement above.
+// Dusk's own bounds. Kept as separate constants even though they equal dawn's:
+// the pairs were arrived at independently, so a future correction to either end
+// of either band shouldn't have to first re-separate them.
 export const SUN_ELEVATION_DUSK_NIGHT_DEG = -11;
 export const SUN_ELEVATION_DUSK_DAY_DEG = 7;
 
 // 0 = full day, 1 = full night, for a given sun elevation.
 //
-// `rising` picks the band. The two are separate because they were arrived at
-// separately, and an earlier version that derived dusk by mirroring dawn was
+// `rising` picks the band. The two are kept separate because they were arrived
+// at separately, and an earlier version that derived dusk by mirroring dawn was
 // wrong twice over: it put the transition BEFORE sunset (52% night with the
 // sun still 6 degrees up), and mirroring assumed a symmetry the game does not
-// obviously have. The bands should match the sky, not each other.
+// obviously have. The bands match today because both were measured and both
+// landed in the same place — which is not the same thing as deriving one from
+// the other, and mirroring still wouldn't produce them (it would put full
+// night at -7, not -11).
 //
 // Smoothstep rather than linear. A linear ramp changes brightness fastest at
 // the very start, when the sky is changing least, and the mismatch reads as
 // the dashboard running ahead of the game. Easing both ends starts slow,
 // moves quickest through the middle of the transition, and settles gently.
+//
+// The bias below then pulls the whole curve toward night, because a COCKPIT is
+// not a sky. The interior is lit by ambient light only, so it loses light much
+// faster than the horizon does — and the photographs being blended are of an
+// interior.
+//
+// Fitted to one observation, in a PRACTICE session with manual time control:
+// the in-game interior stops darkening noticeably at 22:50 sim, which a 10s
+// interval trace of the same evening puts at -7.9 degrees. The exponent is
+// chosen so the curve reaches full night there:
+//
+//   exponent   reaches 99% at   error vs the -7.9 anchor
+//      1          -9.94              -2.04   (too late; keeps darkening
+//                                             after the game has stopped)
+//      2          -7.48              +0.42   <- chosen
+//      3          -5.61              +2.29   (too early)
+//
+// Both endpoints are left exactly where they are, which is what having them
+// independently confirmed correct requires.
+//
+// An earlier value of 3 came from a first report of near-max darkness at
+// 22:00-22:30 (-2.66 to -5.78 degrees), made while driving a 2-hour-cycle
+// multiplayer lobby with no time control. That was RETRACTED once the same
+// thing was checked in a practice session where the clock could be held
+// still — worth recording, because it is the one measurement in this file
+// that a moving clock produced and it was two degrees out.
+//
+// Raise to darken sooner, lower to soften. 1 restores a plain smoothstep.
+export const NIGHT_BIAS_EXPONENT = 2;
+
 export function nightAmountFromSunElevation(elevationDeg: number, rising = true): number {
   const nightAt = rising ? SUN_ELEVATION_NIGHT_DEG : SUN_ELEVATION_DUSK_NIGHT_DEG;
   const dayAt = rising ? SUN_ELEVATION_DAY_DEG : SUN_ELEVATION_DUSK_DAY_DEG;
   const t = Math.max(0, Math.min(1, (elevationDeg - nightAt) / (dayAt - nightAt)));
-  const lit = t * t * (3 - 2 * t);
+  const lit = Math.pow(t * t * (3 - 2 * t), NIGHT_BIAS_EXPONENT);
   return 1 - lit;
 }
 

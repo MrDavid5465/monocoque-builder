@@ -46,42 +46,81 @@ fn minute_of_day(sim_time_ms: f64) -> f64 {
 /// Sun elevation (degrees) bounding each blend — full night at or below the
 /// first, full day at or above the second. Must match `dayNightSim.ts`'s
 /// equivalents; the two implementations light the same room, one through a
-/// dashboard and one through the bulbs, so a divergence shows up as the
-/// screen and the lights disagreeing mid-transition.
+/// dashboard and one through the bulbs, so a divergence shows up as the screen
+/// and the lights disagreeing mid-transition.
 ///
-/// DUSK is measured, not chosen, and survived a correction that invalidated
-/// the first attempt: AC reports time-of-day in the track's CIVIL LOCAL time
-/// while the solar maths works in UTC, so elevations derived from clock
-/// observations were two hours wrong until
+/// MEASURED in game, not chosen, and they survived a correction that
+/// invalidated the first attempt: AC reports time-of-day in the track's CIVIL
+/// LOCAL time while the solar maths works in UTC, so elevations derived from
+/// clock observations were two hours wrong until
 /// `night_clock::clock_utc_offset_minutes` was applied.
 ///
-/// Corrected, two independent sessions agree — 21 Sept began changing at
-/// +6.84 and stopped at -10.73; 22 June read fully dark at -11.27. Those
-/// end-points sit within half a degree of each other having been 11.5 degrees
-/// apart beforehand, which is the real evidence the offset is right.
+/// Three independent sessions at the Nurburgring agree on where the sky stops
+/// changing, from both directions — 21 Sept dusk stopped at -11.09 and (an
+/// earlier session) -10.73; 22 June dawn began brightening at -11.89. Mean
+/// -11.24, hence full night at -11. The day end is measured the same way: 21
+/// Sept the sky began changing at 18:45 local, which is +6.84, hence +7.
 ///
-/// DAWN is NOT measured to the same standard and is known to disagree. It came
-/// from stepping up from 05:15 — already -3.9 degrees — so it is bounded by
-/// where the scrub began rather than by the sky. Taken at face value it says
-/// the sky is dark at -3.9 while the dusk pair says it is lit at -7.26, and
-/// both cannot hold. Pending a dawn re-measure by the dusk method, after which
-/// these will most likely collapse into one band.
-pub const SUN_ELEVATION_NIGHT_DEG: f64 = -2.0;
-pub const SUN_ELEVATION_DAY_DEG: f64 = 15.0;
+/// A physically-derived curve (log-interpolated published illuminance figures)
+/// was tried in place of this and REJECTED on the rig. It agreed about where
+/// night ARRIVES — full dark at nautical twilight, within a degree of all
+/// three measurements, and within 5 points of this band at sunset — but ran up
+/// to 20 points brighter through the middle of twilight (-3, -6, -9), which is
+/// exactly the stretch that reads as "it's getting dark". It looked
+/// overexposed in game.
+///
+/// The model describes open air; the game renders its own sky, and that sky
+/// collapses toward dark faster than real twilight does once the sun is down.
+/// Where they disagree, the measurements win.
+pub const SUN_ELEVATION_NIGHT_DEG: f64 = -11.0;
+pub const SUN_ELEVATION_DAY_DEG: f64 = 7.0;
 
-/// Dusk's own bounds, from the measurement above.
+/// Dusk's own bounds. Kept separate even though they equal dawn's: the pairs
+/// were arrived at independently, so correcting either end of either band
+/// shouldn't first have to re-separate them.
 pub const SUN_ELEVATION_DUSK_NIGHT_DEG: f64 = -11.0;
 pub const SUN_ELEVATION_DUSK_DAY_DEG: f64 = 7.0;
 
 /// 0 = full day, 1 = full night, for a given sun elevation.
 ///
-/// `rising` picks the band. The two are separate because they were arrived at
-/// separately: an earlier version derived dusk by mirroring dawn, which put
-/// the transition BEFORE sunset and assumed a symmetry the game does not
-/// obviously have. The bands should match the sky, not each other.
+/// `rising` picks the band. The two are kept separate because they were
+/// arrived at separately: an earlier version derived dusk by mirroring dawn,
+/// which put the transition BEFORE sunset and assumed a symmetry the game does
+/// not obviously have. They match today because both were measured and both
+/// landed in the same place — not the same thing as deriving one from the
+/// other, and mirroring still wouldn't produce them (it would put full night at
+/// -7, not -11).
 ///
 /// Smoothstep, not linear: a linear ramp moves fastest at the start, when the
 /// sky is changing least, and reads as the lighting running ahead of the game.
+///
+/// The bias then pulls the whole curve toward night, because a COCKPIT is not
+/// a sky — an interior is lit by ambient only and loses light much faster than
+/// the horizon does, and these are photographs of an interior.
+///
+/// Fitted to one observation made in a PRACTICE session with manual time
+/// control: the in-game interior stops darkening noticeably at 22:50 sim,
+/// which a 10s-interval trace of the same evening puts at -7.9 degrees. The
+/// exponent is chosen so the curve reaches full night there:
+///
+///   exponent   reaches 99% at   error vs the -7.9 anchor
+///      1          -9.94              -2.04  (keeps darkening after the game
+///                                            has already stopped)
+///      2          -7.48              +0.42  <- chosen
+///      3          -5.61              +2.29  (slams to night too early)
+///
+/// Both endpoints stay exactly where they are, which is what having them
+/// independently confirmed requires.
+///
+/// An earlier value of 3 came from a first report of near-max darkness at
+/// 22:00-22:30 (-2.66 to -5.78 deg), made while driving a 2-hour-cycle
+/// multiplayer lobby with no time control, and was RETRACTED once the same
+/// thing was checked with the clock held still. Worth recording: it is the one
+/// measurement here that a moving clock produced, and it was two degrees out.
+///
+/// Raise to darken sooner, lower to soften; 1 restores a plain smoothstep.
+pub const NIGHT_BIAS_EXPONENT: f64 = 2.0;
+
 pub fn night_amount_from_sun_elevation(elevation_deg: f64, rising: bool) -> f64 {
     let (night_at, day_at) = if rising {
         (SUN_ELEVATION_NIGHT_DEG, SUN_ELEVATION_DAY_DEG)
@@ -89,7 +128,7 @@ pub fn night_amount_from_sun_elevation(elevation_deg: f64, rising: bool) -> f64 
         (SUN_ELEVATION_DUSK_NIGHT_DEG, SUN_ELEVATION_DUSK_DAY_DEG)
     };
     let t = ((elevation_deg - night_at) / (day_at - night_at)).clamp(0.0, 1.0);
-    1.0 - t * t * (3.0 - 2.0 * t)
+    1.0 - (t * t * (3.0 - 2.0 * t)).powf(NIGHT_BIAS_EXPONENT)
 }
 
 pub fn simulated_night_amount(sim_time_ms: f64, record: &NightMode) -> Option<f64> {
@@ -247,64 +286,52 @@ mod tests {
 
     /// The elevation curve, which is what actually drives the blend whenever
     /// a track location is known. Values mirror `dayNightSim.test.ts`.
+    /// The elevation curve, which drives the blend whenever a track location
+    /// is known. Values mirror `dayNightSim.test.ts`.
     #[test]
     fn elevation_curve_matches_its_bounds_and_eases() {
-        // Bounds are hard 1/0, and clamp beyond them rather than overshooting.
-        assert_eq!(night_amount_from_sun_elevation(-2.0, true), 1.0);
+        assert_eq!(night_amount_from_sun_elevation(-11.0, true), 1.0);
         assert_eq!(night_amount_from_sun_elevation(-40.0, true), 1.0);
-        assert_eq!(night_amount_from_sun_elevation(15.0, true), 0.0);
+        assert_eq!(night_amount_from_sun_elevation(7.0, true), 0.0);
         assert_eq!(night_amount_from_sun_elevation(80.0, true), 0.0);
-        // Midpoint of the band is exactly half, as smoothstep is symmetric.
-        let mid = night_amount_from_sun_elevation(6.5, true);
-        assert!((mid - 0.5).abs() < 1e-9, "midpoint {mid} should be 0.5");
-        // Sunrise itself (-0.833 deg) is still essentially night: the whole
-        // point of the band being weighted after sunrise rather than centred
-        // on it.
-        let at_sunrise = night_amount_from_sun_elevation(-0.833, true);
+        // A plain smoothstep is 0.5 here; squaring pulls it to 0.75 because a
+        // cockpit goes dark long before the sky does.
+        let mid = night_amount_from_sun_elevation(-2.0, true);
         assert!(
-            at_sunrise > 0.97,
-            "at sunrise the blend should still read as night, got {at_sunrise}"
+            (mid - 0.75).abs() < 1e-9,
+            "biased midpoint {mid} should be 0.75"
         );
-        // Eased, not linear: a linear ramp would put the quarter-point at
-        // exactly 0.75, and smoothstep must sit above it (still darker).
-        let quarter = night_amount_from_sun_elevation(-2.0 + 17.0 * 0.25, true);
+
+        // Full night where the interior was observed to stop darkening:
+        // 22:50 sim with the clock held still, i.e. -7.9 degrees.
+        assert!(night_amount_from_sun_elevation(-7.9, true) > 0.99);
+        // But still visibly transitioning well before then — over-biasing
+        // slams to night early, which is the other way to get this wrong.
+        assert!(night_amount_from_sun_elevation(-2.0, true) < 0.8);
+        // Eased, not linear: a linear ramp puts the quarter-point at 0.75, and
+        // smoothstep must sit above it (still darker).
+        let quarter = night_amount_from_sun_elevation(-11.0 + 18.0 * 0.25, true);
         assert!(
             quarter > 0.78,
             "smoothstep should lag a linear ramp early, got {quarter}"
         );
-        // Monotonic across the whole band — no wobble a blend would show.
         let mut prev = f64::MAX;
-        for i in 0..=170 {
-            let v = night_amount_from_sun_elevation(-2.0 + i as f64 * 0.1, true);
+        for i in 0..=180 {
+            let v = night_amount_from_sun_elevation(-11.0 + i as f64 * 0.1, true);
             assert!(v <= prev + 1e-12, "not monotonic at step {i}");
             prev = v;
         }
     }
 
-    /// Elevation wins over the clock ramp when both are available.
-    /// Dusk uses its own MEASURED band, not dawn's and not dawn's mirrored.
-    ///
-    /// The numbers come from scrubbing the in-game clock: skybox still fully
-    /// lit at 18:25 (-7.26 deg) and finished changing by 19:55 (-20.87). Both
-    /// below the horizon, so the game holds the sky lit well past sunset —
-    /// which is the whole reason this is measured rather than derived.
+    /// The measured bands, from both directions, plus the guard that keeps a
+    /// physically-derived curve from quietly replacing them again.
     #[test]
-    fn dusk_band_matches_the_measured_sky() {
-        // Bounds, as measured.
-        assert_eq!(
-            night_amount_from_sun_elevation(SUN_ELEVATION_DUSK_DAY_DEG, false),
-            0.0
-        );
-        assert_eq!(
-            night_amount_from_sun_elevation(SUN_ELEVATION_DUSK_NIGHT_DEG, false),
-            1.0
-        );
-        // Well outside the band in both directions.
-        assert_eq!(night_amount_from_sun_elevation(30.0, false), 0.0);
-        assert_eq!(night_amount_from_sun_elevation(-40.0, false), 1.0);
+    fn bands_match_the_measured_sky_and_stay_darker_than_open_air() {
+        assert_eq!(night_amount_from_sun_elevation(7.0, false), 0.0);
+        assert_eq!(night_amount_from_sun_elevation(-11.0, false), 1.0);
 
-        // The measured observations themselves (timezone-corrected), with a
-        // little tolerance for rounding +6.84/-10.73 to the +7/-11 bounds.
+        // The observations themselves, with a little tolerance for rounding
+        // +6.84/-10.73 onto the +7/-11 bounds.
         assert!(
             night_amount_from_sun_elevation(6.84, false) < 0.02,
             "sky was still fully lit at +6.84 deg (21 Sept)"
@@ -314,43 +341,40 @@ mod tests {
             "sky had stopped changing by -10.73 deg (21 Sept)"
         );
         assert!(
-            night_amount_from_sun_elevation(-11.27, false) > 0.99,
-            "sky read fully dark at -11.27 deg (22 June) — the independent \
-             session that agrees with the one above"
+            night_amount_from_sun_elevation(-11.89, true) > 0.99,
+            "sky was still fully dark at -11.89 deg (22 June dawn)"
         );
 
-        // Sunset itself now sits mid-fade rather than at either end.
-        let at_sunset = night_amount_from_sun_elevation(-0.833, false);
+        // Sunrise/sunset itself lands mid-transition rather than at either end.
+        let at_horizon = night_amount_from_sun_elevation(-0.833, false);
         assert!(
-            (0.2..0.8).contains(&at_sunset),
-            "sunset should land mid-transition, got {at_sunset}"
+            (0.2..0.8).contains(&at_horizon),
+            "the horizon should land mid-transition, got {at_horizon}"
         );
+
+        // Darker through mid-twilight than open-air physics. A log-illuminance
+        // curve gives 0.40/0.61/0.79 at these elevations and looked overexposed
+        // in game; this band is up to 20 points darker, which is what matched.
+        assert!(night_amount_from_sun_elevation(-3.0, false) > 0.5);
+        assert!(night_amount_from_sun_elevation(-6.0, false) > 0.75);
+        assert!(night_amount_from_sun_elevation(-9.0, false) > 0.93);
 
         // NOT a mirror of dawn: asserting that was a real bug in an earlier
-        // version of this test, and the bands are now independent by design.
+        // version of this test.
         let mirrored_night = -SUN_ELEVATION_DAY_DEG;
         assert!(
             (SUN_ELEVATION_DUSK_NIGHT_DEG - mirrored_night).abs() > 1.0,
-            "dusk is measured, not derived from dawn — if these ever coincide \
-             it should be because the sky says so"
+            "these are measured, not derived from each other"
         );
-
-        // Monotonic across the band.
-        let mut prev = f64::MAX;
-        for i in 0..=200 {
-            let v = night_amount_from_sun_elevation(-25.0 + i as f64 * 0.15, false);
-            assert!(v <= prev + 1e-12, "dusk not monotonic at step {i}");
-            prev = v;
-        }
     }
 
     #[test]
     fn elevation_overrides_the_clock_ramp() {
         let r = sim_record();
         // Noon by the clock (the ramp alone would say full day), but the sun
-        // is below the horizon — elevation must win.
+        // is well below the band — elevation must win.
         assert_eq!(
-            night_amount(&r, Some(at(12.0, 0.0)), Some(-10.0), true),
+            night_amount(&r, Some(at(12.0, 0.0)), Some(-20.0), true),
             1.0
         );
         // And with no elevation available it falls back to the clock ramp.

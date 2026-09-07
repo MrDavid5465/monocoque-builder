@@ -129,11 +129,6 @@ const NECK_OFFSET_CLAMP_M = 0.25;
 // 5 up. Nothing here compensates for that, deliberately — this viewer mirrors
 // the angle the game applied, so a lopsided range is the honest result.
 
-// Fraction of the full night darkening applied when the car HAS a night
-// photo. The photo already supplies the night *look*; this only takes the
-// overall level down so it reads as night rather than as a differently-lit
-// daytime shot. Turn this up if night still isn't dark enough, down if the
-// scene goes muddy. 0 restores the previous behaviour (photo only).
 // How often a gesture reports to the parent. The render loop shows every
 // frame regardless, so this only paces the React updates behind it.
 const EMIT_INTERVAL_MS = 120;
@@ -153,6 +148,11 @@ const EMIT_INTERVAL_MS = 120;
 // Multiplied by the smoothed night level at the use site, so it fades in with
 // the eased dawn/dusk blend rather than switching, and it is direction-
 // agnostic: dusk drives it through the same nightAmount that dawn does.
+//
+// Zeroed temporarily while the 0.95 mixAmount cap was being diagnosed (that
+// cap left 5% of the DAY frame blended into full night, and this was hiding
+// it). Restored after judging the night photo on its own at the rig: it is
+// wanted for its own sake, not as a band-aid for the ghost.
 const NIGHT_DARKEN_WITH_PHOTO = 0.25;
 
 // The same darkening for a car with NO night photo, which reaches the screen
@@ -527,13 +527,21 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
       // unbound `nightMap` uniform resolves to black in WebGL, so without
       // this guard the day photo would visibly fade toward solid black as
       // mixAmount ramped up for a car/dashboard with no night photo at all.
-      // The 0.95 cap (matching the flat CSS night overlay in Canvas.tsx/
-      // DashPanEditor.tsx) means full night never fully replaces the day
-      // texture even when a real night photo exists.
+      //
+      // Full night means FULLY the night texture. This used to cap at 0.95,
+      // a number taken from the flat CSS night overlay in Canvas.tsx/
+      // DashPanEditor.tsx — but the two do different things and the number
+      // doesn't carry across. Capping a black overlay at 0.95 is a taste
+      // choice: never quite solid, so shape survives. Capping a crossfade
+      // between two photographs preserves nothing; it just leaves 5% of the
+      // DAY frame mixed into the night one forever, which reads as the day
+      // photo ghosting through wherever it is brightest — windows and sky
+      // against a dark cockpit. Reported from the rig as "still seeing part
+      // of the day photo at 100% night", which is exactly what it was.
       if (shaderRef.current) {
         const tauMs = 830;
         const smoothing = 1 - Math.exp(-dtMs / tauMs);
-        const target = nightTextureRef.current ? stateRef.current.nightAmount * 0.95 : 0;
+        const target = nightTextureRef.current ? stateRef.current.nightAmount : 0;
         mixAmountRef.current = lerp(mixAmountRef.current, target, smoothing);
         shaderRef.current.uniforms.mixAmount.value = mixAmountRef.current;
         shaderRef.current.uniforms.nightMap.value = nightTextureRef.current;

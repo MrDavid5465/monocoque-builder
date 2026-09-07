@@ -10,7 +10,7 @@ import {
   NightModeRecord,
 } from './nightModeQueries';
 import { useGlobalNightMode } from './useGlobalNightMode';
-import { computeSimulatedNightState, formatTimeOfDay, parseTimeOfDay } from './dayNightSim';
+import { formatTimeOfDay, parseTimeOfDay } from './dayNightSim';
 import TrackLinkDialog from './TrackLinkDialog';
 
 // Converts between the two ways of expressing simulated clock speed:
@@ -138,7 +138,7 @@ const DayNightSimPanel: React.FC = () => {
   // reproduced a real "Maximum update depth exceeded" warning (see
   // useGlobalNightMode's own doc comment on tickThrottleMs for the live
   // repro).
-  const { simTimeMs, fromGame, hubSubscriber } = useGlobalNightMode(undefined, { tickThrottleMs: 1000 });
+  const { simTimeMs, fromGame, nightAmount, isNight, hubSubscriber } = useGlobalNightMode(undefined, { tickThrottleMs: 1000 });
 
   // Shows the in-game date while Assetto Corsa is running, falling back to
   // today's — pick a different date to get that day's real sunrise/sunset
@@ -302,7 +302,22 @@ const DayNightSimPanel: React.FC = () => {
     }
   };
 
-  const preview = simTimeMs != null && current ? computeSimulatedNightState(simTimeMs, current) : null;
+  // Read from the hook rather than recomputed here, so this reports exactly
+  // what the dashboards are rendering.
+  //
+  // It used to call computeSimulatedNightState(simTimeMs, current) with no sun
+  // elevation, which silently selected that function's FALLBACK path — the
+  // sunrise/sunset clock ramp. That ramp is flat 100% once the dusk transition
+  // has run, so the popup read "100% night" while every dashboard, using the
+  // elevation path, was at 94% and visibly still blending some of the day
+  // photo. Two different models of the same thing, on screen at once, with
+  // only the popup's being wrong.
+  //
+  // Note this now also honours `simEnabled`: with simulation off it reports
+  // the manual toggle's 0/1, where before it previewed the simulated ramp
+  // regardless. That is the more useful reading — it says what IS happening
+  // rather than what would happen in another mode.
+  const preview = simTimeMs != null && current ? { nightAmount, isNight } : null;
 
   return (
     <Stack tokens={{ childrenGap: '0.77em' }} style={{ minWidth: 320 }}>
@@ -330,7 +345,7 @@ const DayNightSimPanel: React.FC = () => {
         </span>
         <span style={{ fontSize: '0.78em', color: theme.palette.neutralSecondary }}>
           {preview
-            ? `Currently ${preview.nightAmount >= 0.5 ? 'night' : 'day'} (${Math.round(preview.nightAmount * 100)}% night)`
+            ? `Currently ${preview.isNight ? 'night' : 'day'} (${Math.round(preview.nightAmount * 100)}% night)`
             : 'Set sunrise/sunset below to preview'}
         </span>
       </Stack>
