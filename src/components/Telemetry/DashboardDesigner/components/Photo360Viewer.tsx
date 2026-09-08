@@ -114,6 +114,12 @@ const SWAY_PITCH_DEG_PER_M_HEAVE = 25;
 // reading — mirrors the ±3g/±4g clamps on the fallback path.
 const NECK_OFFSET_CLAMP_M = 0.25;
 
+// Easing time constants for the sway, milliseconds. See the use site for why
+// the two paths differ; 200 is what the old fixed per-frame lerp worked out
+// to at 60Hz, kept so the g-derived path feels exactly as it was tuned.
+const SWAY_TAU_MS_NECKFX = 30;
+const SWAY_TAU_MS_G = 200;
+
 // The rotation-channel equivalent (NECK_ANGLE_CLAMP_DEG) is imported from
 // useAcNeckFx rather than declared here — it bounds what the SOURCE can
 // legitimately report, so it has to be identical in every consumer. It used to
@@ -445,6 +451,7 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
 
       let targetYaw: number;
       let targetPitch: number;
+      const usingNeckFx = active && neckLive && !!neck;
       if (active && neckLive && neck) {
         // Signs follow from the head lagging BEHIND the car: under leftward
         // acceleration the head is thrown right (+x), which is the same
@@ -499,11 +506,30 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
       }
       if (!active) { targetYaw = 0; targetPitch = 0; }
 
-      // Same 0.08 smoothing either way. It stays even on the NeckFX path:
-      // frames arrive at 30Hz against this ~60Hz render loop, so without it
-      // the sway would step rather than move.
-      sway.yaw   = lerp(sway.yaw,   swayDisableX ? 0 : targetYaw,   0.08);
-      sway.pitch = lerp(sway.pitch, swayDisableY ? 0 : targetPitch, 0.08);
+      // Time-based, and much shorter on the NeckFX path.
+      //
+      // This was a flat `lerp(..., 0.08)` per frame for both paths. That is
+      // 8% of the remaining distance every frame regardless of how long the
+      // frame took, which is both frame-rate dependent (a 144Hz display
+      // converged 2.4x faster than a 60Hz one) and, at 60Hz, equivalent to a
+      // ~200ms time constant: ~12 frames to cover 63% of a step and ~36 to
+      // cover 95%. Reported from the rig as half a second to a second of lag
+      // on NeckFX, which is this filter almost exactly — the value had
+      // already arrived, it was being eased into.
+      //
+      // The two paths want different amounts. The g-derived fallback is
+      // computing a sway from raw lateral/longitudinal g, which is noisy and
+      // genuinely needs easing; it keeps the 200ms it was tuned at, so its
+      // feel is unchanged. The NeckFX path is not deriving anything — it is
+      // the head movement the GAME already applied, through CSP's own washout
+      // filter, and the whole point of preferring it is that it is 1:1.
+      // Smoothing it again only adds lag to something already smoothed. What
+      // little remains is there to bridge a late frame rather than to shape
+      // the motion.
+      const swayTauMs = usingNeckFx ? SWAY_TAU_MS_NECKFX : SWAY_TAU_MS_G;
+      const swaySmoothing = 1 - Math.exp(-dtMs / swayTauMs);
+      sway.yaw   = lerp(sway.yaw,   swayDisableX ? 0 : targetYaw,   swaySmoothing);
+      sway.pitch = lerp(sway.pitch, swayDisableY ? 0 : targetPitch, swaySmoothing);
 
       if (cameraRef.current) {
         cameraRef.current.fov = f;
