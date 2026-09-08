@@ -10,7 +10,7 @@ import {
   NightModeRecord,
 } from './nightModeQueries';
 import { useGlobalNightMode } from './useGlobalNightMode';
-import { formatTimeOfDay, parseTimeOfDay } from './dayNightSim';
+import { formatTimeOfDay } from './dayNightSim';
 import TrackLinkDialog from './TrackLinkDialog';
 
 // Converts between the two ways of expressing simulated clock speed:
@@ -22,20 +22,6 @@ const HOURS_PER_DAY = 24;
 function hoursFromSpeedPercent(speedPercent: number | null | undefined): number {
   const percent = speedPercent ?? 100;
   return percent > 0 ? (HOURS_PER_DAY * 100) / percent : HOURS_PER_DAY;
-}
-
-// per-form's `timetoday` field reads/writes a Date's *local* hour/minute
-// components directly (Fabric.tsx's handleTimeChange), and dayNightSim.ts's
-// parseTimeOfDay/formatTimeOfDay treat "HH:MM" as a plain, timezone-agnostic
-// label — so no UTC conversion is needed here, just a direct round-trip
-// through today's date + the parsed/formatted hour and minute.
-function hhmmToDisplayDate(hhmm: string | null | undefined): Date {
-  const parsed = parseTimeOfDay(hhmm) ?? 0;
-  const now = new Date();
-  return new Date(now.getFullYear(), now.getMonth(), now.getDate(), Math.floor(parsed / 60), parsed % 60, 0);
-}
-function displayDateToHHMM(d: Date): string {
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
 // Discrete nudges for the server-authoritative simulated clock (see
@@ -91,8 +77,6 @@ const configSchema = {
     type: 'text' as const,
     label: 'Day/night cycle length (hours)',
   },
-  simSunrise: { type: 'timetoday' as const, label: 'Sunrise' },
-  simSunset: { type: 'timetoday' as const, label: 'Sunset' },
   simTransitionMinutes: { type: 'slider' as const, label: 'Dawn/dusk transition (minutes)', min: 0, max: 240, step: 5 },
 };
 
@@ -169,22 +153,22 @@ const DayNightSimPanel: React.FC = () => {
   const [unlinkedTrack, setUnlinkedTrack] = useState<string | null>(null);
   // Bumped on every successful Compute-from-date call and folded into the
   // config Form's `key` below — per-form's <Form> is uncontrolled and only
-  // reads `initialValues` at mount (see that Form's own comment), so the
-  // Sunrise/Sunset ComboBoxes otherwise kept showing whatever was on screen
-  // before the click even after `current.simSunrise`/`simSunset` updated
-  // via the mutation's response (same NightMode id, so the id-only key
-  // never changed). A plain user edit debounce-saving back through the
-  // subscription must NOT remount this Form (that would interrupt typing),
-  // which is why the key still isn't simply tied to simSunrise/simSunset
-  // directly — only this specific external, discrete action forces a fresh
-  // snapshot.
+  // reads `initialValues` at mount (see that Form's own comment), so a field
+  // the compute rewrites underneath us otherwise keeps showing whatever was
+  // on screen before the click (same NightMode id, so the id-only key never
+  // changed). Sunrise/sunset were the visible case and are no longer editable
+  // here, but the same compute also rewrites the dawn/dusk transition slider,
+  // so this is still load-bearing. A plain user edit debounce-saving back
+  // through the subscription must NOT remount this Form (that would interrupt
+  // typing), which is why the key isn't tied to the field values directly —
+  // only this specific external, discrete action forces a fresh snapshot.
   const [computeNonce, setComputeNonce] = useState(0);
   // Same problem, other trigger: the backend also recomputes sunrise/sunset
   // on its own while the game is running (whenever the in-game date or the
   // live track changes — graphql/night_clock.rs's
   // maybe_auto_recompute_sun_times), with no click here to bump the nonce.
   // Those two fields move only on a recompute, never on a hand-edit of
-  // sunrise/sunset, so folding them into the key refreshes the ComboBoxes
+  // anything still in this form, so folding them into the key refreshes it
   // for a server-side recompute without remounting mid-edit.
   const computedFor = `${current?.simSunriseSunsetDate ?? ''}@${current?.simLastComputedTrack ?? ''}`;
   const handleComputeFromDate = () => {
@@ -247,11 +231,9 @@ const DayNightSimPanel: React.FC = () => {
   }), [current?.simEnabled]);
   const configInitialValues = useMemo(() => ({
     cycleHours: currentHours.toFixed(2),
-    simSunrise: hhmmToDisplayDate(current?.simSunrise ?? '06:00'),
-    simSunset: hhmmToDisplayDate(current?.simSunset ?? '20:00'),
     simTransitionMinutes: current?.simTransitionMinutes ?? 40,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [currentHours, current?.simSunrise, current?.simSunset, current?.simTransitionMinutes]);
+  }), [currentHours, current?.simTransitionMinutes]);
 
   // Multi-field onChange convention (per DashPanEditor's
   // handleDashPanFormChange): fires on ANY field change with the full raw
@@ -280,16 +262,6 @@ const DayNightSimPanel: React.FC = () => {
     const patch: Partial<NightModeRecord> = {};
     let changed = false;
 
-    const newSunrise = raw.simSunrise instanceof Date ? displayDateToHHMM(raw.simSunrise) : undefined;
-    if (newSunrise && newSunrise !== current?.simSunrise) {
-      patch.simSunrise = newSunrise;
-      changed = true;
-    }
-    const newSunset = raw.simSunset instanceof Date ? displayDateToHHMM(raw.simSunset) : undefined;
-    if (newSunset && newSunset !== current?.simSunset) {
-      patch.simSunset = newSunset;
-      changed = true;
-    }
     if (raw.simTransitionMinutes != null && raw.simTransitionMinutes !== current?.simTransitionMinutes) {
       patch.simTransitionMinutes = raw.simTransitionMinutes;
       changed = true;
