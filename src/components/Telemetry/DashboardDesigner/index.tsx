@@ -96,7 +96,7 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
   // identity on every ~60Hz simTimeMs tick would defeat that memo).
   const handleKioskButton = useCallback(() => {
     if (kioskMode) navigate(-1);
-    else navigate(`/dashboards/dashboards/${encodeURIComponent(dashboardName)}/show`);
+    else navigate(`/dashboards/${encodeURIComponent(dashboardName)}/show`);
   }, [kioskMode, navigate, dashboardName]);
 
   const { dashboard, setDashboard, saveDashboard, deleteDashboard, savePanCoordinates, savePhotoEditing, uploadSprite, deleteSprite, refetchSprites, copyBuiltinSprite, uploadSpriteData, uploadBackground, isDirty, sprites, loading, canvasRef, forceNightPreview, handleDashboardUpdate } = useDashboard(dashboardName);
@@ -693,7 +693,7 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
   }, [saveDashboard]);
   const handleDeleteDashboard = useCallback(async () => {
     await deleteDashboard();
-    navigate('/dashboards/dashboards');
+    navigate('/dashboards');
   }, [deleteDashboard, navigate]);
 
   // Manual memo cache (not useMemo) for kioskLive360 below — everything past
@@ -1185,7 +1185,7 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
             <IconButton
               iconProps={{ iconName: 'Back' }}
               title="Back to dashboards"
-              onClick={() => navigate('/dashboards/dashboards')}
+              onClick={() => navigate('/dashboards')}
               styles={{ root: { height: 30, width: 30 } }}
             />
             <span style={{ fontSize: '0.9em', fontWeight: 600, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>

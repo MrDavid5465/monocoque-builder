@@ -53,23 +53,23 @@ const Default: React.FC = () => {
       })();
       const targetDash = (car && carDashMap[car]) || group.defaultDash;
       if (targetDash) {
-        navigate(`/dashboards/dashboards/${encodeURIComponent(targetDash)}/show`, { replace: true });
+        navigate(`/dashboards/${encodeURIComponent(targetDash)}/show`, { replace: true });
         return;
       }
     }
 
     if (deviceDash) {
-      navigate(`/dashboards/dashboards/${encodeURIComponent(deviceDash)}/show`, { replace: true });
+      navigate(`/dashboards/${encodeURIComponent(deviceDash)}/show`, { replace: true });
       return;
     }
 
     const globalDash = globalRec?.dash;
     if (globalDash) {
-      navigate(`/dashboards/dashboards/${encodeURIComponent(globalDash)}/show`, { replace: true });
+      navigate(`/dashboards/${encodeURIComponent(globalDash)}/show`, { replace: true });
       return;
     }
 
-    navigate('/dashboards/dashboards', { replace: true });
+    navigate('/dashboards', { replace: true });
   }, [myData, myLoading, defaultsData, defaultsLoading, group, groupsLoading, car, groupName, deviceDash, globalRec, navigate]);
 
   return <div style={{ padding: '2em' }}>Loading…</div>;
