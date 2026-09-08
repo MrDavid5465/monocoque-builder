@@ -187,9 +187,23 @@ pub fn store(frame: AcTelemetryFrame) {
 
 /// The latest frame, or `None` if nothing has arrived recently.
 pub fn latest() -> Option<AcTelemetryFrame> {
+    latest_with_age().map(|(frame, _)| frame)
+}
+
+/// The latest frame plus how long ago it arrived, in milliseconds.
+///
+/// The age is the only part of the end-to-end delay this process can measure
+/// on its own: the game's clock is a wine clock and not comparable to ours, so
+/// "when was this sampled in-game" is unavailable, but "how long has this sat
+/// here before being handed to a subscriber" is exact. Reported per frame so a
+/// consumer can tell a backend hold-up from a transport one -- which is the
+/// distinction that matters when the sway lags and nobody knows which hop is
+/// responsible.
+pub fn latest_with_age() -> Option<(AcTelemetryFrame, f64)> {
     let guard = LATEST.lock().ok()?;
     let (frame, at) = guard.as_ref()?;
-    (at.elapsed() < STALE_AFTER).then(|| frame.clone())
+    let age = at.elapsed();
+    (age < STALE_AFTER).then(|| (frame.clone(), age.as_secs_f64() * 1000.0))
 }
 
 /// Whether frames are currently arriving.

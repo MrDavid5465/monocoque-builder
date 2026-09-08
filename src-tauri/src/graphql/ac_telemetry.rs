@@ -31,6 +31,12 @@ pub struct AcTelemetry {
     /// without `ac.getTrackCoordinatesDeg`, or before the first frame.
     pub track_latitude: Option<f64>,
     pub track_longitude: Option<f64>,
+    /// Milliseconds between this frame arriving from the game and being handed
+    /// to this subscriber. Diagnostic: it isolates time spent waiting inside
+    /// this process from time spent in the game's socket or on the wire, which
+    /// is the split you need when the sway lags and nobody knows which hop
+    /// owns it. 0 on the snapshot query, which reads outside the stream.
+    pub age_ms: f32,
     pub sun_angle_deg: f32,
     /// From `ac.getSunPitchAngle()`, and NOT usable as sun elevation —
     /// measured live it returns exact constants that never move while the
@@ -91,6 +97,8 @@ pub struct AcTelemetry {
 impl From<AcTelemetryFrame> for AcTelemetry {
     fn from(frame: AcTelemetryFrame) -> Self {
         Self {
+            // Unknown unless built via `with_age` below.
+            age_ms: 0.0,
             time_total_seconds: frame.time_total_seconds,
             day_of_year: frame.day_of_year,
             timestamp: frame.timestamp,
@@ -227,6 +235,11 @@ impl AcTelemetryMutation {
 /// without a second query.
 pub fn stream(rate_hz: u32) -> impl Stream<Item = Option<AcTelemetry>> {
     let period = Duration::from_millis((1000 / rate_hz.clamp(1, 60)) as u64);
-    IntervalStream::new(tokio::time::interval(period))
-        .map(|_| ac_telemetry::latest().map(AcTelemetry::from))
+    IntervalStream::new(tokio::time::interval(period)).map(|_| {
+        ac_telemetry::latest_with_age().map(|(frame, age_ms)| {
+            let mut out = AcTelemetry::from(frame);
+            out.age_ms = age_ms as f32;
+            out
+        })
+    })
 }

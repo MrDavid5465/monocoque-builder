@@ -334,7 +334,20 @@ function script.update(dt)
 
   sendDue = sendDue - dt
   if sendDue > 0 then return end
-  sendDue = SEND_INTERVAL
+  -- Carry the overshoot rather than resetting to a whole interval.
+  --
+  -- Resetting quantised the real send period UP to a whole number of game
+  -- frames: at 100fps (dt 10ms) a 16.7ms interval takes two frames, so this
+  -- sent at 50Hz, and at 120fps floating-point residue left sendDue a hair
+  -- above zero on the second frame and cost a third, dropping it to ~40Hz.
+  -- Worse than the average, the period jittered between one and two frames as
+  -- frame time moved, which is what showed up downstream as frames arriving
+  -- up to 90ms stale while delivery itself was steady.
+  sendDue = sendDue + SEND_INTERVAL
+  -- A hitch (loading, a stutter) can drive sendDue far negative; carrying all
+  -- of that would bank credit and fire a burst of catch-up sends afterwards.
+  -- One interval of debt is the most worth honouring.
+  if sendDue < 0 then sendDue = 0 end
 
   local sim = ac.getSim()
   if sim == nil or sim.isInMainMenu then return end
