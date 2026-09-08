@@ -121,10 +121,13 @@ export const SUN_ELEVATION_DUSK_DAY_DEG = 7;
 // faster than the horizon does — and the photographs being blended are of an
 // interior.
 //
-// Fitted to one observation, in a PRACTICE session with manual time control:
-// the in-game interior stops darkening noticeably at 22:50 sim, which a 10s
-// interval trace of the same evening puts at -7.9 degrees. The exponent is
-// chosen so the curve reaches full night there:
+// Fitted to one observation and then confirmed by a second, both taken in a
+// PRACTICE session with manual time control — the clock held still, which is
+// what makes them trustworthy (see the retraction note below).
+//
+// The fit: the in-game interior stops darkening noticeably at 22:50 sim, which
+// a 10s-interval trace of the same evening puts at -7.9 degrees. The exponent
+// is chosen so the curve reaches full night there:
 //
 //   exponent   reaches 99% at   error vs the -7.9 anchor
 //      1          -9.94              -2.04   (too late; keeps darkening
@@ -134,6 +137,13 @@ export const SUN_ELEVATION_DUSK_DAY_DEG = 7;
 //
 // Both endpoints are left exactly where they are, which is what having them
 // independently confirmed correct requires.
+//
+// The confirmation: dawn was then scrubbed the same way, and read correctly
+// with no further change. That matters more than a second data point. The
+// exponent was fitted entirely to a DUSK observation and applies symmetrically
+// — an interior that goes dark before the sky does should also stay dark after
+// the sky brightens — so dawn was the place that assumption could have failed,
+// and it did not. It is why the two bands are still allowed to be identical.
 //
 // An earlier value of 3 came from a first report of near-max darkness at
 // 22:00-22:30 (-2.66 to -5.78 degrees), made while driving a 2-hour-cycle

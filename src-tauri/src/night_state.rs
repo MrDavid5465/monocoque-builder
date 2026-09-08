@@ -98,8 +98,11 @@ pub const SUN_ELEVATION_DUSK_DAY_DEG: f64 = 7.0;
 /// a sky — an interior is lit by ambient only and loses light much faster than
 /// the horizon does, and these are photographs of an interior.
 ///
-/// Fitted to one observation made in a PRACTICE session with manual time
-/// control: the in-game interior stops darkening noticeably at 22:50 sim,
+/// Fitted to one observation and confirmed by a second, both taken in a
+/// PRACTICE session with manual time control — the clock held still, which is
+/// what makes them trustworthy (see the retraction note below).
+///
+/// The fit: the in-game interior stops darkening noticeably at 22:50 sim,
 /// which a 10s-interval trace of the same evening puts at -7.9 degrees. The
 /// exponent is chosen so the curve reaches full night there:
 ///
@@ -111,6 +114,13 @@ pub const SUN_ELEVATION_DUSK_DAY_DEG: f64 = 7.0;
 ///
 /// Both endpoints stay exactly where they are, which is what having them
 /// independently confirmed requires.
+///
+/// The confirmation: dawn was then scrubbed the same way and read correctly
+/// with no further change. The exponent was fitted entirely to a DUSK
+/// observation and applies symmetrically — an interior that darkens before the
+/// sky should also stay dark after the sky brightens — so dawn was where that
+/// assumption could have failed. It did not, which is why the two bands are
+/// still allowed to be identical.
 ///
 /// An earlier value of 3 came from a first report of near-max darkness at
 /// 22:00-22:30 (-2.66 to -5.78 deg), made while driving a 2-hour-cycle
