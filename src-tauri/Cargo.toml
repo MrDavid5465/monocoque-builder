@@ -5,7 +5,7 @@ members = [
 
 [package]
 name = "monocoque-builder"
-version = "0.4.0"
+version = "0.5.0"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
