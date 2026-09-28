@@ -63,6 +63,11 @@ fn main() {
                         Err(e) => eprintln!("Could not restore Assetto Corsa settings: {e}"),
                     }
 
+                    // Before the API is even listening: the controller has to
+                    // exist whenever the sim enumerates its devices, which is
+                    // typically well before the first dashboard button press.
+                    gamepad::init();
+                    tokio::spawn(gamepad::run_device_supervisor());
                     tokio::spawn(gamepad::run_watchdog());
                     tokio::spawn(huenicorn::run_sim_watcher());
                     tokio::spawn(huenicorn::run_color_poller());
