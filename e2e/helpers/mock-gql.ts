@@ -216,8 +216,9 @@ export async function mockGraphQL(
 export async function gotoDesigner(page: Page, dashboardName = 'E2E Test') {
   // The old telemetry app's /telemetry/manage/:name route was removed when
   // dashboards moved under ReactiveAdmin (Dashboards/DashboardsAdmin) —
-  // the designer now lives at /dashboards/dashboards/:id/edit (idField
-  // is the dashboard name, route built by CardList's `${pathname}/${routeId}/edit`).
-  await page.goto(`/#/dashboards/dashboards/${encodeURIComponent(dashboardName)}/edit`);
+  // the designer now lives at /dashboards/:id/edit (idField is the
+  // dashboard name, route built by CardList's `${pathname}/${routeId}/edit`).
+  // The list is the dashboards app's index, so the app name appears once.
+  await page.goto(`/#/dashboards/${encodeURIComponent(dashboardName)}/edit`);
   await page.waitForSelector('text=Loading dashboard...', { state: 'hidden', timeout: 10_000 });
 }
