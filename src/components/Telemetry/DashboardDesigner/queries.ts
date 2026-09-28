@@ -224,6 +224,14 @@ export const DASHBOARD_UPDATES_SUB = gql`
         operationName
         value { id favorite }
       }
+      # Admin pages' refetch triggers, routed here by hubSubscriptionRouter.
+      # They refetch on any event, so the id (for subscribe-to-one filtering)
+      # is all they need.
+      ... on MonocoqueSoundDeviceChanged { operationName value { id } }
+      ... on SoundDeviceProfileChanged { operationName value { id } }
+      ... on LedsDeviceProfileChanged { operationName value { id } }
+      ... on ShiftLightProfileChanged { operationName value { id } }
+      ... on SimWindDeviceProfileChanged { operationName value { id } }
       # Only the NeckFX fields. This member arrives at 60Hz and the type
       # carries a great deal more (sun angles, weather, world position) —
       # see useAcNeckFx for the consumer.

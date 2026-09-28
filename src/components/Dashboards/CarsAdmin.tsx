@@ -5,7 +5,7 @@ import ReactiveAdmin from '../../lib/typical-admin-fabric';
 import SwitchableList from '../../lib/typical-admin-fabric/SwitchableList';
 import CarShow from './CarShow';
 import CarNew from './CarNew';
-import { GET_CARS, ADD_CAR, DELETE_CAR, SET_FAVORITE_CAR, CarRecord } from '../Telemetry/carQueries';
+import { GET_CARS, ADD_CAR, DELETE_CAR, SET_FAVORITE_CAR, CAR_CHANGED, CarRecord } from '../Telemetry/carQueries';
 
 function apiBase() {
   return `http://${window.location.hostname}:9000`;
@@ -15,7 +15,25 @@ function apiBase() {
 // required by IDispatcher/ITASchema but not actually read here — CarShow/CarNew
 // are fully custom components that do their own fetching/mutating, same
 // rationale as DashboardsAdmin's show/edit.
-const dispatcher = { list: GET_CARS, show: GET_CARS, edit: GET_CARS, new: ADD_CAR, delete: DELETE_CAR };
+// `subscribe` is what makes the card grid react to writes it didn't make.
+// CardList refetches on any event from it; without it the list only ever
+// reflects what was true at mount, which is why a 360 capture's new
+// thumbnails needed a manual page refresh to appear. The capture runs
+// detached from any request (see graphql/capture.rs, which publishes
+// CarChanged when it stores the photos), so there is no mutation response for
+// Apollo to update the cache from — a subscription is the only route.
+//
+// Note this is the LIST-wide subscription, not `subscribeToOne`: that one is
+// for Show/Update, which is why a car's own detail page already updated while
+// the grid did not.
+const dispatcher = {
+  list: GET_CARS,
+  show: GET_CARS,
+  edit: GET_CARS,
+  new: ADD_CAR,
+  delete: DELETE_CAR,
+  subscribe: CAR_CHANGED,
+};
 const name = { singular: 'Car', plural: 'Cars' };
 const carSchema = {
   name: { label: 'Name' },

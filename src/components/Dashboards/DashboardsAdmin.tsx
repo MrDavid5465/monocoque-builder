@@ -4,7 +4,7 @@ import SwitchableList from '../../lib/typical-admin-fabric/SwitchableList';
 import DashboardShow from './DashboardShow';
 import DashboardEdit from './DashboardEdit';
 import DashboardNew from './DashboardNew';
-import { GET_DASHBOARDS, ADD_DASHBOARD, REMOVE_DASHBOARD } from '../Telemetry/DashboardDesigner/queries';
+import { GET_DASHBOARDS, ADD_DASHBOARD, REMOVE_DASHBOARD, DASHBOARD_CHANGED_SUB } from '../Telemetry/DashboardDesigner/queries';
 import { dashboardThumbnailUrl } from '../Telemetry/DashboardDesigner/thumbnailUrl';
 
 // dispatcher.show/edit/new and schemaDefinition.show/edit/new are structurally
@@ -16,7 +16,17 @@ import { dashboardThumbnailUrl } from '../Telemetry/DashboardDesigner/thumbnailU
 // rationale as CarsAdmin's show/edit/new. dispatcher.delete IS read directly
 // (typical-admin-fabric/Show.tsx and CardList.tsx invoke it as the delete
 // mutation) — no companion schemaDefinition.delete key exists or is needed.
-const dispatcher = { list: GET_DASHBOARDS, show: GET_DASHBOARDS, edit: GET_DASHBOARDS, new: ADD_DASHBOARD, delete: REMOVE_DASHBOARD };
+// See CarsAdmin's dispatcher for why `subscribe` matters: without it the card
+// grid never learns about writes it didn't make, and dashboard thumbnails are
+// written by the same detached paths.
+const dispatcher = {
+  list: GET_DASHBOARDS,
+  show: GET_DASHBOARDS,
+  edit: GET_DASHBOARDS,
+  new: ADD_DASHBOARD,
+  delete: REMOVE_DASHBOARD,
+  subscribe: DASHBOARD_CHANGED_SUB,
+};
 const name = { singular: 'Dashboard', plural: 'Dashboards' };
 const dashboardSchema = {
   name: { label: 'Name' },

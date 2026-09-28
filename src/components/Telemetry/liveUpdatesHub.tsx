@@ -20,7 +20,12 @@ export type LiveUpdateTypename =
   | 'RecordingStatus'
   | 'AmbientColorChanged'
   | 'HuenicornSettingsChanged'
-  | 'AcTelemetry';
+  | 'AcTelemetry'
+  | 'MonocoqueSoundDeviceChanged'
+  | 'SoundDeviceProfileChanged'
+  | 'LedsDeviceProfileChanged'
+  | 'ShiftLightProfileChanged'
+  | 'SimWindDeviceProfileChanged';
 
 type Listener = (event: any) => void;
 

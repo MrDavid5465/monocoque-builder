@@ -42,6 +42,10 @@ use crate::typiql_types::{
     DeviceDefaultChanged, LfeChannelChanged, MonocoqueSoundDeviceChanged, NightModeChanged,
     PreviewCarChanged, ShakerChannelChanged, ShakerDspChannelChanged,
 };
+use crate::typiql_types::{
+    LedsDeviceProfileChanged, ShiftLightProfileChanged, SimWindDeviceProfileChanged,
+    SoundDeviceProfileChanged,
+};
 use async_graphql::{Context, Object, SimpleObject, Subscription};
 use futures_util::stream::{select, select_all, Stream, StreamExt};
 use std::sync::Arc;
@@ -113,6 +117,16 @@ enum DashboardUpdateEvent {
     // published from update_settings — see HuenicornSettingsChanged's own
     // doc comment.
     HuenicornSettings(HuenicornSettingsChanged),
+    // The admin pages' list/show/edit refetch triggers. typical-admin's
+    // Subscriber routes a page's `dispatcher.subscribe` through this hub
+    // instead of opening one connection per page (see the frontend's
+    // hubSubscriptionRouter), so every type an admin page subscribes to has
+    // to be carried here. Event-driven, so no include flag.
+    MonocoqueSoundDevice(MonocoqueSoundDeviceChanged),
+    SoundDeviceProfile(SoundDeviceProfileChanged),
+    LedsDeviceProfile(LedsDeviceProfileChanged),
+    ShiftLightProfile(ShiftLightProfileChanged),
+    SimWindDeviceProfile(SimWindDeviceProfileChanged),
 }
 
 /// One tick of the server-authoritative simulated in-game clock (see
@@ -606,8 +620,28 @@ impl SubscriptionRoot {
                 futures_util::stream::empty().boxed()
             };
 
-        Ok(futures_util::stream::select_all([
-            s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11, s12, s13,
-        ]))
+        let admin = [
+            TypiQLBroker::<MonocoqueSoundDeviceChanged>::subscribe()
+                .map(DashboardUpdateEvent::MonocoqueSoundDevice)
+                .boxed(),
+            TypiQLBroker::<SoundDeviceProfileChanged>::subscribe()
+                .map(DashboardUpdateEvent::SoundDeviceProfile)
+                .boxed(),
+            TypiQLBroker::<LedsDeviceProfileChanged>::subscribe()
+                .map(DashboardUpdateEvent::LedsDeviceProfile)
+                .boxed(),
+            TypiQLBroker::<ShiftLightProfileChanged>::subscribe()
+                .map(DashboardUpdateEvent::ShiftLightProfile)
+                .boxed(),
+            TypiQLBroker::<SimWindDeviceProfileChanged>::subscribe()
+                .map(DashboardUpdateEvent::SimWindDeviceProfile)
+                .boxed(),
+        ];
+
+        Ok(futures_util::stream::select_all(
+            [s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11, s12, s13]
+                .into_iter()
+                .chain(admin),
+        ))
     }
 }

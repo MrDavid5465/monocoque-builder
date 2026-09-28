@@ -24,6 +24,7 @@ import dispatcher, { IMy } from "./lib/denim/lib/queries";
 import SetupWizard from "./components/Onboarding/SetupWizard";
 import { ConfirmDialogHost } from "./lib/denim/components/ConfirmDialog";
 import { LiveUpdatesProvider } from "./components/Telemetry/liveUpdatesHub";
+import { HubSubscriptionRouter } from "./components/Telemetry/hubSubscriptionRouter";
 
 export const getStyle = () => {
   return { ...getDenimStyle(), ...mergeStyleSets(qStyles(getTheme())) };
@@ -81,6 +82,7 @@ const App: React.FC = () => {
         includeAmbientColor={false}
         includeAcTelemetry={false}
       >
+      <HubSubscriptionRouter>
       <Denim
         Logo={Logo}
         Brand={(props) => (
@@ -93,6 +95,7 @@ const App: React.FC = () => {
         components={{ Shakers, LedsDevices, ShiftLights, SimWindDevices, AmbientLights, Dashboards }}
         themes={THEMES}
         />
+      </HubSubscriptionRouter>
       </LiveUpdatesProvider>
     </>
   );
