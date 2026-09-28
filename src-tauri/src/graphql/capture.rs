@@ -231,8 +231,9 @@ impl CarCaptureMutation {
     /// straight onto the Car when it finishes, through the same
     /// `set_car_photo` path a manual upload uses.
     ///
-    /// `track_id` is optional: with nothing given, the car is shot wherever
-    /// `race.ini` currently points, which is guaranteed to be installed.
+    /// `track_id` is optional: with nothing given, the car is shot in the
+    /// generated showroom track if it's installed, and otherwise wherever
+    /// `race.ini` currently points (see `default_capture_track`).
     async fn capture_car_photos_360(
         &self,
         ctx: &Context<'_>,
@@ -319,8 +320,13 @@ impl CarCaptureMutation {
         match track_id.filter(|value| !value.is_empty()) {
             Some(track) => config.track_id = track,
             None => {
-                let (track, layout) =
-                    ac_capture::preflight::current_track(&paths).ok_or_else(|| {
+                // Not fatal: without it the default falls back to the last
+                // played track, which still produces a capture.
+                if let Err(e) = ac_capture::showroom::ensure_installed(&paths.install_dir) {
+                    ac_capture::log::line(&format!("showroom: {e}"));
+                }
+                let (track, layout) = ac_capture::preflight::default_capture_track(&paths)
+                    .ok_or_else(|| {
                         async_graphql::Error::new(
                             "Couldn't work out which track to use. Launch Assetto Corsa once, \
                              or pass a track explicitly.",
@@ -329,6 +335,14 @@ impl CarCaptureMutation {
                 config.track_id = track;
                 config.track_layout = layout;
             }
+        }
+
+        // A generated showroom track carries its own placement: the donor
+        // supplies the spawn, which is nowhere near the building.
+        if let Some(hints) = ac_capture::preflight::track_capture_hints(&paths, &config.track_id) {
+            config.place_at = hints.place_at;
+            config.place_dir = hints.place_dir;
+            config.hide_meshes = hints.hide_meshes;
         }
 
         ac_capture::begin(&car.id);

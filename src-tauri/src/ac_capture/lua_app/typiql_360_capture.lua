@@ -59,6 +59,14 @@ local function num(values, key, fallback)
   return tonumber(values[key]) or fallback
 end
 
+--- "x,y,z" -> vec3, or nil for an empty/unparseable value.
+local function parseVec3(text)
+  if text == nil or text == '' then return nil end
+  local x, y, z = text:match('^%s*(-?[%d%.]+)%s*,%s*(-?[%d%.]+)%s*,%s*(-?[%d%.]+)%s*$')
+  if x == nil then return nil end
+  return vec3(tonumber(x), tonumber(y), tonumber(z))
+end
+
 --- Loads the queued job, if any, and immediately consumes it. Returns nil
 --- when there's nothing to do, which is the normal case for a regular play
 --- session.
@@ -92,6 +100,24 @@ local function claimJob()
     -- Also makes placement identical from car to car, instead of depending
     -- on whichever pit box the session happened to allocate.
     spawnSet = values.SPAWN_SET or ac.SpawnSet.HotlapStart,
+    -- Absolute world coordinate to place the car at, "x,y,z", empty to use
+    -- the spawn set above. Exists for the generated showroom track, where the
+    -- interesting spot is the showroom's origin rather than any spawn the
+    -- donor track happens to define -- a donor supplies the spawn and the
+    -- drivable surface, and lands the car in its own pit lane, nowhere near
+    -- the building. physics.setCarPosition aligns to the track surface
+    -- itself, so only x and z really matter.
+    placeAt = values.PLACE_AT or '',
+    -- Heading to face, "x,y,z". Passing nil to setCarPosition would align the
+    -- car along the AI spline, which inside a building is the donor track's
+    -- racing line and points somewhere arbitrary.
+    placeDir = values.PLACE_DIR or '0,0,1',
+    -- Mesh filters to hide before shooting, pipe-separated. A composed
+    -- showroom track carries its donor's scenery -- the donor is what supplies
+    -- the spawn and the drivable surface, so it cannot be left out of the
+    -- model -- and that scenery is grass and kerbs across the showroom floor.
+    -- Pipe-separated because a CSP filter may itself contain commas.
+    hideMeshes = values.HIDE_MESHES or '',
     -- Whether the car needs moving at all. False when the session already
     -- spawned it where the photo is taken, which is the normal case.
     teleport = (values.TELEPORT or '0') ~= '0',
@@ -154,6 +180,10 @@ local placed = false
 --- Whether physics writes were permitted, and how long the car was given to
 --- come to rest.
 local placementReport = ''
+--- What the donor-scenery hiding actually did. Reported because a filter that
+--- matches nothing is silent otherwise, and the failure mode -- grass across
+--- the showroom floor -- only shows up in the finished photo.
+local hideReport = ''
 
 --- Writes the outcome where TyPiQL can read it. TyPiQL waits on this file
 --- rather than on the images themselves so that a failure is reported
@@ -171,6 +201,7 @@ local function writeResult(ok, message)
     'TIMES=' .. timeReport,
     'START=' .. startReport,
     'PLACEMENT=' .. placementReport,
+    'HIDDEN=' .. hideReport,
   }, '\n'))
 end
 
@@ -333,7 +364,35 @@ function script.update(dt)
     -- pit lighting in the night frame.
     if not placed then
       placed = true
-      if not job.teleport then
+      -- Hidden before the first settle, so auto-exposure adapts to the
+      -- scene that actually gets photographed.
+      if job.hideMeshes ~= '' then
+        local hidden, groups = 0, 0
+        for raw in job.hideMeshes:gmatch('[^|]+') do
+          -- A separate local: the loop variable is const in Lua 5.4, and this
+          -- script has to parse under both that and CSP's LuaJIT.
+          local filter = raw:match('^%s*(.-)%s*$')
+          if filter ~= '' then
+            local found = ac.findMeshes(filter)
+            hidden = hidden + found:size()
+            found:setVisible(false)
+            groups = groups + 1
+          end
+        end
+        hideReport = string.format('hid %d mesh(es) via %d filter(s)', hidden, groups)
+      end
+
+      local at = parseVec3(job.placeAt)
+      if at ~= nil and physics.allowed() then
+        -- Absolute placement wins over the spawn set: the showroom track's
+        -- donor spawn is in a pit lane the photo never wants to see.
+        physics.setCarPosition(0, at, parseVec3(job.placeDir) or vec3(0, 0, 1))
+        physics.setCarVelocity(0, vec3(0, 0, 0))
+        placementReport = string.format('placed at %.1f,%.1f,%.1f', at.x, at.y, at.z)
+      elseif at ~= nil then
+        placementReport = 'placement requested but physics not allowed'
+        ac.log('typiql: physics not allowed, cannot place car at ' .. job.placeAt)
+      elseif not job.teleport then
         -- Normal path: the session already spawned the car where the photo
         -- wants it, so leave it alone. Teleporting would only pick the car
         -- up and drop it again.
@@ -353,7 +412,7 @@ function script.update(dt)
     -- Held here until the car has come to rest. Without it the first frame
     -- can catch the car mid-bounce, or mid-roll.
     -- A car that was never moved doesn't need time to stop moving.
-    local settleFor = job.teleport and job.placeSettle or 0
+    local settleFor = (job.teleport or job.placeAt ~= '') and job.placeSettle or 0
     if stateTime < settleFor then return end
     if job.teleport then
       placementReport = string.format('teleported allowed=%s settled=%.1fs',

@@ -138,6 +138,9 @@ pub fn write_job(paths: &CapturePaths, config: &CaptureConfig, job_id: &str) -> 
          NIGHT_SETTLE_SECONDS={night_settle}\n\
          TIMEOUT_SECONDS={timeout}\n\
          SPAWN_SET={spawn_set}\n\
+         PLACE_AT={place_at}\n\
+         PLACE_DIR={place_dir}\n\
+         HIDE_MESHES={hide_meshes}\n\
          TELEPORT={teleport}\n\
          PLACE_SETTLE_SECONDS={place_settle}\n\
          SHUTDOWN_WHEN_DONE={shutdown}\n",
@@ -149,6 +152,9 @@ pub fn write_job(paths: &CapturePaths, config: &CaptureConfig, job_id: &str) -> 
         night_settle = config.night_settle_seconds,
         timeout = config.in_game_timeout_seconds,
         spawn_set = config.spawn_set,
+        place_at = config.place_at,
+        place_dir = config.place_dir,
+        hide_meshes = config.hide_meshes,
         // Only move the car if the session couldn't spawn it where the photo
         // is taken. Teleporting drops it in from above, so it's a fallback,
         // not the normal path.

@@ -22,6 +22,7 @@ pub mod launch;
 pub mod log;
 pub mod paths;
 pub mod preflight;
+pub mod showroom;
 
 pub use preflight::CaptureConfig;
 
@@ -268,7 +269,7 @@ mod tests {
     /// images onto a Car record, which needs the app's data store.
     ///
     /// Assetto Corsa must be closed first. Set `MONOCOQUE_BUILDER_CAPTURE_CAR` to pick
-    /// a car; the track comes from whatever `race.ini` currently points at.
+    /// a car; the track is picked by `default_capture_track`.
     ///
     /// `#[ignore]`, and genuinely invasive — it edits real settings, though
     /// every file is journalled first and restored on the way out:
@@ -281,10 +282,20 @@ mod tests {
 
         let paths = CapturePaths::resolve(None, None).expect("no Assetto Corsa install detected");
         let mut config = CaptureConfig::new(car.clone(), String::new());
-        let (track, layout) =
-            preflight::current_track(&paths).expect("no track in race.ini — launch AC once");
+        if let Err(e) = showroom::ensure_installed(&paths.install_dir) {
+            println!("showroom not generated: {e}");
+        }
+        let (track, layout) = preflight::default_capture_track(&paths)
+            .expect("no showroom track and no track in race.ini — launch AC once");
         config.track_id = track.clone();
         config.track_layout = layout;
+        // Same hints the real capture path applies — without them a showroom
+        // run shoots from the donor track's pit lane.
+        if let Some(hints) = preflight::track_capture_hints(&paths, &config.track_id) {
+            config.place_at = hints.place_at;
+            config.place_dir = hints.place_dir;
+            config.hide_meshes = hints.hide_meshes;
+        }
 
         println!("car   : {car}");
         println!("track : {track}");

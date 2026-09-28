@@ -31,6 +31,48 @@ use std::path::{Path, PathBuf};
 /// rename it.
 pub const DEFAULT_DISPLAY_MODE_360: &str = "__EXT_360";
 
+/// Optional per-track capture hints, written by the showroom-track generator.
+///
+/// A generated track knows where its interesting spot is — inside the building
+/// — but nothing else does: the donor track supplies the spawn, which is in the
+/// donor's pit lane. Rather than hardcoding one showroom's coordinates in here,
+/// the track carries them, so the generator can be re-run for a different
+/// showroom or donor without a code change.
+pub const CAPTURE_HINTS_FILE: &str = "monocoque_capture.ini";
+
+/// The track `showroom::ensure_installed` generates.
+pub const SHOWROOM_TRACK_ID: &str = "monocoque_showroom";
+
+/// What a generated track tells the capture about itself.
+#[derive(Debug, Clone, Default)]
+pub struct TrackCaptureHints {
+    /// `[PLACE] AT` — where to set the car down, "x,y,z".
+    pub place_at: String,
+    /// `[PLACE] DIR` — which way to face.
+    pub place_dir: String,
+    /// `[HIDE] FILTERS` — mesh filters to make invisible before shooting,
+    /// pipe-separated. A composed track carries the DONOR's scenery, which is
+    /// what supplies the spawn and the drivable surface and therefore cannot
+    /// simply be left out of the model.
+    pub hide_meshes: String,
+}
+
+/// Reads a generated track's capture hints, if it has any.
+pub fn track_capture_hints(paths: &CapturePaths, track_id: &str) -> Option<TrackCaptureHints> {
+    let path = paths
+        .install_dir
+        .join("content")
+        .join("tracks")
+        .join(track_id)
+        .join(CAPTURE_HINTS_FILE);
+    let text = std::fs::read_to_string(path).ok()?;
+    Some(TrackCaptureHints {
+        place_at: ini::get_value(&text, "PLACE", "AT").unwrap_or_default(),
+        place_dir: ini::get_value(&text, "PLACE", "DIR").unwrap_or_else(|| "0,0,1".to_string()),
+        hide_meshes: ini::get_value(&text, "HIDE", "FILTERS").unwrap_or_default(),
+    })
+}
+
 /// AC's session type for Practice.
 const SESSION_TYPE_PRACTICE: &str = "1";
 
@@ -87,7 +129,29 @@ pub struct CaptureConfig {
     /// default, so 13:00 becomes 01:00, matching the "+12h" button in CSP's
     /// debug app.
     pub night_offset_seconds: u32,
-    /// Seconds to let the car come to rest after being teleported.
+    /// Absolute world coordinate to set the car down at, "x,y,z". Empty uses
+    /// `session_spawn_set` instead.
+    ///
+    /// For the generated showroom track: a donor track supplies the spawn and
+    /// the drivable surface, so the car arrives in the donor's pit lane rather
+    /// than in the building. `physics.setCarPosition` aligns to the track
+    /// surface, so only x and z matter much.
+    pub place_at: String,
+    /// Heading to face at `place_at`, "x,y,z". Not optional in practice:
+    /// passing nothing aligns the car along the AI spline, which inside a
+    /// building is the donor track's racing line pointing somewhere arbitrary.
+    pub place_dir: String,
+    /// Mesh filters to hide before shooting, pipe-separated.
+    ///
+    /// Only a composed track needs this: its donor supplies the spawn and the
+    /// drivable surface, so the donor's scenery is necessarily in the scene
+    /// too — grass and kerbs across a showroom floor. Applied at runtime
+    /// rather than through the track's ext_config because the effect is then
+    /// verifiable in the same session, and because the CSP key for hiding from
+    /// config is not what it appears to be (`VISIBILITY_LEVEL` is a detail
+    /// threshold, not visibility).
+    pub hide_meshes: String,
+    /// Seconds to let the car come to rest after being teleported or placed.
     ///
     /// `physics.teleportCarTo` drops the car in rather than setting it
     /// down — observed landing hard enough to roll onto its side — so it
@@ -195,6 +259,9 @@ impl CaptureConfig {
             // and an hour genuinely dark for the night one.
             day_hour: 13,
             night_offset_seconds: 12 * 60 * 60,
+            place_at: String::new(),
+            place_dir: "0,0,1".into(),
+            hide_meshes: String::new(),
             place_settle_seconds: 3.0,
             day_settle_seconds: 6.0,
             night_settle_seconds: 6.0,
@@ -369,6 +436,7 @@ pub fn apply(paths: &CapturePaths, config: &CaptureConfig) -> Result<RestoreJour
     let graphics_ini = paths.ext_cfg("graphics_adjustments.ini");
     let modes_ini = paths.ext_cfg("custom_rendering_modes.ini");
     let screenshots_ini = paths.ext_cfg("nice_screenshots.ini");
+    let particles_ini = paths.ext_cfg("particles_fx.ini");
 
     let mut journal = RestoreJournal::default();
     journal.snapshot(&race_ini)?;
@@ -378,6 +446,7 @@ pub fn apply(paths: &CapturePaths, config: &CaptureConfig) -> Result<RestoreJour
     }
     journal.snapshot(&modes_ini)?;
     journal.snapshot(&screenshots_ini)?;
+    journal.snapshot(&particles_ini)?;
     // On disk before anything is modified — see this module's doc comment.
     journal.persist()?;
 
@@ -385,6 +454,7 @@ pub fn apply(paths: &CapturePaths, config: &CaptureConfig) -> Result<RestoreJour
     write_video_ini(&video_ini, config)?;
     write_modes_ini(&modes_ini, config)?;
     write_screenshot_quality(&screenshots_ini, config)?;
+    write_fireworks_off(&particles_ini)?;
     if config.disable_upscaling {
         write_upscaling_off(&graphics_ini)?;
     }
@@ -399,12 +469,28 @@ pub fn finish(journal: &RestoreJournal) -> Result<(), String> {
     Ok(())
 }
 
-/// The track `race.ini` currently points at, as `(track, layout)`.
+/// Where to shoot a car when the caller hasn't said, as `(track, layout)`.
 ///
-/// Used as the default place to shoot a car. It's a better default than any
-/// hardcoded track name: whatever is in there was genuinely launched on this
-/// install at some point, so it's guaranteed to exist and to have a valid
-/// layout — a hardcoded favourite might simply not be installed.
+/// The showroom track wins whenever it's installed. That's the whole point of
+/// generating it: its interior is evenly lit at midday and genuinely black at
+/// night, and it looks the same for every car, whereas a real circuit gives a
+/// different backdrop and a different night floor per shot.
+///
+/// Otherwise fall back to whatever `race.ini` points at — a weaker but always
+/// valid default, since that track was genuinely launched on this install at
+/// some point, so it exists and its layout is real.
+///
+/// Presence of the hints file is the installed-check: the generator writes it
+/// last, so a track carrying one is both complete and known to be a capture
+/// track rather than a same-named circuit.
+pub fn default_capture_track(paths: &CapturePaths) -> Option<(String, Option<String>)> {
+    if track_capture_hints(paths, SHOWROOM_TRACK_ID).is_some() {
+        return Some((SHOWROOM_TRACK_ID.to_string(), None));
+    }
+    current_track(paths)
+}
+
+/// The track `race.ini` currently points at, as `(track, layout)`.
 pub fn current_track(paths: &CapturePaths) -> Option<(String, Option<String>)> {
     let text = std::fs::read_to_string(paths.race_ini()).ok()?;
     let track = ini::get_value(&text, "RACE", "TRACK").filter(|value| !value.is_empty())?;
@@ -613,12 +699,70 @@ fn write_upscaling_off(path: &Path) -> Result<(), String> {
     write(path, &updated)
 }
 
+/// Turns CSP's fireworks off for the capture.
+///
+/// They're a user preference that can be set to run every night
+/// (`BEHAVIOUR=8`, which this rig uses), not only on holidays, so a night
+/// frame would otherwise catch them mid-burst and light the cabin. `ENABLED`
+/// is the master switch above `BEHAVIOUR`, so it holds whatever the user
+/// picked; the journal puts their setting back afterwards.
+fn write_fireworks_off(path: &Path) -> Result<(), String> {
+    let text = read_or_empty(path)?;
+    let updated = ini::set_value(&text, "FIREWORKS", "ENABLED", "0");
+    write(path, &updated)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn config() -> CaptureConfig {
         CaptureConfig::new("ks_toyota_ae86", "ks_brands_hatch")
+    }
+
+    /// A capture asked for no track is meant to land in the showroom — the
+    /// one place whose lighting is known — and only fall back on the last
+    /// played track when the showroom hasn't been generated yet. Getting this
+    /// backwards is invisible until the photos come back wrong, since either
+    /// answer produces a capture that runs and succeeds.
+    #[test]
+    fn showroom_beats_the_last_played_track_when_installed() {
+        let root = std::env::temp_dir().join(format!("typiql-track-{}", uuid::Uuid::new_v4()));
+        let paths = CapturePaths {
+            install_dir: root.join("install"),
+            user_dir: root.join("user"),
+        };
+        std::fs::create_dir_all(paths.race_ini().parent().unwrap()).unwrap();
+        std::fs::write(
+            paths.race_ini(),
+            "[RACE]\nTRACK=ks_nordschleife\nCONFIG_TRACK=touristenfahrten\n",
+        )
+        .unwrap();
+
+        // No showroom yet: whatever was last played.
+        assert_eq!(
+            default_capture_track(&paths),
+            Some((
+                "ks_nordschleife".to_string(),
+                Some("touristenfahrten".to_string())
+            ))
+        );
+
+        let showroom = paths
+            .install_dir
+            .join("content")
+            .join("tracks")
+            .join(SHOWROOM_TRACK_ID);
+        std::fs::create_dir_all(&showroom).unwrap();
+        std::fs::write(showroom.join(CAPTURE_HINTS_FILE), "[PLACE]\nAT=0,0,0\n").unwrap();
+
+        // Generated: the showroom wins, with no layout of its own.
+        assert_eq!(
+            default_capture_track(&paths),
+            Some((SHOWROOM_TRACK_ID.to_string(), None))
+        );
+
+        std::fs::remove_dir_all(&root).ok();
     }
 
     #[test]
@@ -692,6 +836,28 @@ mod tests {
         assert_eq!(
             ini::get_value(&text, "VIDEO", "HEIGHT").as_deref(),
             Some("4096")
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn fireworks_are_off_whatever_behaviour_the_user_chose() {
+        let dir = std::env::temp_dir().join(format!("typiql-fireworks-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("particles_fx.ini");
+        std::fs::write(&path, "[FIREWORKS]\nBEHAVIOUR=8\n").unwrap();
+
+        write_fireworks_off(&path).unwrap();
+
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(
+            ini::get_value(&text, "FIREWORKS", "ENABLED").as_deref(),
+            Some("0")
+        );
+        // The user's own choice is left for the journal to restore around.
+        assert_eq!(
+            ini::get_value(&text, "FIREWORKS", "BEHAVIOUR").as_deref(),
+            Some("8")
         );
         std::fs::remove_dir_all(&dir).ok();
     }
