@@ -10,25 +10,43 @@
 //! or a dev session testing the installed copy while you edit the source and
 //! wonder why nothing changes.
 //!
-//! In a debug build, a service with no configured dev command is treated as a
+//! In a debug build, a service with no dev command is treated as a
 //! **misconfiguration, not a fallback**: `resolve` returns `None` and the
 //! caller declines to start it. Silently launching the installed binary is
 //! precisely what the dev/production split exists to prevent — that is how an
 //! afternoon gets spent debugging a stale `/usr/local/bin` copy while the
 //! source build sits unused.
+//!
+//! The dev command comes from an **environment variable**, not app config.
+//! Where a source build lives is a property of one developer's machine, not
+//! of the application: putting it in config meant the setting existed in the
+//! UI of every shipped build, where it does nothing, and travelled with a
+//! config file to machines that have no such checkout. An env var is scoped
+//! to the shell that launched the dev build, which is exactly the lifetime
+//! the value has.
+
+/// Environment variables holding the dev command for each service. Only read
+/// in debug builds.
+pub const SIMD_DEV_COMMAND_ENV: &str = "MONOCOQUE_BUILDER_SIMD_DEV_COMMAND";
+pub const MONOCOQUE_DEV_COMMAND_ENV: &str = "MONOCOQUE_BUILDER_MONOCOQUE_DEV_COMMAND";
+pub const HUENICORN_DEV_COMMAND_ENV: &str = "MONOCOQUE_BUILDER_HUENICORN_DEV_COMMAND";
 
 /// True when this is a debug (`cargo build` / `tauri dev`) binary.
 pub fn is_debug_build() -> bool {
     cfg!(debug_assertions)
 }
 
-/// The command to launch `service`, or `None` when this is a debug build and
-/// no dev command is configured for it (see the module docs — that case is a
-/// refusal, not a fallback). Callers own the logging, since the watchdogs
-/// re-resolve on every tick and would otherwise repeat the same complaint
-/// every few seconds.
-pub fn resolve(production: &str, debug: Option<&str>) -> Option<String> {
-    resolve_with_mode(production, debug, is_debug_build())
+/// The command to launch a service, or `None` when this is a debug build and
+/// its dev environment variable isn't set (see the module docs — that case is
+/// a refusal, not a fallback).
+///
+/// `production` is the configured command used by shipped builds; `dev_env`
+/// names the variable consulted instead while developing. Callers own the
+/// logging, since the watchdogs re-resolve on every tick and would otherwise
+/// repeat the same complaint every few seconds.
+pub fn resolve(production: &str, dev_env: &str) -> Option<String> {
+    let debug = std::env::var(dev_env).ok();
+    resolve_with_mode(production, debug.as_deref(), is_debug_build())
 }
 
 /// The decision itself, with the mode passed in — a single build can only

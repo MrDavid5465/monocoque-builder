@@ -179,10 +179,10 @@ fn resolved_command() -> Option<String> {
         .as_ref()
         .map(|c| c.settings.huenicorn_command.clone())
         .unwrap_or_else(|| "huenicorn".into());
-    let debug = config
-        .as_ref()
-        .and_then(|c| c.settings.huenicorn_debug_command.clone());
-    crate::service_commands::resolve(&production, debug.as_deref())
+    crate::service_commands::resolve(
+        &production,
+        crate::service_commands::HUENICORN_DEV_COMMAND_ENV,
+    )
 }
 
 /// Whether `command`'s first whitespace-separated token resolves to
@@ -229,9 +229,12 @@ pub fn start_huenicorn() -> Result<u32, String> {
     // debug-build refusal is returned as an error the caller surfaces rather
     // than only logged.
     let command = resolved_command().ok_or_else(|| {
-        "This is a debug build and no Huenicorn dev command is set (Settings > Services). \
-         Refusing to start the installed Huenicorn."
-            .to_string()
+        format!(
+            "This is a debug build and {} is not set. Refusing to start the installed \
+             Huenicorn — point that variable at your source build, or run a release build \
+             to use the configured command.",
+            crate::service_commands::HUENICORN_DEV_COMMAND_ENV
+        )
     })?;
 
     // Same host-resolution the watchdogs do: this spawn runs on the host under
@@ -1183,7 +1186,18 @@ pub async fn run_gamma_pusher(adapter: Arc<dyn TypiQLAdapter>) {
         let night = match night_clock::read_current(&adapter).await {
             Some(record) => {
                 let sim_ms = night_clock::current_sim_ms(&record, night_clock::now_ms());
-                night_state::night_amount(&record, sim_ms) as f32
+                // Same elevation the dashboards blend on, so the bulbs and
+                // the screen can't disagree partway through a dawn.
+                let sun = match sim_ms {
+                    Some(ms) => night_clock::current_sun_elevation_deg(&adapter, &record, ms).await,
+                    None => None,
+                };
+                night_state::night_amount(
+                    &record,
+                    sim_ms,
+                    sun.map(|(elevation, _)| elevation),
+                    sun.map(|(_, rising)| rising).unwrap_or(true),
+                ) as f32
             }
             // No NightMode record yet (nothing has toggled day/night on this
             // install): treat it as full day rather than skipping, so the

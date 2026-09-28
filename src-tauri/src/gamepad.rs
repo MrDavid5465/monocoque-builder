@@ -64,6 +64,8 @@ const AXES: [AbsoluteAxisType; 6] = [
     AbsoluteAxisType::ABS_RZ,
 ];
 
+// The live uinput device. Created once and held for the life of the process
+// — see `init` for why it must not be created on demand.
 static DEVICE: Mutex<Option<evdev::uinput::VirtualDevice>> = Mutex::new(None);
 
 fn ensure_device(
@@ -95,6 +97,74 @@ fn ensure_device(
     let device = builder.build().map_err(|e| e.to_string())?;
     **guard = Some(device);
     Ok(())
+}
+
+/// Creates the virtual controller if it isn't up, and reports whether it is.
+///
+/// Cheap to call repeatedly: once the device exists this is a lock and a
+/// `is_some`.
+pub fn ensure_present() -> Result<(), String> {
+    let mut guard = DEVICE.lock().map_err(|e| e.to_string())?;
+    ensure_device(&mut guard)
+}
+
+/// Brings the controller up at startup. Call once, before anything can press
+/// a button.
+///
+/// The device used to be created lazily, on the first button press of the
+/// session, which made the controller's existence depend on someone using
+/// it. Two things went wrong with that, both of which look from the driver's
+/// seat like "the controller went to sleep and had to wake up":
+///
+/// 1. A press after an idle period is frequently the *first* press since the
+///    app started, and that one press pays for creating the uinput node,
+///    udev processing it, and the game noticing a joystick it has never seen
+///    before. The press itself is emitted into a device nothing is listening
+///    to yet, so it is usually lost outright; by the next press the game has
+///    caught up and everything is instant again.
+/// 2. Worse, Assetto Corsa enumerates controllers when it starts. Launch the
+///    sim before touching a dashboard button — the normal order — and
+///    DDController simply does not exist at the moment that enumeration
+///    happens.
+///
+/// Creating it at startup makes the controller a property of the app
+/// running, which is what a physical controller plugged into a USB port
+/// behaves like, and is what the rest of the stack assumes.
+///
+/// Failure is not fatal: `/dev/uinput` may not be writable yet (see
+/// `setup_gamepad_udev`), and `run_device_supervisor` will keep trying.
+pub fn init() {
+    match ensure_present() {
+        Ok(()) => println!("Virtual controller DDController is up"),
+        Err(e) => eprintln!(
+            "Could not create the DDController virtual controller: {e}\n\
+             Dashboard buttons won't reach the game until /dev/uinput is writable \
+             (Settings → install the gamepad udev rule)."
+        ),
+    }
+}
+
+const SUPERVISOR_INTERVAL: Duration = Duration::from_secs(5);
+
+/// Runs forever; spawn once at startup (see main.rs). Keeps the controller
+/// present.
+///
+/// It has two jobs, both of which exist because an absent controller is
+/// silent — nothing in the UI can tell you the button you pressed went
+/// nowhere:
+///
+/// - Recovers from a startup where `/dev/uinput` wasn't writable yet, so
+///   installing the udev rule doesn't also require restarting the app.
+/// - Rebuilds the device if an emit ever failed and invalidated it (an
+///   `ENODEV` from the kernel dropping our node out from under us), instead
+///   of leaving a dead handle in place for the rest of the session.
+pub async fn run_device_supervisor() {
+    loop {
+        tokio::time::sleep(SUPERVISOR_INTERVAL).await;
+        // Quiet on purpose — `init` already reported the first failure, and
+        // this fires every 5s.
+        let _ = ensure_present();
+    }
 }
 
 const UDEV_RULE_PATH: &str = "/etc/udev/rules.d/99-dashboard-gamepad.rules";
@@ -163,6 +233,10 @@ pub fn setup_gamepad_udev() -> Result<String, String> {
         .map_err(|e| format!("Failed to launch pkexec: {e}"))?;
 
     if status.success() {
+        // The rule is what was blocking `init` at startup, so bring the
+        // controller up now rather than making the user restart the app to
+        // get the thing they just granted permission for.
+        init();
         Ok("installed".to_string())
     } else {
         Err(format!(
@@ -175,15 +249,32 @@ pub fn setup_gamepad_udev() -> Result<String, String> {
 fn emit_button(button_index: u8, pressed: bool) -> Result<(), String> {
     let mut guard = DEVICE.lock().map_err(|e| e.to_string())?;
     ensure_device(&mut guard)?;
-    if let Some(device) = guard.as_mut() {
-        let event = InputEvent::new(
-            EventType::KEY,
-            button_key_code(button_index as u16),
-            if pressed { 1 } else { 0 },
-        );
-        device.emit(&[event]).map_err(|e| e.to_string())?;
+    let event = InputEvent::new(
+        EventType::KEY,
+        button_key_code(button_index as u16),
+        if pressed { 1 } else { 0 },
+    );
+    emit(&mut guard, event)
+}
+
+/// Emits one event, dropping the device if the kernel rejects it.
+///
+/// A failed emit means this handle is no longer usable (the node went away),
+/// and keeping it would make every later press fail the same way in silence.
+/// Clearing it lets `ensure_device` — on the next press, or within 5s from
+/// `run_device_supervisor` — build a fresh one.
+fn emit(
+    guard: &mut std::sync::MutexGuard<Option<evdev::uinput::VirtualDevice>>,
+    event: InputEvent,
+) -> Result<(), String> {
+    let Some(device) = guard.as_mut() else {
+        return Ok(());
+    };
+    let result = device.emit(&[event]).map_err(|e| e.to_string());
+    if result.is_err() {
+        **guard = None;
     }
-    Ok(())
+    result
 }
 
 // Reached only via the GraphQL resolvers in graphql/gamepad.rs, over HTTP —
@@ -218,12 +309,14 @@ pub fn set_button(button_index: u8, pressed: bool, watchdog: bool) -> Result<(),
 pub fn set_axis(axis_index: u8, value: f32) -> Result<(), String> {
     let mut guard = DEVICE.lock().map_err(|e| e.to_string())?;
     ensure_device(&mut guard)?;
-    if let (Some(device), Some(&axis_type)) = (guard.as_mut(), AXES.get(axis_index as usize)) {
-        let raw = (value.clamp(-1.0, 1.0) * 32767.0) as i32;
-        let event = InputEvent::new(EventType::ABSOLUTE, axis_type.0, raw);
-        device.emit(&[event]).map_err(|e| e.to_string())?;
-    }
-    Ok(())
+    let Some(&axis_type) = AXES.get(axis_index as usize) else {
+        return Ok(());
+    };
+    let raw = (value.clamp(-1.0, 1.0) * 32767.0) as i32;
+    emit(
+        &mut guard,
+        InputEvent::new(EventType::ABSOLUTE, axis_type.0, raw),
+    )
 }
 
 // index → last-heartbeat time, for buttons currently held with watchdog
@@ -274,6 +367,25 @@ mod tests {
         set_button(5, false, false).expect("release should succeed");
         println!("device created + button 5 pressed/released; sleeping 10s for inspection");
         std::thread::sleep(std::time::Duration::from_secs(10));
+    }
+
+    /// The controller must exist because the app is running, not because
+    /// someone pressed something — the sim enumerates its devices at launch,
+    /// long before the first press. Manual, like its neighbours: it creates
+    /// a real system-wide uinput device. Run with:
+    ///   cargo test --bin monocoque-builder gamepad::tests::manual_device_is_up_before_any_press -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn manual_device_is_up_before_any_press() {
+        init();
+
+        let devices = std::fs::read_to_string("/proc/bus/input/devices")
+            .expect("should be able to read /proc/bus/input/devices");
+        assert!(
+            devices.contains("DDController"),
+            "DDController should be registered after init() with no button press"
+        );
+        println!("DDController present with zero presses");
     }
 
     /// Confirms a watchdog-tracked press with no follow-up heartbeat gets

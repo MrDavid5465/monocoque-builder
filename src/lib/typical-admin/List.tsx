@@ -42,7 +42,7 @@ const List: React.FC<Props> = ({
         <Subscriber
           document={dispatcher.subscribe}
           options={{
-            onSubscriptionData: refetch,
+            onData: () => refetch(),
           }}
         />
       )}

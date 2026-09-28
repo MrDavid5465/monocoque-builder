@@ -134,18 +134,10 @@ impl AppConfigMutation {
                     s.huenicorn_command,
                     existing.settings.huenicorn_command,
                 ),
-                simd_debug_command: merge_optional(
-                    s.simd_debug_command,
-                    existing.settings.simd_debug_command,
-                ),
-                monocoque_debug_command: merge_optional(
-                    s.monocoque_debug_command,
-                    existing.settings.monocoque_debug_command,
-                ),
-                huenicorn_debug_command: merge_optional(
-                    s.huenicorn_debug_command,
-                    existing.settings.huenicorn_debug_command,
-                ),
+                // Carried straight through from what was read. These are keys
+                // this build doesn't model (see AppSettings::extra); dropping
+                // them here would defeat the point of capturing them.
+                extra: existing.settings.extra,
             }
         } else {
             existing.settings

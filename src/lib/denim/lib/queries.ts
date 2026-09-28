@@ -59,9 +59,6 @@ const MY = gql`
         simdCommand
         monocoqueCommand
         huenicornCommand
-        simdDebugCommand
-        monocoqueDebugCommand
-        huenicornDebugCommand
         debugBuild
         ...GamepadMappingsFields
       }
@@ -96,9 +93,6 @@ const UPDATE_SETTINGS = gql`
         simdCommand
         monocoqueCommand
         huenicornCommand
-        simdDebugCommand
-        monocoqueDebugCommand
-        huenicornDebugCommand
         debugBuild
         ...GamepadMappingsFields
       }
@@ -146,9 +140,6 @@ export interface IUserSettingInput {
   huenicornCommand?: string;
   /** Dev-build overrides, used instead of the commands above in a debug
    *  build and ignored in a release build - see service_commands.rs. */
-  simdDebugCommand?: string;
-  monocoqueDebugCommand?: string;
-  huenicornDebugCommand?: string;
 }
 export interface ISettings {
   launchPage: string;
@@ -173,9 +164,6 @@ export interface ISettings {
   huenicornCommand?: string;
   /** Dev-build overrides, used instead of the commands above in a debug
    *  build and ignored in a release build - see service_commands.rs. */
-  simdDebugCommand?: string;
-  monocoqueDebugCommand?: string;
-  huenicornDebugCommand?: string;
   /** Read-only: true when the backend serving this is a debug build, i.e.
    *  the dev commands above are the ones actually in effect. */
   debugBuild?: boolean;

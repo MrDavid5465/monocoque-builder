@@ -4,11 +4,12 @@ use crate::pipewire_dsp::{
 };
 use crate::typiql_types::{
     LfeChannel, MonocoqueSoundDevice, ShakerChannel, ShakerDspChannel, SoundDeviceProfile,
+    SoundDeviceProfileChanged,
 };
 use async_graphql::{Context, Object, Result as GqlResult};
 use std::collections::HashMap;
 use std::sync::Arc;
-use typiql::{resolve_list, TypiQLAdapter, TypiQLType};
+use typiql::{resolve_list, TypiQLAdapter, TypiQLBroker, TypiQLType};
 
 /// Fetches every live (profileId == null) MonocoqueSoundDevice row.
 async fn fetch_live_monocoque_rows(adapter: &Arc<dyn TypiQLAdapter>) -> Vec<MonocoqueSoundDevice> {
@@ -307,7 +308,7 @@ impl ShakerDspMutation {
             resolve_list::<SoundDeviceProfile>(ctx, vec![]).await?;
         for p in &all_profiles {
             if p.is_default && p.id != id {
-                adapter
+                let demoted = adapter
                     .update(
                         SoundDeviceProfile::collection_name().into(),
                         "id",
@@ -315,6 +316,17 @@ impl ShakerDspMutation {
                         serde_json::json!({ "is_default": false }),
                     )
                     .await;
+                // Every profile whose flag moved, not just the new default
+                // below — promoting one demotes another, and a list holding
+                // that other profile would keep showing it as the default.
+                if let Some(demoted) =
+                    demoted.and_then(|v| serde_json::from_value::<SoundDeviceProfile>(v).ok())
+                {
+                    TypiQLBroker::publish(SoundDeviceProfileChanged {
+                        operation_name: "update".to_string(),
+                        value: demoted,
+                    });
+                }
             }
         }
 
@@ -328,7 +340,17 @@ impl ShakerDspMutation {
             .await
             .ok_or_else(|| async_graphql::Error::new("Profile not found"))?;
 
-        serde_json::from_value(updated).map_err(|e| async_graphql::Error::new(e.to_string()))
+        let updated: SoundDeviceProfile = serde_json::from_value(updated)
+            .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        // Written through the adapter, so the macro's own announcement is
+        // bypassed. ProfilesList holds a live soundDeviceProfileChanged
+        // subscription, so without this it showed a stale default until
+        // reloaded.
+        TypiQLBroker::publish(SoundDeviceProfileChanged {
+            operation_name: "update".to_string(),
+            value: updated.clone(),
+        });
+        Ok(updated)
     }
 
     /// Writes Monocoque's config file. Replaces the previously-orphaned

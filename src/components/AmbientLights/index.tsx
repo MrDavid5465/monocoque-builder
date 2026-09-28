@@ -1,10 +1,10 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useContext } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { useMutation, useQuery } from '@apollo/client/react';
 import { PrimaryButton, DefaultButton } from '@fluentui/react';
 import { getTheme, Form, FormCard, Stack, TextField } from '../../lib/denim/lib';
 import dispatcher, { IMy, IChannelGamma } from '../../lib/denim/lib/queries';
-import { useLiveUpdatesHub, useHubListener } from '../Telemetry/liveUpdatesHub';
+import { LiveUpdatesContext, useLiveUpdatesDemand, useLiveUpdatesHub, useHubListener } from '../Telemetry/liveUpdatesHub';
 import { DevColorTest } from './DevColorTest';
 import { ChannelMapper } from './ChannelMapper';
 import { AdvancedHuenicornSettings } from './AdvancedHuenicornSettings';
@@ -130,17 +130,18 @@ const AmbientLightsMain: React.FC = () => {
   });
   const huenicornStatus = statusData?.huenicornStatus;
 
-  // Which command line is actually "live" is the build type, not a toggle —
-  // see service_commands.rs's own doc comment — so the fix-it field below
-  // edits whichever one huenicornStatus.installed is actually checking
-  // against, same convention as the global Settings modal's Services tab.
-  const commandFieldName = settings.debugBuild ? 'huenicornDebugCommand' : 'huenicornCommand';
+  // Always edits the configured command, even in a debug build where that
+  // isn't the one being launched: a dev build takes its command from
+  // TYPIQL_HUENICORN_DEV_COMMAND in the environment (see
+  // service_commands.rs), which no UI can set for an already-running
+  // process. The notice below says so rather than letting someone edit a
+  // field that can't affect the build they're running.
+  const commandFieldName = 'huenicornCommand';
   const [commandDraft, setCommandDraft] = useState('');
   const [savingCommand, setSavingCommand] = useState(false);
   useEffect(() => {
-    const current = settings.debugBuild ? settings.huenicornDebugCommand : settings.huenicornCommand;
-    setCommandDraft(current ?? '');
-  }, [settings.debugBuild, settings.huenicornCommand, settings.huenicornDebugCommand]);
+    setCommandDraft(settings.huenicornCommand ?? '');
+  }, [settings.huenicornCommand]);
 
   // Saves only the one command field — omitting every other field reads as
   // "leave unchanged" per AppSettingsInput's MaybeUndefined convention, same
@@ -266,7 +267,15 @@ const AmbientLightsMain: React.FC = () => {
   // from what the viewer actually shows and doesn't duplicate the ~30Hz
   // publish with its own HTTP round-trip. Same channel-selection rule: an
   // explicit ambientPrimaryChannel, else whichever channel arrives first.
-  const [hub, hubSubscriber] = useLiveUpdatesHub({ includeAmbientColor: true, includeNightClock: false });
+  // Prefers the app-root provider; own hub only as a fallback.
+  const ambientHub = useContext(LiveUpdatesContext);
+  const [ownHub, hubSubscriber] = useLiveUpdatesHub({
+    includeNightClock: false,
+    skip: !!ambientHub,
+  });
+  const hub = ambientHub ?? ownHub;
+  // This page IS the per-channel color view, so it always wants that stream.
+  useLiveUpdatesDemand(hub, { includeAmbientColor: true });
   const [currentColors, setCurrentColors] = useState<ChannelColor[]>([]);
   useHubListener(hub, 'AmbientColorChanged', (event: any) => setCurrentColors(event?.colors ?? []));
   const selectedColor = ambientPrimaryChannel !== ''
@@ -337,9 +346,16 @@ const AmbientLightsMain: React.FC = () => {
           <div style={{ fontWeight: 600, marginBottom: 8, fontSize: '1.1em' }}>Huenicorn isn't installed</div>
           <div style={{ fontSize: '0.85em', opacity: 0.8, marginBottom: 12 }}>
             Ambient Lights needs Huenicorn — a separate companion program that captures your
-            screen's colors and streams them to your Hue lights. The configured command
-            (<code>{settings.debugBuild ? settings.huenicornDebugCommand || '(none set)' : settings.huenicornCommand}</code>)
-            couldn't be found.
+            screen's colors and streams them to your Hue lights.{' '}
+            {settings.debugBuild ? (
+              <>
+                This is a development build, so the command comes from{' '}
+                <code>TYPIQL_HUENICORN_DEV_COMMAND</code> in the environment rather than from
+                settings — and nothing was found there.
+              </>
+            ) : (
+              <>The configured command (<code>{settings.huenicornCommand}</code>) couldn't be found.</>
+            )}
           </div>
           <a
             href={HUENICORN_GITLAB_URL}

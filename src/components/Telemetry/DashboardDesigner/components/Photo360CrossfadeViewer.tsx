@@ -1,5 +1,6 @@
 import { forwardRef } from 'react';
 import Photo360Viewer, { Photo360Handle } from './Photo360Viewer';
+import { NeckFxSample } from '../../useAcNeckFx';
 
 interface Props {
   dayPhotoUrl: string;
@@ -25,6 +26,10 @@ interface Props {
   onChange: (yaw: number, pitch: number, fov: number, roll: number) => void;
   readOnly?: boolean;
   telemetryData?: Record<string, number>;
+  // Forwarded via the `...rest` spread below — see Photo360Viewer's own doc
+  // comment on why AC's head movement arrives as a ref off its own
+  // subscription rather than as a field on telemetryData.
+  neckFxRef?: React.RefObject<NeckFxSample>;
   swayEnabled?: boolean;
   swayGainX?: number;
   swayGainY?: number;

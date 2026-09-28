@@ -35,7 +35,7 @@ export {
   Dialog,
 } from "@fluentui/react";
 export { useConstCallback } from "@fluentui/react-hooks";
-export { Link, Route, Routes, Navigate, NavLink, useParams } from "react-router-dom";
+export { Link, Route, Routes, Navigate, NavLink, useParams, useLocation } from "react-router-dom";
 export { useQuery, useMutation } from "@apollo/client/react";
 export { ButtonDropdown } from "./ButtonDropdown";
 export { format } from "date-fns";

@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, useImperativeHandle, forwardRef, useCallback } from 'react';
 import * as THREE from 'three';
+import { NeckFxSample, neckFxIsLive, clampNeckAngle } from '../../useAcNeckFx';
 
 export interface Photo360Handle {
   capture: (captureWidth: number, captureHeight: number) => Promise<string>;
@@ -52,6 +53,12 @@ interface Props {
   // based on lateral/longitudinal g, mirroring the canvas sway effect used for
   // non-360 backgrounds. Never written back via onChange.
   telemetryData?: Record<string, number>;
+  // Assetto Corsa's applied head movement, when the AC telemetry app is
+  // streaming — preferred over the g-derived sway above, which stays as the
+  // fallback for every other sim. A ref rather than a field on telemetryData:
+  // it arrives at 60Hz off the shared hub (useAcNeckFx) and is read inside the
+  // render loop, so it must never re-render anything.
+  neckFxRef?: React.RefObject<NeckFxSample>;
   swayEnabled?: boolean;
   swayGainX?: number;
   swayGainY?: number;
@@ -79,18 +86,103 @@ interface Props {
 const SWAY_YAW_DEG_PER_G   = 1.5;
 const SWAY_PITCH_DEG_PER_G = 0.75;
 
-// Fraction of the full night darkening applied when the car HAS a night
-// photo. The photo already supplies the night *look*; this only takes the
-// overall level down so it reads as night rather than as a differently-lit
-// daytime shot. Turn this up if night still isn't dark enough, down if the
-// scene goes muddy. 0 restores the previous behaviour (photo only).
-const NIGHT_DARKEN_WITH_PHOTO = 0.45;
+// NeckFX path: degrees of pan per metre of head movement, used INSTEAD of the
+// per-g constants above whenever Assetto Corsa is reporting the offset it
+// actually applied (see telemetry/types.rs on why a washout filter can't be
+// approximated from g).
+//
+// Scaled to land in the same visual range as the g-derived path they replace,
+// so enabling the telemetry app changes the phase and feel of the sway but not
+// its magnitude: CSP's cockpit camera moves the head a few centimetres at
+// cornering loads, and ~1.5° at ~0.045m is where these come from. The 2:1
+// yaw:pitch ratio is carried over deliberately.
+const SWAY_YAW_DEG_PER_M   = 33;
+const SWAY_PITCH_DEG_PER_M = 16.5;
+
+// Vertical head travel (heave) is its own gain rather than reusing the
+// longitudinal one: they're different motions with different ranges — a kerb
+// strike moves the head much further, and much faster, than braking does —
+// and keeping them separate means either can be tuned, or sign-flipped,
+// without disturbing the other.
+//
+// UNCALIBRATED. Every per-metre figure here is derived from an assumed few
+// centimetres of head travel per g, not from measured values. Sample the live
+// channel before trusting any of them.
+const SWAY_PITCH_DEG_PER_M_HEAVE = 25;
+
+// Head movement past this (metres) is treated as a glitch rather than a
+// reading — mirrors the ±3g/±4g clamps on the fallback path.
+const NECK_OFFSET_CLAMP_M = 0.25;
+
+// Easing time constants for the sway, milliseconds. See the use site for why
+// the two paths differ; 200 is what the old fixed per-frame lerp worked out
+// to at 60Hz, kept so the g-derived path feels exactly as it was tuned.
+const SWAY_TAU_MS_NECKFX = 30;
+const SWAY_TAU_MS_G = 200;
+
+// The rotation-channel equivalent (NECK_ANGLE_CLAMP_DEG) is imported from
+// useAcNeckFx rather than declared here — it bounds what the SOURCE can
+// legitimately report, so it has to be identical in every consumer. It used to
+// be a literal in each, and they drifted. See that file for how 160 was sized.
+//
+// Measured ranges on this rig, confirmed against what the driver actually saw:
+//
+//   yaw    -130 .. +130   symmetric, set by CSP's LOOK_BACK_ANGLE
+//   pitch   -50 .. +5     ASYMMETRIC, and correct — not a bug
+//   centre  yaw 0.000, pitch +0.063, roll 0.000 (bias too small to correct)
+//
+// The pitch asymmetry is genuine: AC lets you look down ~50 degrees but barely
+// 5 up. Nothing here compensates for that, deliberately — this viewer mirrors
+// the angle the game applied, so a lopsided range is the honest result.
+
+// How often a gesture reports to the parent. The render loop shows every
+// frame regardless, so this only paces the React updates behind it.
+const EMIT_INTERVAL_MS = 120;
+
+// Night darkening for a car that HAS a night photo, at full night. Night 360
+// photos are exposed to look correct on their own, so one that simply reads
+// too bright has no other knob.
+//
+// 0.25 gives exactly 20% darker than the untouched photo, because the shader
+// applies this as `rgb *= 1.0 - nightDarken * 0.8`: 1 - 0.25*0.8 = 0.8.
+//
+// Worth stating plainly, since the arithmetic misled once already: this is a
+// fraction of the UNTOUCHED photo, not of some previous setting. An earlier
+// 0.61 was chosen as "20% darker than the original 0.45", which compounded
+// to x0.512 — 49% darker than untouched, not 20%.
+//
+// Multiplied by the smoothed night level at the use site, so it fades in with
+// the eased dawn/dusk blend rather than switching, and it is direction-
+// agnostic: dusk drives it through the same nightAmount that dawn does.
+//
+// Zeroed temporarily while the 0.95 mixAmount cap was being diagnosed (that
+// cap left 5% of the DAY frame blended into full night, and this was hiding
+// it). Restored after judging the night photo on its own at the rig: it is
+// wanted for its own sake, not as a band-aid for the ghost.
+const NIGHT_DARKEN_WITH_PHOTO = 0.25;
+
+// The same darkening for a car with NO night photo, which reaches the screen
+// through Canvas's soft-light tint overlay instead of the shader.
+//
+// Expressed as overlay opacity, which is NOT the same scale as
+// NIGHT_DARKEN_WITH_PHOTO above: soft-light against black darkens mid-tones
+// by roughly half the opacity (base -> base*(1-a) + base^2*a, i.e. ~a/2 at
+// base 0.5). So 0.4 here lands near the same ~20% the shader path gets from
+// 0.25, and the two are kept in step by that reasoning rather than by sharing
+// a number — setting them equal would silently halve this one.
+//
+// Exists because night 360 photos are exposed to read correctly on their own,
+// so one that simply isn't dark enough can't be fixed by
+// NIGHT_DARKEN_WITH_PHOTO above — that one deliberately backs OFF when a real
+// night photo is present. Scaled by the eased night blend at the use site, so
+// it fades out with everything else rather than switching.
+const NIGHT_DARKEN_AT_FULL_NIGHT = 0.4;
 
 const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
   photoUrl, nightPhotoUrl, nightAmount = 0, ambientColor = null, ambientTintIntensity = 0,
   ambientSaturationBoostDay = 1, ambientSaturationBoostNight = 1,
   yaw, pitch, fov, roll, displayWidth, displayHeight, onChange, readOnly = false,
-  telemetryData, swayEnabled = false, swayGainX = 1, swayGainY = 1, swayDisableX = false, swayDisableY = false,
+  telemetryData, neckFxRef, swayEnabled = false, swayGainX = 1, swayGainY = 1, swayDisableX = false, swayDisableY = false,
   onLoaded, tintOverlayRef,
 }, ref) => {
   const mountRef    = useRef<HTMLDivElement>(null);
@@ -125,8 +217,48 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
   stateRef.current  = { yaw, pitch, fov, roll, displayWidth, displayHeight, nightAmount, ambientColor, ambientTintIntensity, ambientSaturationBoostDay, ambientSaturationBoostNight };
   const dragRef     = useRef<{ startX: number; startY: number; startYaw: number; startPitch: number } | null>(null);
 
+  // Live pan, owned here while the user is interacting, and read by the
+  // render loop in preference to the props.
+  //
+  // The viewer is a controlled component, so before this every pointer move
+  // had to round-trip through the parent's React state before it could show:
+  // in the designer that meant `trackedSetDashboard` re-rendering the entire
+  // dashboard node tree at pointer rate, which is exactly as smooth as it
+  // sounds. The gesture now updates this ref and the ~60Hz loop picks it up
+  // on the next frame regardless of what React is doing; `onChange` is still
+  // called, just throttled, so saves and sliders keep working.
+  const livePanRef = useRef<{ yaw: number; pitch: number; fov: number } | null>(null);
+  // What we last told the parent. Lets an incoming prop change be classified:
+  // matching means it's our own value echoing back, differing means something
+  // else moved the pan (sliders, a car switch, a reset) and should win.
+  const lastEmittedRef = useRef<{ yaw: number; pitch: number; fov: number } | null>(null);
+  const emitTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const lastEmitAtRef = useRef(0);
+
+  {
+    const last = lastEmittedRef.current;
+    // Only a value we've already published can be compared against. Before
+    // the first emit of a gesture `last` is null and the props are legitimately
+    // stale — treating that as external would discard the live value and snap
+    // back, which is visible if anything else re-renders mid-gesture (a
+    // telemetry tick will do it).
+    const external = !!last
+      && (Math.abs(last.yaw - yaw) > 0.001
+        || Math.abs(last.pitch - pitch) > 0.001
+        || Math.abs(last.fov - fov) > 0.001);
+    if (external && !dragRef.current) {
+      livePanRef.current = null;
+      lastEmittedRef.current = null;
+    }
+  }
+
   const telemetryRef = useRef(telemetryData);
   telemetryRef.current = telemetryData;
+  // Mirrored the same way as telemetryData above: the GL-setup effect below
+  // runs once, so it must not close over whichever ref object happened to be
+  // passed on the first render.
+  const neckFxPropRef = useRef(neckFxRef);
+  neckFxPropRef.current = neckFxRef;
   const swayConfigRef = useRef({ swayEnabled, swayGainX, swayGainY, swayDisableX, swayDisableY });
   swayConfigRef.current = { swayEnabled, swayGainX, swayGainY, swayDisableX, swayDisableY };
   const onLoadedRef = useRef(onLoaded);
@@ -285,7 +417,12 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
       // itself is still called every frame so rendering resumes
       // immediately on refocus, with no extra listener needed.
       if (document.hidden) return;
-      const { yaw: y, pitch: p, fov: f, roll: r, displayWidth: dw, displayHeight: dh } = stateRef.current;
+      const { roll: r, displayWidth: dw, displayHeight: dh } = stateRef.current;
+      // Live gesture value when there is one, otherwise the prop.
+      const live = livePanRef.current;
+      const y = live ? live.yaw : stateRef.current.yaw;
+      const p = live ? live.pitch : stateRef.current.pitch;
+      const f = live ? live.fov : stateRef.current.fov;
 
       // displayWidth/displayHeight can change after mount (e.g. a
       // responsive container being resized) — the renderer's own canvas
@@ -299,10 +436,100 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
 
       const { swayEnabled: active, swayGainX, swayGainY, swayDisableX, swayDisableY } = swayConfigRef.current;
       const t = telemetryRef.current;
-      const gLat = active ? Math.max(-3, Math.min(3, t?.['gLat'] ?? 0)) : 0;
-      const gLon = active ? Math.max(-4, Math.min(4, t?.['gLon'] ?? 0)) : 0;
-      sway.yaw   = lerp(sway.yaw,   swayDisableX ? 0 : -gLat * SWAY_YAW_DEG_PER_G   * swayGainX, 0.08);
-      sway.pitch = lerp(sway.pitch, swayDisableY ? 0 :  gLon * SWAY_PITCH_DEG_PER_G * swayGainY, 0.08);
+      // Assetto Corsa's real head movement when it's available, the g-derived
+      // approximation otherwise. Not a blend: they disagree in phase by
+      // design, so crossfading would produce motion neither source asked for.
+      //
+      // Read from its own ref rather than from `telemetryData` — this comes
+      // over the separate acTelemetry subscription (see useAcNeckFx), so the
+      // cross-sim frame stays free of AC-only fields.
+      const neck = neckFxPropRef.current?.current;
+      const neckLive = neckFxIsLive(neck);
+      const clampNeck = (v: number) =>
+        Math.max(-NECK_OFFSET_CLAMP_M, Math.min(NECK_OFFSET_CLAMP_M, v));
+      const clampAngle = clampNeckAngle;
+
+      let targetYaw: number;
+      let targetPitch: number;
+      const usingNeckFx = active && neckLive && !!neck;
+      if (active && neckLive && neck) {
+        // Signs follow from the head lagging BEHIND the car: under leftward
+        // acceleration the head is thrown right (+x), which is the same
+        // direction the g-derived path pans for that corner — hence the
+        // positive coefficient here against gLat's negative one. Likewise
+        // braking throws the head forward (+z) where gLon goes negative.
+        // Degrees straight through — this viewer pans in degrees, and the
+        // game is reporting the angle it actually applied, so there is nothing
+        // to convert. The position channel below needed an invented
+        // degrees-per-metre gain; this needs none.
+        //
+        // Position is added on top rather than ignored: it carries movement
+        // the rotation cannot (heave over kerbs), and it is what responds if
+        // the following effects are turned up in neck.ini.
+        //
+        // neck.yawDeg is negated: measured live via free-look (right-click-drag
+        // in AC, recorded through acTelemetrySnapshot) that AC reports a
+        // NEGATIVE neckYawDeg for a real rightward look and POSITIVE for
+        // leftward — opposite of this viewer's own yaw convention (see
+        // onPointerMove above), so passing it through unnegated panned the
+        // photo sphere the wrong way: turning your head right visibly panned
+        // left. clampNeck(neck.x) is untouched — its sign was deliberately
+        // matched to the g-derived fallback path (comment above) and nothing
+        // reported it as wrong.
+        //
+        // No swayGainX here, deliberately: this is the game's own applied
+        // angle, not an approximation to be scaled — the sensitivity slider
+        // exists to tame the g-derived fallback's invented degrees-per-g
+        // gain below, and applying it here too would detune a value that's
+        // already correct 1:1.
+        targetYaw =
+          -clampAngle(neck.yawDeg) + clampNeck(neck.x) * SWAY_YAW_DEG_PER_M;
+        // Vertical head movement (heave over bumps and kerbs) was being
+        // dropped here entirely — only x and z were read — which threw away
+        // the most visible motion the game actually applies. Raising the head
+        // shows more of what's above, so +y pitches the view up.
+        //
+        // neck.pitchDeg is negated for the same reason neck.yawDeg is above:
+        // confirmed live that AC's pitch convention is also opposite this
+        // viewer's own (looking up panned the photo sphere down). z/y stay
+        // untouched — same reasoning as x on the yaw line. No swayGainY here
+        // either, same reasoning as swayGainX above.
+        targetPitch =
+          -clampAngle(neck.pitchDeg)
+            - clampNeck(neck.z) * SWAY_PITCH_DEG_PER_M
+            + clampNeck(neck.y) * SWAY_PITCH_DEG_PER_M_HEAVE;
+      } else {
+        const gLat = active ? Math.max(-3, Math.min(3, t?.['gLat'] ?? 0)) : 0;
+        const gLon = active ? Math.max(-4, Math.min(4, t?.['gLon'] ?? 0)) : 0;
+        targetYaw   = -gLat * SWAY_YAW_DEG_PER_G   * swayGainX;
+        targetPitch =  gLon * SWAY_PITCH_DEG_PER_G * swayGainY;
+      }
+      if (!active) { targetYaw = 0; targetPitch = 0; }
+
+      // Time-based, and much shorter on the NeckFX path.
+      //
+      // This was a flat `lerp(..., 0.08)` per frame for both paths. That is
+      // 8% of the remaining distance every frame regardless of how long the
+      // frame took, which is both frame-rate dependent (a 144Hz display
+      // converged 2.4x faster than a 60Hz one) and, at 60Hz, equivalent to a
+      // ~200ms time constant: ~12 frames to cover 63% of a step and ~36 to
+      // cover 95%. Reported from the rig as half a second to a second of lag
+      // on NeckFX, which is this filter almost exactly — the value had
+      // already arrived, it was being eased into.
+      //
+      // The two paths want different amounts. The g-derived fallback is
+      // computing a sway from raw lateral/longitudinal g, which is noisy and
+      // genuinely needs easing; it keeps the 200ms it was tuned at, so its
+      // feel is unchanged. The NeckFX path is not deriving anything — it is
+      // the head movement the GAME already applied, through CSP's own washout
+      // filter, and the whole point of preferring it is that it is 1:1.
+      // Smoothing it again only adds lag to something already smoothed. What
+      // little remains is there to bridge a late frame rather than to shape
+      // the motion.
+      const swayTauMs = usingNeckFx ? SWAY_TAU_MS_NECKFX : SWAY_TAU_MS_G;
+      const swaySmoothing = 1 - Math.exp(-dtMs / swayTauMs);
+      sway.yaw   = lerp(sway.yaw,   swayDisableX ? 0 : targetYaw,   swaySmoothing);
+      sway.pitch = lerp(sway.pitch, swayDisableY ? 0 : targetPitch, swaySmoothing);
 
       if (cameraRef.current) {
         cameraRef.current.fov = f;
@@ -326,13 +553,21 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
       // unbound `nightMap` uniform resolves to black in WebGL, so without
       // this guard the day photo would visibly fade toward solid black as
       // mixAmount ramped up for a car/dashboard with no night photo at all.
-      // The 0.95 cap (matching the flat CSS night overlay in Canvas.tsx/
-      // DashPanEditor.tsx) means full night never fully replaces the day
-      // texture even when a real night photo exists.
+      //
+      // Full night means FULLY the night texture. This used to cap at 0.95,
+      // a number taken from the flat CSS night overlay in Canvas.tsx/
+      // DashPanEditor.tsx — but the two do different things and the number
+      // doesn't carry across. Capping a black overlay at 0.95 is a taste
+      // choice: never quite solid, so shape survives. Capping a crossfade
+      // between two photographs preserves nothing; it just leaves 5% of the
+      // DAY frame mixed into the night one forever, which reads as the day
+      // photo ghosting through wherever it is brightest — windows and sky
+      // against a dark cockpit. Reported from the rig as "still seeing part
+      // of the day photo at 100% night", which is exactly what it was.
       if (shaderRef.current) {
         const tauMs = 830;
         const smoothing = 1 - Math.exp(-dtMs / tauMs);
-        const target = nightTextureRef.current ? stateRef.current.nightAmount * 0.95 : 0;
+        const target = nightTextureRef.current ? stateRef.current.nightAmount : 0;
         mixAmountRef.current = lerp(mixAmountRef.current, target, smoothing);
         shaderRef.current.uniforms.mixAmount.value = mixAmountRef.current;
         shaderRef.current.uniforms.nightMap.value = nightTextureRef.current;
@@ -472,9 +707,35 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
         shaderRef.current.uniforms.ambientTint.value.copy(t);
         shaderRef.current.uniforms.ambientOpacity.value = overlayEl ? 0 : ambientOpacityRef.current;
         if (overlayEl) {
+          // Extra darkening at night, on top of whatever the tint is doing.
+          //
+          // Night 360 photos are exposed to look correct on their own, so a
+          // car whose night photo simply isn't dark enough has no other knob:
+          // NIGHT_DARKEN_WITH_PHOTO deliberately backs off precisely when a
+          // real night photo exists.
+          //
+          // Deliberately does NOT depend on the Huenicorn tint. Riding the
+          // tint's opacity was the first attempt and was silently inert:
+          // `ambient_tint_intensity` defaults to 0, so the overlay never
+          // renders and darkening its colour changed nothing at all.
+          //
+          // Two ways to reach the same overlay, because it can only hold one
+          // colour: with a tint present, push that colour toward black; with
+          // no tint, paint neutral black and use opacity alone. Both darken
+          // through Canvas's `mix-blend-mode: soft-light`.
           const to255 = (v: number) => Math.round(Math.min(1, Math.max(0, v)) * 255);
-          overlayEl.style.backgroundColor = `rgb(${to255(t.x)}, ${to255(t.y)}, ${to255(t.z)})`;
-          overlayEl.style.opacity = String(ambientOpacityRef.current);
+          const nightDarken = NIGHT_DARKEN_AT_FULL_NIGHT * nightLevelRef.current;
+          const tintOpacity = ambientOpacityRef.current;
+
+          if (tintOpacity > 0.001) {
+            const scale = 1 - nightDarken;
+            overlayEl.style.backgroundColor =
+              `rgb(${to255(t.x * scale)}, ${to255(t.y * scale)}, ${to255(t.z * scale)})`;
+            overlayEl.style.opacity = String(tintOpacity);
+          } else {
+            overlayEl.style.backgroundColor = 'rgb(0, 0, 0)';
+            overlayEl.style.opacity = String(nightDarken);
+          }
         }
       }
 
@@ -566,33 +827,101 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
     },
   }));
 
+  // Publishes the live pan to the parent, at most every EMIT_INTERVAL_MS with
+  // a guaranteed trailing call. The render loop is already showing the value,
+  // so this only needs to be often enough for sliders and the debounced saves
+  // to keep up — one React update per frame would put the whole dashboard
+  // tree back in the drag path, which is what made this jerky.
+  const emitPan = useCallback((immediate = false) => {
+    const live = livePanRef.current;
+    if (!live) return;
+    const send = () => {
+      lastEmitAtRef.current = Date.now();
+      lastEmittedRef.current = { ...live };
+      onChangeRef.current(live.yaw, live.pitch, live.fov, stateRef.current.roll);
+    };
+    if (emitTimerRef.current) clearTimeout(emitTimerRef.current);
+    if (immediate || Date.now() - lastEmitAtRef.current >= EMIT_INTERVAL_MS) {
+      send();
+    } else {
+      emitTimerRef.current = setTimeout(send, EMIT_INTERVAL_MS);
+    }
+  }, []);
+
   const onPointerDown = useCallback((e: React.PointerEvent) => {
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    const live = livePanRef.current;
     dragRef.current = {
       startX: e.clientX, startY: e.clientY,
-      startYaw: stateRef.current.yaw, startPitch: stateRef.current.pitch,
+      startYaw: live ? live.yaw : stateRef.current.yaw,
+      startPitch: live ? live.pitch : stateRef.current.pitch,
     };
   }, []);
 
   const onPointerMove = useCallback((e: React.PointerEvent) => {
     const d = dragRef.current;
     if (!d) return;
-    const sensitivity = stateRef.current.fov / 400;
+    const fovNow = livePanRef.current?.fov ?? stateRef.current.fov;
+    const sensitivity = fovNow / 400;
     const newYaw   = d.startYaw   - (e.clientX - d.startX) * sensitivity;
+    // Inverted: dragging DOWN now looks down. Grabbing the scene and pulling
+    // it with you is the direct-manipulation reading, and it matches the
+    // horizontal axis beside it, which has always worked that way.
     const newPitch = Math.max(-85, Math.min(85,
-      d.startPitch + (e.clientY - d.startY) * sensitivity,
+      d.startPitch - (e.clientY - d.startY) * sensitivity,
     ));
-    onChange(newYaw, newPitch, stateRef.current.fov, stateRef.current.roll);
-  }, [onChange]);
+    livePanRef.current = { yaw: newYaw, pitch: newPitch, fov: fovNow };
+    emitPan();
+  }, [emitPan]);
 
-  const onPointerUp = useCallback(() => { dragRef.current = null; }, []);
+  const onPointerUp = useCallback(() => {
+    if (!dragRef.current) return;
+    dragRef.current = null;
+    // The throttle may be mid-wait holding the final position — make sure the
+    // parent ends up with where the gesture actually stopped.
+    emitPan(true);
+  }, [emitPan]);
 
-  const onWheel = useCallback((e: React.WheelEvent) => {
-    e.preventDefault();
-    const delta = e.deltaY * 0.05;
-    const newFov = Math.max(5, Math.min(120, stateRef.current.fov + delta));
-    onChange(stateRef.current.yaw, stateRef.current.pitch, newFov, stateRef.current.roll);
-  }, [onChange]);
+  // Zoom-by-wheel, as a NATIVE non-passive listener rather than JSX onWheel.
+  //
+  // React registers `wheel` passively at its root, so `preventDefault()` in an
+  // onWheel handler is silently a no-op: the page scrolled while zooming, and
+  // on a dashboard the canvas's own wheel-zoom (Canvas.tsx, itself a
+  // non-passive native listener on an ancestor) fired too, so one gesture
+  // zoomed both the 360 and the canvas under it. Attaching here gets a real
+  // preventDefault, and stopPropagation keeps the gesture from reaching that
+  // ancestor at all.
+  //
+  // `onChange` is read through a ref so this listener is attached once rather
+  // than re-attached on every render by callers passing an inline arrow.
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+  useEffect(() => {
+    const el = mountRef.current;
+    if (!el || readOnly) return;
+    const handler = (e: WheelEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      // Multiplicative, and normalised for deltaMode — the same treatment
+      // Canvas.tsx gives its own zoom. A fixed additive step felt coarse at
+      // narrow FOV and sluggish at wide, because a degree is worth far more
+      // when you're zoomed in; scaling keeps each notch the same proportion.
+      // deltaMode 1 is lines rather than pixels (Firefox), which without the
+      // conversion made every notch a huge jump.
+      const pixelDelta = e.deltaMode === 0 ? e.deltaY : e.deltaY * 16;
+      const current = livePanRef.current?.fov ?? stateRef.current.fov;
+      const newFov = Math.max(5, Math.min(120, current * Math.exp(pixelDelta * 0.0015)));
+      const live = livePanRef.current;
+      livePanRef.current = {
+        yaw: live ? live.yaw : stateRef.current.yaw,
+        pitch: live ? live.pitch : stateRef.current.pitch,
+        fov: newFov,
+      };
+      emitPan();
+    };
+    el.addEventListener('wheel', handler, { passive: false });
+    return () => el.removeEventListener('wheel', handler);
+  }, [readOnly, emitPan]);
 
   return (
     <div style={{ position: 'relative', width: displayWidth, height: displayHeight, cursor: readOnly ? 'default' : 'grab', flexShrink: 0 }}>
@@ -603,7 +932,6 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
         onPointerMove={readOnly ? undefined : onPointerMove}
         onPointerUp={readOnly ? undefined : onPointerUp}
         onPointerCancel={readOnly ? undefined : onPointerUp}
-        onWheel={readOnly ? undefined : onWheel}
       />
     </div>
   );

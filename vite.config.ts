@@ -33,7 +33,13 @@ export default defineConfig(async () => ({
       : undefined,
     watch: {
       // 3. tell vite to ignore watching `src-tauri`
-      ignored: ["**/src-tauri/**"],
+      //
+      // .claude/ holds git worktrees, which live inside the repo root and so
+      // get walked by the watcher. A flatpak build run from one leaves a
+      // build-dir containing an entire app filesystem -- including
+      // var/run/udev/watch symlinks that loop -- which kills the dev server
+      // on startup with `ELOOP: too many symbolic links encountered`.
+      ignored: ["**/src-tauri/**", "**/.claude/**"],
     },
   },
 }));

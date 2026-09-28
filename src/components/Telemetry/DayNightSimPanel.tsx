@@ -10,7 +10,7 @@ import {
   NightModeRecord,
 } from './nightModeQueries';
 import { useGlobalNightMode } from './useGlobalNightMode';
-import { computeSimulatedNightState, formatTimeOfDay, parseTimeOfDay } from './dayNightSim';
+import { formatTimeOfDay } from './dayNightSim';
 import TrackLinkDialog from './TrackLinkDialog';
 
 // Converts between the two ways of expressing simulated clock speed:
@@ -22,20 +22,6 @@ const HOURS_PER_DAY = 24;
 function hoursFromSpeedPercent(speedPercent: number | null | undefined): number {
   const percent = speedPercent ?? 100;
   return percent > 0 ? (HOURS_PER_DAY * 100) / percent : HOURS_PER_DAY;
-}
-
-// per-form's `timetoday` field reads/writes a Date's *local* hour/minute
-// components directly (Fabric.tsx's handleTimeChange), and dayNightSim.ts's
-// parseTimeOfDay/formatTimeOfDay treat "HH:MM" as a plain, timezone-agnostic
-// label — so no UTC conversion is needed here, just a direct round-trip
-// through today's date + the parsed/formatted hour and minute.
-function hhmmToDisplayDate(hhmm: string | null | undefined): Date {
-  const parsed = parseTimeOfDay(hhmm) ?? 0;
-  const now = new Date();
-  return new Date(now.getFullYear(), now.getMonth(), now.getDate(), Math.floor(parsed / 60), parsed % 60, 0);
-}
-function displayDateToHHMM(d: Date): string {
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
 // Discrete nudges for the server-authoritative simulated clock (see
@@ -91,8 +77,6 @@ const configSchema = {
     type: 'text' as const,
     label: 'Day/night cycle length (hours)',
   },
-  simSunrise: { type: 'timetoday' as const, label: 'Sunrise' },
-  simSunset: { type: 'timetoday' as const, label: 'Sunset' },
   simTransitionMinutes: { type: 'slider' as const, label: 'Dawn/dusk transition (minutes)', min: 0, max: 240, step: 5 },
 };
 
@@ -124,12 +108,44 @@ const DayNightSimPanel: React.FC = () => {
   const [setSunriseSunsetFromDate, { loading: computingSunTimes }] = useMutation(SET_SUNRISE_SUNSET_FROM_DATE);
   const current = ((data as any)?.getNightModes ?? [])[0] as NightModeRecord | undefined;
 
-  // Defaults to today — pick a different date to get that day's real
-  // sunrise/sunset instead (e.g. simulating a summer day while actually
-  // playing in winter). Uses whatever track live telemetry currently
-  // reports (see graphql/night_clock.rs); errors (no live track, track not
-  // linked to a Track Location yet) are shown here directly.
-  const [computeDate, setComputeDate] = useState(() => new Date().toISOString().slice(0, 10));
+  // Reuses useGlobalNightMode's subscription for the live clock tick rather
+  // than opening a second one — see NIGHT_MODE_UPDATES's doc comment for why
+  // that's not just a style preference (a second always-on subscription on
+  // top of this one starved the browser's connection pool and hung
+  // unrelated mutations).
+  //
+  // tickThrottleMs: 1000 — this panel only ever displays simTimeMs as a
+  // "HH:MM" label and a "YYYY-MM-DD" date (see below), so sub-second
+  // precision is thrown away anyway. Left unthrottled, the raw ~60Hz tick
+  // re-rendered this whole panel — including its two per-form <Form>s and
+  // their Fluent ComboBoxes — 60x/sec whenever the popup was open, which
+  // reproduced a real "Maximum update depth exceeded" warning (see
+  // useGlobalNightMode's own doc comment on tickThrottleMs for the live
+  // repro).
+  const { simTimeMs, fromGame, nightAmount, isNight, hubSubscriber } = useGlobalNightMode(undefined, { tickThrottleMs: 1000 });
+
+  // Shows the in-game date while Assetto Corsa is running, falling back to
+  // today's — pick a different date to get that day's real sunrise/sunset
+  // instead (e.g. simulating a summer day while actually playing in winter).
+  // Uses whatever track live telemetry currently reports (see
+  // graphql/night_clock.rs); errors (no live track, track not linked to a
+  // Track Location yet) are shown here directly.
+  //
+  // Held as an *override* rather than state synced from the game via an
+  // effect: the displayed value is derived fresh every render, so the field
+  // follows the game's date as the session's clock rolls over without any
+  // sync effect to get out of step (and without this panel — memoized
+  // precisely because it sits in a ~60Hz render tree — gaining a new
+  // state-update-on-tick path).
+  const [computeDateOverride, setComputeDateOverride] = useState<string | null>(null);
+  // getUTC*, matching dayNightSim.ts's deliberate UTC-only treatment of
+  // simTimeMs — and matching the backend, which reads the same in-game
+  // timestamp as a track-local date (graphql/night_clock.rs's `game_date`).
+  // Gated on `fromGame`: without it simTimeMs is the server's own simulated
+  // clock, whose date is an artifact of however far it's been nudged rather
+  // than anything the user would recognise.
+  const gameDate = fromGame && simTimeMs != null ? new Date(simTimeMs).toISOString().slice(0, 10) : null;
+  const computeDate = computeDateOverride ?? gameDate ?? new Date().toISOString().slice(0, 10);
   const [computeError, setComputeError] = useState<string | null>(null);
   // Set (opening TrackLinkDialog) when the compute call fails specifically
   // because the live track isn't linked to a Track Location yet — see
@@ -137,16 +153,24 @@ const DayNightSimPanel: React.FC = () => {
   const [unlinkedTrack, setUnlinkedTrack] = useState<string | null>(null);
   // Bumped on every successful Compute-from-date call and folded into the
   // config Form's `key` below — per-form's <Form> is uncontrolled and only
-  // reads `initialValues` at mount (see that Form's own comment), so the
-  // Sunrise/Sunset ComboBoxes otherwise kept showing whatever was on screen
-  // before the click even after `current.simSunrise`/`simSunset` updated
-  // via the mutation's response (same NightMode id, so the id-only key
-  // never changed). A plain user edit debounce-saving back through the
-  // subscription must NOT remount this Form (that would interrupt typing),
-  // which is why the key still isn't simply tied to simSunrise/simSunset
-  // directly — only this specific external, discrete action forces a fresh
-  // snapshot.
+  // reads `initialValues` at mount (see that Form's own comment), so a field
+  // the compute rewrites underneath us otherwise keeps showing whatever was
+  // on screen before the click (same NightMode id, so the id-only key never
+  // changed). Sunrise/sunset were the visible case and are no longer editable
+  // here, but the same compute also rewrites the dawn/dusk transition slider,
+  // so this is still load-bearing. A plain user edit debounce-saving back
+  // through the subscription must NOT remount this Form (that would interrupt
+  // typing), which is why the key isn't tied to the field values directly —
+  // only this specific external, discrete action forces a fresh snapshot.
   const [computeNonce, setComputeNonce] = useState(0);
+  // Same problem, other trigger: the backend also recomputes sunrise/sunset
+  // on its own while the game is running (whenever the in-game date or the
+  // live track changes — graphql/night_clock.rs's
+  // maybe_auto_recompute_sun_times), with no click here to bump the nonce.
+  // Those two fields move only on a recompute, never on a hand-edit of
+  // anything still in this form, so folding them into the key refreshes it
+  // for a server-side recompute without remounting mid-edit.
+  const computedFor = `${current?.simSunriseSunsetDate ?? ''}@${current?.simLastComputedTrack ?? ''}`;
   const handleComputeFromDate = () => {
     setComputeError(null);
     setSunriseSunsetFromDate({ variables: { date: computeDate } })
@@ -170,21 +194,6 @@ const DayNightSimPanel: React.FC = () => {
     setUnlinkedTrack(null);
     handleComputeFromDate();
   };
-
-  // Reuses useGlobalNightMode's subscription for the live clock tick rather
-  // than opening a second one — see NIGHT_MODE_UPDATES's doc comment for why
-  // that's not just a style preference (a second always-on subscription on
-  // top of this one starved the browser's connection pool and hung
-  // unrelated mutations).
-  //
-  // tickThrottleMs: 1000 — this panel only ever displays simTimeMs as a
-  // "HH:MM" label (see below), so sub-second precision is thrown away
-  // anyway. Left unthrottled, the raw ~60Hz tick re-rendered this whole
-  // panel — including its two per-form <Form>s and their Fluent ComboBoxes
-  // — 60x/sec whenever the popup was open, which reproduced a real
-  // "Maximum update depth exceeded" warning (see useGlobalNightMode's own
-  // doc comment on tickThrottleMs for the live repro).
-  const { simTimeMs, hubSubscriber } = useGlobalNightMode(undefined, { tickThrottleMs: 1000 });
 
   const save = (update: Partial<NightModeRecord>) => {
     if (current?.id) {
@@ -222,11 +231,9 @@ const DayNightSimPanel: React.FC = () => {
   }), [current?.simEnabled]);
   const configInitialValues = useMemo(() => ({
     cycleHours: currentHours.toFixed(2),
-    simSunrise: hhmmToDisplayDate(current?.simSunrise ?? '06:00'),
-    simSunset: hhmmToDisplayDate(current?.simSunset ?? '20:00'),
     simTransitionMinutes: current?.simTransitionMinutes ?? 40,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [currentHours, current?.simSunrise, current?.simSunset, current?.simTransitionMinutes]);
+  }), [currentHours, current?.simTransitionMinutes]);
 
   // Multi-field onChange convention (per DashPanEditor's
   // handleDashPanFormChange): fires on ANY field change with the full raw
@@ -255,16 +262,6 @@ const DayNightSimPanel: React.FC = () => {
     const patch: Partial<NightModeRecord> = {};
     let changed = false;
 
-    const newSunrise = raw.simSunrise instanceof Date ? displayDateToHHMM(raw.simSunrise) : undefined;
-    if (newSunrise && newSunrise !== current?.simSunrise) {
-      patch.simSunrise = newSunrise;
-      changed = true;
-    }
-    const newSunset = raw.simSunset instanceof Date ? displayDateToHHMM(raw.simSunset) : undefined;
-    if (newSunset && newSunset !== current?.simSunset) {
-      patch.simSunset = newSunset;
-      changed = true;
-    }
     if (raw.simTransitionMinutes != null && raw.simTransitionMinutes !== current?.simTransitionMinutes) {
       patch.simTransitionMinutes = raw.simTransitionMinutes;
       changed = true;
@@ -277,7 +274,22 @@ const DayNightSimPanel: React.FC = () => {
     }
   };
 
-  const preview = simTimeMs != null && current ? computeSimulatedNightState(simTimeMs, current) : null;
+  // Read from the hook rather than recomputed here, so this reports exactly
+  // what the dashboards are rendering.
+  //
+  // It used to call computeSimulatedNightState(simTimeMs, current) with no sun
+  // elevation, which silently selected that function's FALLBACK path — the
+  // sunrise/sunset clock ramp. That ramp is flat 100% once the dusk transition
+  // has run, so the popup read "100% night" while every dashboard, using the
+  // elevation path, was at 94% and visibly still blending some of the day
+  // photo. Two different models of the same thing, on screen at once, with
+  // only the popup's being wrong.
+  //
+  // Note this now also honours `simEnabled`: with simulation off it reports
+  // the manual toggle's 0/1, where before it previewed the simulated ramp
+  // regardless. That is the more useful reading — it says what IS happening
+  // rather than what would happen in another mode.
+  const preview = simTimeMs != null && current ? { nightAmount, isNight } : null;
 
   return (
     <Stack tokens={{ childrenGap: '0.77em' }} style={{ minWidth: 320 }}>
@@ -305,7 +317,7 @@ const DayNightSimPanel: React.FC = () => {
         </span>
         <span style={{ fontSize: '0.78em', color: theme.palette.neutralSecondary }}>
           {preview
-            ? `Currently ${preview.nightAmount >= 0.5 ? 'night' : 'day'} (${Math.round(preview.nightAmount * 100)}% night)`
+            ? `Currently ${preview.isNight ? 'night' : 'day'} (${Math.round(preview.nightAmount * 100)}% night)`
             : 'Set sunrise/sunset below to preview'}
         </span>
       </Stack>
@@ -327,7 +339,7 @@ const DayNightSimPanel: React.FC = () => {
       <Separator />
 
       <Form
-        key={current ? `loaded-config-${current.id}-${computeNonce}` : 'loading-config'}
+        key={current ? `loaded-config-${current.id}-${computeNonce}-${computedFor}` : 'loading-config'}
         form={configSchema}
         name="dayNightSimConfig"
         initialValues={configInitialValues}
@@ -336,13 +348,15 @@ const DayNightSimPanel: React.FC = () => {
 
       <Stack tokens={{ childrenGap: 4 }}>
         <span style={{ fontSize: '0.78em', opacity: 0.65 }}>
-          Or compute real sunrise/sunset for a date, at whatever track is currently live
+          {gameDate && computeDateOverride == null
+            ? "Sunrise, sunset and the dawn/dusk width follow the game's own date and track"
+            : 'Or compute real sunrise/sunset for a date, at whatever track is currently live'}
         </span>
         <Stack horizontal verticalAlign="end" tokens={{ childrenGap: 8 }}>
           <TextField
             type="date"
             value={computeDate}
-            onChange={(_e, v) => setComputeDate(v ?? '')}
+            onChange={(_e, v) => setComputeDateOverride(v ?? '')}
             styles={{ root: { flex: 1 } }}
           />
           <DefaultButton

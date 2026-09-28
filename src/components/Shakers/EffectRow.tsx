@@ -1,7 +1,8 @@
-import React, { useRef } from 'react';
+import React from 'react';
 import { IconButton, Icon } from '@fluentui/react';
 import { Form } from '../../lib/denim/lib';
 import { getTheme } from '../../lib/denim/lib';
+import { useRowCommit } from '../../lib/per-form/useRowCommit';
 import { dspOffSchema, dspOnSchema } from './schemas';
 import { ShakerDspChannel } from './dspQueries';
 
@@ -70,82 +71,68 @@ export const EffectRow: React.FC<EffectRowProps> = ({ rec, label, onToggle, onUp
   const showDsp = enabled && !!onDspChange && rec!.dspSlot != null && dspEnabled;
   const muted = dspChannel?.muted ?? false;
 
-  // Shared by every slider in this one Form (volume, fader, LPF Hz, and the
-  // four advanced fields) — only ONE can be dragged at a time, so a single
-  // ref correctly gates all of them: defer the outer (network-mutating)
-  // commit until pointer release instead of firing on every drag tick.
-  // Checkboxes/selects/TyreGrid's own Apply button never touch this (no
-  // onActivate wired to them), so they still commit immediately.
-  const dragging = useRef(false);
-  const pending = useRef<any>(null);
-  const skipFirst = useRef(true);
-  // Last snapshot actually forwarded to onToggle/onUpdate/onDspChange — lets
-  // commit() diff a field-by-field Form-wide `clean` snapshot back down into
-  // the three different narrower callbacks each field group belongs to.
-  const prevRef = useRef<any>(null);
-
-  // The inner <Form> below (keyed on rec/dspChannel identity, see its own
-  // `key` prop) remounts with fresh internal values — and fires a fresh
-  // mount-tick onChange — whenever `rec` or `dspChannel` transitions from
-  // "still loading" (null) to real data, most commonly on first page load
-  // before GET_ITEMS/GET_DSP_CHANNELS resolve. These refs live up here in
-  // EffectRow, which itself never remounts (ShakerMatrix doesn't key it),
-  // so without this reset `skipFirst` stays consumed from that first
-  // (pre-data) mount, and the second mount's real-data onChange sails
-  // straight into commit() as a phantom "user edit" — confirmed live via
-  // this exact bug in the sibling LfeRow.tsx (infinite enable/disable
+  // The inner <Form> (keyed on rec/dspChannel identity, see its own `key`
+  // prop) remounts with fresh internal values — and fires a fresh mount-tick
+  // onChange — whenever `rec` or `dspChannel` transitions from "still
+  // loading" (null) to real data, most commonly on first page load before
+  // GET_ITEMS/GET_DSP_CHANNELS resolve. The commit state lives up here in
+  // EffectRow, which itself never remounts (ShakerMatrix doesn't key it), so
+  // without a reset on identity change the mount tick stays consumed from
+  // that first (pre-data) mount and the second mount's real-data onChange
+  // sails straight into a commit as a phantom "user edit" — confirmed live
+  // via this exact bug in the sibling LfeRow.tsx (infinite enable/disable
   // ping-pong on refresh) and via this row's own mass no-op
   // updateShakerDspChannel/applyShakerDspChannelLive calls firing for every
-  // channel on every fresh page load. Resetting inline during render (not
-  // in a useEffect) matters: the remounted Form's own mount-effect fires as
-  // part of the same commit, effects run child-before-parent, so a parent
-  // useEffect here would reset these refs one render too late.
+  // channel on every fresh page load.
+  //
+  // useRowCommit owns that now, resetting inline during render for the same
+  // reason: the remounted Form's mount-effect fires in the same commit and
+  // effects run child-before-parent, so an effect here would be one render
+  // too late.
+  //
+  // Its `drag` gate is shared by every slider in this one Form (volume,
+  // fader, LPF Hz, and the four advanced fields) — only ONE can be dragged
+  // at a time, so a single gate correctly covers all of them: defer the
+  // network-mutating commit until pointer release instead of firing on every
+  // drag tick. Checkboxes/selects/TyreGrid's Apply button never wire
+  // onActivate, so they still commit immediately.
   const identity = `${rec?.id ?? 'none'}|${dspChannel?.id ?? 'none'}|${showDsp}`;
-  const lastIdentity = useRef(identity);
-  if (lastIdentity.current !== identity) {
-    lastIdentity.current = identity;
-    skipFirst.current = true;
-    prevRef.current = null;
-  }
 
-  const commit = (clean: any) => {
-    const prev = prevRef.current ?? clean;
-
-    if (clean.enabled !== prev.enabled) {
-      onToggle();
-      // The row's own identity (rec becoming null or non-null) is about to
-      // change from the parent re-rendering with fresh data — nothing else
-      // in this snapshot is still meaningful to also commit this tick.
-      prevRef.current = clean;
-      return;
-    }
-
-    if ('volume' in clean && clean.volume !== prev.volume) {
-      onUpdate({ volume: clean.volume });
-    }
-
-    if ('fader' in clean) {
-      const lpfHzOut = clean.lpfOn ? clean.lpfHz : null;
-      const prevLpfHzOut = prev.lpfOn ? prev.lpfHz : null;
-      if (clean.fader !== prev.fader || lpfHzOut !== prevLpfHzOut) {
-        onDspChange!({ lpfHz: lpfHzOut, fader: clean.fader });
+  // `changed` lets one Form-wide snapshot fan back out into the three
+  // narrower callbacks each field group belongs to, without hand-diffing.
+  const { handleChange, drag } = useRowCommit<any>({
+    identity,
+    onCommit: (next, prev, changed) => {
+      if (changed.includes('enabled')) {
+        onToggle();
+        // The row's own identity (rec becoming null or non-null) is about to
+        // change from the parent re-rendering with fresh data — nothing else
+        // in this snapshot is still meaningful to also commit this tick.
+        return;
       }
-    }
 
-    if (ADVANCED_FIELDS.some(k => k in clean && clean[k] !== prev[k])) {
-      onUpdate({
-        modulation: clean.modulation, frequency: clean.frequency,
-        frequencyMax: clean.frequencyMax, amplitude: clean.amplitude, amplitudeMax: clean.amplitudeMax,
-      });
-    }
+      if ('volume' in next && changed.includes('volume')) {
+        onUpdate({ volume: next.volume });
+      }
 
-    prevRef.current = clean;
-  };
+      // lpfOn/lpfHz collapse into a single nullable lpfHz on the wire, so
+      // this compares the *derived* value rather than either raw field.
+      if ('fader' in next) {
+        const lpfHzOut = next.lpfOn ? next.lpfHz : null;
+        const prevLpfHzOut = prev.lpfOn ? prev.lpfHz : null;
+        if (changed.includes('fader') || lpfHzOut !== prevLpfHzOut) {
+          onDspChange!({ lpfHz: lpfHzOut, fader: next.fader });
+        }
+      }
 
-  const drag = {
-    onActivate: () => { dragging.current = true; },
-    onDeactivate: () => { dragging.current = false; if (pending.current) commit(pending.current); },
-  };
+      if (ADVANCED_FIELDS.some(k => k in next && changed.includes(k))) {
+        onUpdate({
+          modulation: next.modulation, frequency: next.frequency,
+          frequencyMax: next.frequencyMax, amplitude: next.amplitude, amplitudeMax: next.amplitudeMax,
+        });
+      }
+    },
+  });
 
   const schema = showDsp
     ? dspOnSchema({ label: label ?? '', enabled, drag })
@@ -186,11 +173,7 @@ export const EffectRow: React.FC<EffectRowProps> = ({ rec, label, onToggle, onUp
         form={schema}
         name="effect"
         initialValues={initialValues}
-        onChange={(_name: string, { clean }: any) => {
-          pending.current = clean;
-          if (skipFirst.current) { skipFirst.current = false; prevRef.current = clean; return; }
-          if (!dragging.current) commit(clean);
-        }}
+        onChange={(_name: string, { clean }: any) => handleChange(clean)}
       />
       {showDsp && (
         <div style={{ position: 'absolute', top: 0, right: 0 }}>

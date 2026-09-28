@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  nightAmountFromSunElevation,
   parseTimeOfDay,
   formatTimeOfDay,
   computeSimulatedNightState,
@@ -67,33 +68,154 @@ describe('computeSimulatedNightState', () => {
     expect(state.nightAmount).toBe(1);
   });
 
-  it('is exactly 0.5 at the sunrise instant', () => {
+  it('is still full night at the sunrise instant — the ramp starts there, not centred on it', () => {
     const sixAm = Date.UTC(2026, 0, 1, 6, 0, 0);
     const state = computeSimulatedNightState(sixAm, config())!;
-    expect(state.nightAmount).toBeCloseTo(0.5, 5);
+    expect(state.nightAmount).toBe(1);
   });
 
-  it('ramps linearly through the dawn window', () => {
-    // 10 min before sunrise, halfway through a 20-min-half-width dawn ramp -> 3/4 night.
-    const tenMinBeforeSunrise = Date.UTC(2026, 0, 1, 5, 50, 0);
-    const state = computeSimulatedNightState(tenMinBeforeSunrise, config({ simTransitionMinutes: 40 }))!;
-    expect(state.nightAmount).toBeCloseTo(0.75, 5);
+  it('is still full day at the sunset instant — the ramp starts there, not centred on it', () => {
+    const eightPm = Date.UTC(2026, 0, 1, 20, 0, 0);
+    const state = computeSimulatedNightState(eightPm, config())!;
+    expect(state.nightAmount).toBe(0);
   });
 
-  it('ramps the other direction through dusk (day -> night)', () => {
+  it('ramps linearly through the dawn window, forward from sunrise', () => {
+    const tenMinAfterSunrise = Date.UTC(2026, 0, 1, 6, 10, 0);
+    expect(computeSimulatedNightState(tenMinAfterSunrise, config({ simTransitionMinutes: 40 }))!.nightAmount).toBeCloseTo(0.75, 5);
+    const twentyMinAfterSunrise = Date.UTC(2026, 0, 1, 6, 20, 0);
+    expect(computeSimulatedNightState(twentyMinAfterSunrise, config({ simTransitionMinutes: 40 }))!.nightAmount).toBeCloseTo(0.5, 5);
+    const fortyMinAfterSunrise = Date.UTC(2026, 0, 1, 6, 40, 0);
+    expect(computeSimulatedNightState(fortyMinAfterSunrise, config({ simTransitionMinutes: 40 }))!.nightAmount).toBeCloseTo(0, 5);
+  });
+
+  it('ramps the other direction through dusk (day -> night), forward from sunset', () => {
     const tenMinAfterSunset = Date.UTC(2026, 0, 1, 20, 10, 0);
-    const state = computeSimulatedNightState(tenMinAfterSunset, config({ simTransitionMinutes: 40 }))!;
-    expect(state.nightAmount).toBeCloseTo(0.75, 5);
+    expect(computeSimulatedNightState(tenMinAfterSunset, config({ simTransitionMinutes: 40 }))!.nightAmount).toBeCloseTo(0.25, 5);
+    const fortyMinAfterSunset = Date.UTC(2026, 0, 1, 20, 40, 0);
+    expect(computeSimulatedNightState(fortyMinAfterSunset, config({ simTransitionMinutes: 40 }))!.nightAmount).toBeCloseTo(1, 5);
   });
 
   it('handles a sunset near midnight without wraparound glitches', () => {
-    const fiveMinAfterSunset = Date.UTC(2026, 0, 2, 0, 5, 0);
+    const fifteenMinAfterSunset = Date.UTC(2026, 0, 2, 0, 5, 0);
     const state = computeSimulatedNightState(
-      fiveMinAfterSunset,
+      fifteenMinAfterSunset,
       config({ simSunrise: '06:00', simSunset: '23:50', simTransitionMinutes: 40 }),
     )!;
-    expect(state.nightAmount).toBeGreaterThan(0.5);
-    expect(state.nightAmount).toBeLessThan(1);
+    // 23:50 + 15min is still inside the 40-minute dusk ramp, well short of full night.
+    expect(state.nightAmount).toBeCloseTo(0.375, 5);
+  });
+});
+
+// ─── nightAmountFromSunElevation ────────────────────────────────────────────
+// The curve that actually drives the blend whenever a track location is
+// known. Mirrors night_state.rs's elevation_curve_matches_its_bounds_and_eases
+// — the two light the same room (screen and bulbs) and must not diverge.
+
+describe('nightAmountFromSunElevation', () => {
+  it('is hard 1/0 at the bounds and clamps beyond them', () => {
+    expect(nightAmountFromSunElevation(-11)).toBe(1);
+    expect(nightAmountFromSunElevation(-40)).toBe(1);
+    expect(nightAmountFromSunElevation(7)).toBe(0);
+    expect(nightAmountFromSunElevation(80)).toBe(0);
+  });
+
+  it('is biased toward night at the midpoint of the band', () => {
+    // A plain smoothstep is exactly 0.5 here. Squaring pulls it to 0.75,
+    // because a cockpit goes dark long before the sky does — see
+    // NIGHT_BIAS_EXPONENT.
+    expect(nightAmountFromSunElevation(-2)).toBeCloseTo(0.75, 9);
+  });
+
+  it('reaches full night where the in-game interior stops darkening', () => {
+    // Observed in a PRACTICE session with manual time control: the interior
+    // stops darkening noticeably at 22:50 sim, which a 10s-interval trace of
+    // the same evening puts at -7.9 degrees. A plain smoothstep is only 92%
+    // there and would go on darkening for another two degrees after the game
+    // had finished.
+    expect(nightAmountFromSunElevation(-7.9)).toBeGreaterThan(0.99);
+    // Still visibly transitioning well before that, rather than slamming to
+    // night early — the failure mode of over-biasing.
+    expect(nightAmountFromSunElevation(-2)).toBeLessThan(0.8);
+    // ...and neither endpoint moves, both being independently confirmed.
+    expect(nightAmountFromSunElevation(7)).toBe(0);
+    expect(nightAmountFromSunElevation(-11)).toBe(1);
+  });
+
+  it('uses its own MEASURED dawn band, re-measured by the dusk method', () => {
+    // 22 June at the Nurburgring, scrubbing from well before anything was
+    // expected: the sky began brightening at 03:30 local (-11.89 deg) and the
+    // sun cleared the tree line at 05:40 (+1.53, geometric sunrise 05:22 plus
+    // the trees). An earlier -2 bound was an artefact of starting the scrub at
+    // 05:15, already -3.9 deg — it recorded where the scrub began.
+    expect(nightAmountFromSunElevation(-11.89)).toBeGreaterThan(0.99);
+    const atSunrise = nightAmountFromSunElevation(-0.833);
+    expect(atSunrise).toBeGreaterThan(0.2);
+    expect(atSunrise).toBeLessThan(0.8);
+    const overTheTrees = nightAmountFromSunElevation(1.53);
+    expect(overTheTrees).toBeGreaterThan(0.3);
+    expect(overTheTrees).toBeLessThan(0.7);
+  });
+
+  it('eases rather than running linear', () => {
+    // A linear ramp would put the quarter point at exactly 0.75; smoothstep
+    // must sit above it, i.e. still darker early on.
+    expect(nightAmountFromSunElevation(-11 + 18 * 0.25)).toBeGreaterThan(0.78);
+  });
+
+  it('is monotonic across the band', () => {
+    let prev = Infinity;
+    for (let i = 0; i <= 180; i++) {
+      const v = nightAmountFromSunElevation(-11 + i * 0.1);
+      expect(v).toBeLessThanOrEqual(prev + 1e-12);
+      prev = v;
+    }
+  });
+
+  it('uses its own MEASURED dusk band, timezone-corrected', () => {
+    // AC reports the track's CIVIL LOCAL time while the solar maths is UTC, so
+    // elevations derived from clock observations were two hours wrong until
+    // that was corrected. Afterwards two independent sessions agree: 21 Sept
+    // began changing at +6.84 and stopped at -10.73; 22 June read fully dark
+    // at -11.27 — half a degree apart, having been 11.5 apart before.
+    expect(nightAmountFromSunElevation(7, false)).toBe(0);
+    expect(nightAmountFromSunElevation(-11, false)).toBe(1);
+    expect(nightAmountFromSunElevation(30, false)).toBe(0);
+    expect(nightAmountFromSunElevation(-40, false)).toBe(1);
+    expect(nightAmountFromSunElevation(6.84, false)).toBeLessThan(0.02);
+    expect(nightAmountFromSunElevation(-10.73, false)).toBeGreaterThan(0.97);
+    expect(nightAmountFromSunElevation(-11.27, false)).toBeGreaterThan(0.99);
+    // Sunset lands mid-transition rather than at either end.
+    const atSunset = nightAmountFromSunElevation(-0.833, false);
+    expect(atSunset).toBeGreaterThan(0.2);
+    expect(atSunset).toBeLessThan(0.8);
+    // Dawn converged on the same pair, independently and on another date.
+    expect(nightAmountFromSunElevation(-11, true)).toBe(1);
+    expect(nightAmountFromSunElevation(7, true)).toBe(0);
+  });
+
+  it('is darker through dusk than open-air physics would be', () => {
+    // The reason a physically-derived curve was tried and rejected. Log
+    // illuminance through published twilight figures agrees with this band at
+    // sunset (0.29 vs 0.34) and about where full night lands, but runs up to
+    // 20 points brighter through the middle of twilight — which read as
+    // visibly overexposed in game. These are the three elevations where the
+    // two disagree most; they guard against anyone re-deriving the "correct"
+    // curve and quietly regressing it.
+    expect(nightAmountFromSunElevation(-3, false)).toBeGreaterThan(0.5);
+    expect(nightAmountFromSunElevation(-6, false)).toBeGreaterThan(0.75);
+    expect(nightAmountFromSunElevation(-9, false)).toBeGreaterThan(0.93);
+  });
+
+  it('wins over the clock ramp, and a bad reading falls back to it', () => {
+    const noon = Date.UTC(2026, 0, 1, 12, 0, 0);
+    const c = config();
+    // Noon by the clock (ramp alone says full day) but the sun is well below
+    // the band — elevation must win.
+    expect(computeSimulatedNightState(noon, c, -20)!.nightAmount).toBe(1);
+    // Absent or non-finite falls back to the clock ramp.
+    expect(computeSimulatedNightState(noon, c, null)!.nightAmount).toBe(0);
+    expect(computeSimulatedNightState(noon, c, NaN)!.nightAmount).toBe(0);
   });
 });
 
@@ -136,6 +258,10 @@ describe('computeEffectiveNightState', () => {
     expect(state.isNight).toBe(true);
     expect(state.nightAmount).toBe(1);
   });
+
+
+
+
 
   it('falls back to manual if simEnabled is true but sunrise/sunset are not configured', () => {
     const noon = Date.UTC(2026, 0, 1, 12, 0, 0);

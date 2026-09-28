@@ -27,6 +27,35 @@ fn julian_day_number(year: i32, month: u32, day: u32) -> f64 {
     (day as i64 + (153 * m + 2) / 5 + 365 * y + y / 4 - y / 100 + y / 400 - 32045) as f64
 }
 
+/// Inverse of `julian_day_number` — the standard Fliegel–Van Flandern
+/// Gregorian inversion. Kept next to its forward counterpart, and covered by
+/// a round-trip test, since the two magic-constant sets have to agree.
+fn civil_from_julian_day_number(jdn: i64) -> (i32, u32, u32) {
+    let a = jdn + 32044;
+    let b = (4 * a + 3) / 146097;
+    let c = a - 146097 * b / 4;
+    let d = (4 * c + 3) / 1461;
+    let e = c - 1461 * d / 4;
+    let m = (5 * e + 2) / 153;
+    let day = e - (153 * m + 2) / 5 + 1;
+    let month = m + 3 - 12 * (m / 10);
+    let year = 100 * b + d - 4800 + m / 10;
+    (year as i32, month as u32, day as u32)
+}
+
+/// UTC calendar date of a Unix timestamp, as "YYYY-MM-DD".
+///
+/// Exists so the in-game date carried by AC telemetry (`AcTelemetryFrame`'s
+/// `timestamp`, which is track-local rather than real-world UTC — see
+/// `graphql/mod.rs`'s `sim_ms_from_game`) can drive sunrise/sunset without
+/// pulling in a date crate. `floor`, not truncating division, so pre-1970
+/// timestamps don't land a day late.
+pub fn iso_date_from_epoch_seconds(secs: i64) -> String {
+    let days = (secs as f64 / 86_400.0).floor() as i64;
+    let (year, month, day) = civil_from_julian_day_number(2_440_588 + days);
+    format!("{year:04}-{month:02}-{day:02}")
+}
+
 /// Parses "YYYY-MM-DD" into (year, month, day). No external date crate.
 pub fn parse_iso_date(s: &str) -> Option<(i32, u32, u32)> {
     let mut parts = s.trim().splitn(3, '-');
@@ -103,15 +132,25 @@ fn equation_of_time(t: f64) -> f64 {
         - 1.25 * e * e * sin2m;
     rad2deg(e_time) * 4.0 // minutes of time
 }
-/// Hour angle (degrees) of sunrise/sunset — `90.833°` bakes in standard
+/// Solar zenith angle defining sunrise/sunset — bakes in standard
 /// atmospheric refraction plus the sun's apparent radius, same convention
-/// NOAA's calculator uses. `None` for a latitude/declination with no
-/// sunrise or sunset that day (polar day/night).
-fn hour_angle_deg(lat: f64, solar_dec: f64) -> Option<f64> {
+/// NOAA's calculator uses.
+const SUNRISE_ZENITH_DEG: f64 = 90.833;
+/// Solar zenith angle defining civil twilight (sun 6° below the horizon) —
+/// conventionally the point where outdoor light stops being usable and
+/// headlights go on, which is exactly the boundary the dawn/dusk ramp is
+/// modelling.
+const CIVIL_TWILIGHT_ZENITH_DEG: f64 = 96.0;
+
+/// Hour angle (degrees) at which the sun reaches `zenith_deg`. `None` for a
+/// latitude/declination that never reaches it that day (polar day/night, or
+/// a high-latitude summer night that never gets dark enough for civil
+/// twilight to end).
+fn hour_angle_deg(lat: f64, solar_dec: f64, zenith_deg: f64) -> Option<f64> {
     let lat_rad = deg2rad(lat);
     let sd_rad = deg2rad(solar_dec);
     let ha_arg =
-        deg2rad(90.833).cos() / (lat_rad.cos() * sd_rad.cos()) - lat_rad.tan() * sd_rad.tan();
+        deg2rad(zenith_deg).cos() / (lat_rad.cos() * sd_rad.cos()) - lat_rad.tan() * sd_rad.tan();
     if !(-1.0..=1.0).contains(&ha_arg) {
         return None;
     }
@@ -134,19 +173,108 @@ pub fn compute_sunrise_sunset(
     let t = time_julian_cent(jd);
     let eq_time = equation_of_time(t);
     let solar_dec = sun_declination(t);
-    let ha_deg = hour_angle_deg(latitude, solar_dec)?;
+    let ha_deg = hour_angle_deg(latitude, solar_dec, SUNRISE_ZENITH_DEG)?;
 
-    // NOAA's own formula takes longitude WEST-positive (opposite of the
-    // standard East-positive geographic convention this app/Nominatim use
-    // everywhere else) — negate at this boundary only.
-    let west_lon = -longitude;
-    let sunrise_min = 720.0 - 4.0 * (west_lon + ha_deg) - eq_time;
-    let sunset_min = 720.0 - 4.0 * (west_lon - ha_deg) - eq_time;
+    // Longitude goes in East-positive, exactly as stored — do NOT negate it.
+    //
+    // This previously negated to "west-positive, the convention NOAA's own
+    // formula takes". That was wrong, and it put solar noon out by
+    // 2 x 4 x longitude minutes: 56 min at the Nordschleife (7E), ~10 hours
+    // in New York (74W), and complete nonsense in Tokyo (sunrise landing
+    // after sunset). The sign is checkable against physics without any
+    // almanac: east of Greenwich the sun crosses the meridian EARLIER in
+    // UTC, so solar noon must be `720 - 4*longitude - eq_time`, which is
+    // what these two lines now produce at `ha_deg == 0`.
+    let sunrise_min = 720.0 - 4.0 * (longitude + ha_deg) - eq_time;
+    let sunset_min = 720.0 - 4.0 * (longitude - ha_deg) - eq_time;
 
     Some((
         sunrise_min.rem_euclid(1440.0),
         sunset_min.rem_euclid(1440.0),
     ))
+}
+
+/// Date AC swings the sun on when `equinox_sun_trajectory` is set: it moves
+/// as though it were the 20th of March whatever the session date says.
+pub const EQUINOX_TRAJECTORY_DATE: (u32, u32) = (3, 20);
+
+/// Sun elevation above the horizon in degrees, negative below, for a given
+/// date, location and time of day (`minute_of_day`, minutes since midnight in
+/// the same frame the game's clock reports).
+///
+/// This is what a dawn/dusk ramp should key on, rather than interpolating
+/// between sunrise and sunset clock times. Elevation is the thing that
+/// actually sets sky brightness, it is monotonic through the interesting
+/// part, and it needs no assumption about where in the transition sunrise
+/// falls — which is exactly the assumption that kept being wrong.
+///
+/// Deliberately NOT read from telemetry. AC exposes `sim.lightDirection`, but
+/// the SDK documents it as "sun OR moon" and before dawn it is the moon:
+/// measured on this rig it reported 56 degrees of elevation at an hour when
+/// the sun was 6 degrees below the horizon — above the sun's maximum possible
+/// elevation at that latitude, which is how the substitution was caught.
+///
+/// The caller must pass the date the *game* is using, which is not always the
+/// session date: see `EQUINOX_TRAJECTORY_DATE`.
+pub fn sun_elevation_deg(
+    year: i32,
+    month: u32,
+    day: u32,
+    latitude: f64,
+    longitude: f64,
+    minute_of_day: f64,
+) -> f64 {
+    let t = time_julian_cent(julian_day_number(year, month, day));
+    let solar_dec = sun_declination(t);
+    let eq_time = equation_of_time(t);
+
+    // True solar time, then hour angle: 0 at solar noon, +/-180 at midnight,
+    // 4 minutes of clock per degree of rotation. Same East-positive longitude
+    // convention as `compute_sunrise_sunset` — see the note there about the
+    // sign error this used to have.
+    let true_solar_time = (minute_of_day + eq_time + 4.0 * longitude).rem_euclid(1440.0);
+    let hour_angle = true_solar_time / 4.0 - 180.0;
+
+    let lat = deg2rad(latitude);
+    let dec = deg2rad(solar_dec);
+    let cos_zenith = lat.sin() * dec.sin() + lat.cos() * dec.cos() * deg2rad(hour_angle).cos();
+    90.0 - rad2deg(cos_zenith.clamp(-1.0, 1.0).acos())
+}
+
+/// Width (minutes) of the dawn/dusk ramp for the given date and location —
+/// i.e. `NightMode.sim_transition_minutes`, derived rather than guessed.
+///
+/// dayNightSim.ts centres the ramp ON sunrise/sunset with half-width
+/// `transition / 2`, so half of it falls before sunrise and half after. Civil
+/// twilight (sun from -6° up to the horizon) is the natural half-width: the
+/// ramp then begins at civil dawn — the point conventionally treated as
+/// "lights on" — and ends as far after sunrise as it began before it. Hence
+/// the factor of 2. Each degree of hour angle is 4 minutes of rotation.
+///
+/// Latitude matters a lot here, which is the whole reason not to leave this
+/// as a fixed default: civil twilight is ~21 minutes at the equator but
+/// stretches past an hour at Spa in midwinter. Returns `None` at latitudes
+/// where the sun never crosses one of the two boundaries that day.
+pub fn compute_transition_minutes(
+    year: i32,
+    month: u32,
+    day: u32,
+    latitude: f64,
+    _longitude: f64,
+) -> Option<f64> {
+    let t = time_julian_cent(julian_day_number(year, month, day));
+    let solar_dec = sun_declination(t);
+    let ha_sunrise = hour_angle_deg(latitude, solar_dec, SUNRISE_ZENITH_DEG)?;
+    let ha_civil = hour_angle_deg(latitude, solar_dec, CIVIL_TWILIGHT_ZENITH_DEG)?;
+    Some(2.0 * 4.0 * (ha_civil - ha_sunrise))
+}
+
+/// Rounds a raw transition width onto the Dawn/dusk slider's own domain
+/// (0..240, step 5 — see DayNightSimPanel.tsx's `configSchema`) so a computed
+/// value lands exactly on a slider stop instead of a hair off one, which
+/// would otherwise read back as an unsaved edit.
+pub fn quantize_transition_minutes(minutes: f64) -> i64 {
+    ((minutes / 5.0).round() as i64 * 5).clamp(0, 240)
 }
 
 /// Minutes since midnight -> "HH:MM", matching dayNightSim.ts's
@@ -200,7 +328,48 @@ mod tests {
             "day length {day_length_min} min not in expected 16.5-17h range"
         );
         // Solar noon (near-longitude-0 site) should fall near 12:00 UTC.
-        assert!((rise + set) / 2.0 - 12.0 * 60.0 < 15.0);
+        //
+        // The `.abs()` is load-bearing and was missing: without it this is a
+        // one-sided comparison that passes for ANY value below 12:15,
+        // including the wildly-early noons a longitude sign error produces.
+        // That is precisely how such a bug survived this suite — see
+        // `solar_noon_tracks_longitude_sign` below, which tests the thing
+        // this assertion only looked like it was testing.
+        assert!(((rise + set) / 2.0 - 12.0 * 60.0).abs() < 15.0);
+    }
+
+    /// The regression test for a real bug: `compute_sunrise_sunset` used to
+    /// negate longitude, putting solar noon out by `2 * 4 * longitude`
+    /// minutes — 56 min at the Nordschleife, ~10 hours in New York, and
+    /// sunrise-after-sunset in Tokyo.
+    ///
+    /// Deliberately asserts against *physics*, not recalled clock times, per
+    /// the warning above: east of Greenwich the sun crosses the meridian
+    /// earlier in UTC, west of it later, by 4 minutes per degree. Solar noon
+    /// is therefore `720 - 4*longitude - eq_time`, and the equation of time
+    /// is bounded by about +/-16 minutes all year, so a 25-minute tolerance
+    /// pins the sign and magnitude without pinning an almanac value.
+    #[test]
+    fn solar_noon_tracks_longitude_sign() {
+        for (name, lat, lon) in [
+            ("Nordschleife", 50.3526, 6.9830),
+            ("Tokyo", 35.68, 139.69),
+            ("New York", 40.71, -74.01),
+            ("Interlagos", -23.7036, -46.6997),
+        ] {
+            let (rise, set) = compute_sunrise_sunset(2026, 9, 4, lat, lon).unwrap();
+            // Unwrap the midpoint: a day spanning UTC midnight puts sunset
+            // numerically below sunrise, and the naive mean lands antipodal.
+            let set_unwrapped = if set < rise { set + 1440.0 } else { set };
+            let noon = ((rise + set_unwrapped) / 2.0).rem_euclid(1440.0);
+            let expected = (720.0 - 4.0 * lon).rem_euclid(1440.0);
+            let diff = (noon - expected + 720.0).rem_euclid(1440.0) - 720.0;
+            assert!(
+                diff.abs() < 25.0,
+                "{name} ({lon} deg E): solar noon {noon:.0} min, expected ~{expected:.0} \
+                 (off by {diff:.0} min — longitude sign or scale is wrong)"
+            );
+        }
     }
 
     #[test]
@@ -226,10 +395,125 @@ mod tests {
         assert_eq!(format_hhmm(-30.0), "23:30");
     }
 
+    /// Elevation must agree with the sunrise/sunset the other function
+    /// computes, or the two describe different suns. Checks the crossing
+    /// rather than a remembered clock time: at sunrise the sun sits at
+    /// -0.833 degrees (the refraction/disc allowance baked into
+    /// SUNRISE_ZENITH_DEG), so elevation there must be within a whisker of
+    /// that, and must be rising.
+    #[test]
+    fn elevation_agrees_with_computed_sunrise() {
+        for (name, lat, lon, (y, mo, d)) in [
+            ("Nordschleife", 50.3526, 6.9830, (2026, 3, 20)),
+            ("Interlagos", -23.7036, -46.6997, (2026, 9, 4)),
+            ("Suzuka", 34.8431, 136.5407, (2026, 6, 21)),
+        ] {
+            let (rise, set) = compute_sunrise_sunset(y, mo, d, lat, lon).unwrap();
+            for (label, at) in [("sunrise", rise), ("sunset", set)] {
+                let elev = sun_elevation_deg(y, mo, d, lat, lon, at);
+                assert!(
+                    (elev + 0.833).abs() < 0.5,
+                    "{name} {label}: elevation {elev:.3} at the computed time, expected ~-0.833"
+                );
+            }
+            // Rising at sunrise, falling at sunset — pins the direction, so a
+            // sign slip in the hour angle cannot pass.
+            assert!(
+                sun_elevation_deg(y, mo, d, lat, lon, rise + 10.0)
+                    > sun_elevation_deg(y, mo, d, lat, lon, rise - 10.0),
+                "{name}: sun not rising at sunrise"
+            );
+            assert!(
+                sun_elevation_deg(y, mo, d, lat, lon, set + 10.0)
+                    < sun_elevation_deg(y, mo, d, lat, lon, set - 10.0),
+                "{name}: sun not setting at sunset"
+            );
+        }
+    }
+
+    /// Peak elevation is bounded by geometry: `90 - |latitude - declination|`.
+    /// This is what exposed AC's `lightDirection` as the moon before dawn --
+    /// it reported 56 degrees where the sun here cannot exceed ~39.6.
+    #[test]
+    fn peak_elevation_respects_the_latitude_ceiling() {
+        let (lat, lon) = (50.3526, 6.9830);
+        let (y, mo, d) = (2026, 3, 20);
+        let peak = (0..1440)
+            .map(|m| sun_elevation_deg(y, mo, d, lat, lon, m as f64))
+            .fold(f64::MIN, f64::max);
+        // Equinox: declination ~0, so the ceiling is 90 - latitude.
+        let ceiling = 90.0 - lat;
+        assert!(
+            peak <= ceiling + 0.5 && peak > ceiling - 2.0,
+            "peak elevation {peak:.2} not just under the {ceiling:.2} ceiling"
+        );
+    }
+
     #[test]
     fn parses_iso_date() {
         assert_eq!(parse_iso_date("2024-06-21"), Some((2024, 6, 21)));
         assert_eq!(parse_iso_date("bogus"), None);
         assert_eq!(parse_iso_date("2024-13-01"), None);
+    }
+
+    #[test]
+    fn julian_day_number_round_trips_through_its_inverse() {
+        // The forward and inverse algorithms carry different magic-constant
+        // sets (-32045 vs +32044); this is what keeps them honest. Spans a
+        // leap day, a century non-leap (1900), and a 400-year leap (2000).
+        for (y, m, d) in [
+            (1900, 2, 28),
+            (1970, 1, 1),
+            (2000, 2, 29),
+            (2024, 6, 17),
+            (2024, 12, 31),
+            (2026, 9, 1),
+        ] {
+            let jdn = julian_day_number(y, m, d) as i64;
+            assert_eq!(civil_from_julian_day_number(jdn), (y, m, d), "{y}-{m}-{d}");
+        }
+    }
+
+    #[test]
+    fn iso_date_from_epoch_seconds_matches_known_instants() {
+        assert_eq!(iso_date_from_epoch_seconds(0), "1970-01-01");
+        // The exact in-game instant this feature was verified against
+        // (2024-06-17 12:57:27 UTC), plus its own midnight boundaries.
+        assert_eq!(iso_date_from_epoch_seconds(1_718_629_047), "2024-06-17");
+        assert_eq!(iso_date_from_epoch_seconds(1_718_582_400), "2024-06-17");
+        assert_eq!(iso_date_from_epoch_seconds(1_718_582_399), "2024-06-16");
+        // Negative (pre-epoch) must floor, not truncate toward zero.
+        assert_eq!(iso_date_from_epoch_seconds(-1), "1969-12-31");
+    }
+
+    #[test]
+    fn transition_is_about_forty_minutes_at_the_equator() {
+        // Civil twilight at the equator is ~21 min year-round, so the
+        // sunrise-centred ramp spans ~42 — which is why 40 was a defensible
+        // hardcoded default before this was computed.
+        let t = compute_transition_minutes(2024, 3, 20, 0.0, 0.0).unwrap();
+        assert!((t - 42.0).abs() < 4.0, "equator transition {t} not ~42min");
+    }
+
+    #[test]
+    fn transition_widens_with_latitude_in_winter() {
+        // Spa (50.44°N) in midwinter has markedly longer twilight than the
+        // equator — the whole reason for deriving this per track/date rather
+        // than leaving one fixed number for every circuit.
+        let equator = compute_transition_minutes(2024, 12, 21, 0.0, 0.0).unwrap();
+        let spa = compute_transition_minutes(2024, 12, 21, 50.4372, 5.9714).unwrap();
+        assert!(
+            spa > equator + 20.0,
+            "spa {spa} not much wider than equator {equator}"
+        );
+        assert!(spa < 240.0, "spa {spa} outside the slider's domain");
+    }
+
+    #[test]
+    fn quantize_snaps_to_slider_stops_and_clamps() {
+        assert_eq!(quantize_transition_minutes(42.3), 40);
+        assert_eq!(quantize_transition_minutes(43.0), 45);
+        assert_eq!(quantize_transition_minutes(-5.0), 0);
+        assert_eq!(quantize_transition_minutes(9999.0), 240);
     }
 }

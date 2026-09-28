@@ -1,7 +1,8 @@
-import React, { useRef } from 'react';
+import React from 'react';
 import { Label, Stack } from '@fluentui/react';
 import { Form } from '../../lib/denim/lib';
 import { TyreGrid } from '../shared/TyreGrid';
+import { useRowCommit } from '../../lib/per-form/useRowCommit';
 import { TYRE_SHORT } from './EffectRow';
 import { ShakerChannel } from './channelQueries';
 import { AudioSinkInfo } from './dspQueries';
@@ -62,8 +63,23 @@ const ChannelHeader: React.FC<Props> = ({ channel, audioSinks, onDevidChange, on
   };
 
   const initialValues = { devid: channel.devid, pan: channel.pan, position: channel.position ?? null };
-  const prevRef = useRef(initialValues);
-  const skipFirst = useRef(true);
+
+  // Previously this kept bare skipFirst/prevRef with NO identity reset — the
+  // latent form of the bug LfeRow/EffectRow document. It only stayed benign
+  // because the Form is keyed on channel.id while these refs sat one level
+  // up, so a channel swap left the mount tick already consumed and the next
+  // real-data onChange would have committed as a phantom edit. Routing
+  // through useRowCommit with channel.id as the identity closes that
+  // uniformly rather than relying on the parent never reusing the component.
+  const { handleChange } = useRowCommit<typeof initialValues>({
+    identity: channel.id,
+    initial: initialValues,
+    onCommit: (next, _prev, changed) => {
+      if (changed.includes('devid')) onDevidChange(next.devid);
+      if (changed.includes('pan')) onPanChange(next.pan);
+      if (changed.includes('position')) onPositionChange(next.position as string);
+    },
+  });
 
   return (
     <div>
@@ -75,14 +91,7 @@ const ChannelHeader: React.FC<Props> = ({ channel, audioSinks, onDevidChange, on
         form={schema}
         name="channel"
         initialValues={initialValues}
-        onChange={(_: string, { clean }: any) => {
-          if (skipFirst.current) { skipFirst.current = false; prevRef.current = clean; return; }
-          const prev = prevRef.current;
-          if (clean.devid !== prev.devid) onDevidChange(clean.devid);
-          if (clean.pan !== prev.pan) onPanChange(clean.pan);
-          if (clean.position !== prev.position) onPositionChange(clean.position);
-          prevRef.current = clean;
-        }}
+        onChange={(_: string, { clean }: any) => handleChange(clean)}
       />
     </div>
   );

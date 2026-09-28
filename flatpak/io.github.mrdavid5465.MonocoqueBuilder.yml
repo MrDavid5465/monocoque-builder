@@ -88,6 +88,21 @@ finish-args:
   # from the host path -- without this grant the app would edit a private
   # copy nothing ever reads. See config_manager::monocoque_config_dir().
   - --filesystem=xdg-config/monocoque:create
+  # 360° capture and the AC telemetry app both read and rewrite Assetto
+  # Corsa's own config (race.ini, video.ini, the CSP overrides under
+  # cfg/extension) and install CSP Lua apps into the game folder, so they
+  # need to reach the Steam tree. Both a native Steam and a Flatpak Steam
+  # are covered.
+  - --filesystem=xdg-data/Steam
+  - --filesystem=~/.steam
+  - --filesystem=~/.var/app/com.valvesoftware.Steam
+  # Steam libraries on other drives. Bazzite and SteamOS mount these under
+  # /var/mnt and /run/media respectively; a library can sit anywhere, so a
+  # folder picker remains the fallback for unusual layouts.
+  - --filesystem=/var/mnt
+  - --filesystem=/run/media
+  - --filesystem=/media
+  - --filesystem=/mnt
 
 build-options:
   append-path: /usr/lib/sdk/rust-stable/bin:/usr/lib/sdk/node20/bin

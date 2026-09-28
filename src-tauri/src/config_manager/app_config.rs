@@ -29,9 +29,8 @@ impl Default for AppConfig {
                 simd_command: "simd".into(),
                 monocoque_command: "monocoque play".into(),
                 huenicorn_command: "huenicorn".into(),
-                simd_debug_command: None,
-                monocoque_debug_command: None,
-                huenicorn_debug_command: None,
+                // Nothing unknown in a config this build just created.
+                extra: Default::default(),
             },
         }
     }
@@ -43,9 +42,13 @@ pub fn applications() -> Vec<AppEntry> {
             name: "Dashboards".into(),
             path: "dashboards".into(),
             front_end: "Dashboards".into(),
-            // The app is the dashboards list, so it opens straight onto it and
-            // no longer carries a sub-nav link that repeats its own name.
-            default_route: "dashboards".into(),
+            // Empty, like every other app. The dashboards list is this app's
+            // INDEX route rather than a child of it, so there is nothing to
+            // redirect to -- `/dashboards` renders the list directly. It used
+            // to be "dashboards", which bounced `/dashboards` to
+            // `/dashboards/dashboards` and put the app's own name in the URL
+            // twice.
+            default_route: "".into(),
             links: vec![
                 AppLink {
                     path: "cars".into(),

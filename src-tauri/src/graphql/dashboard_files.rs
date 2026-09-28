@@ -1,9 +1,9 @@
-use crate::typiql_types::{DashboardEntry, File};
+use crate::typiql_types::{DashboardEntry, DashboardEntryChanged, File};
 use async_graphql::{Context, Object, Result as GqlResult};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use typiql::Location;
+use typiql::{Location, TypiQLBroker};
 
 #[derive(Default)]
 pub struct DashboardFileSyncQuery;
@@ -258,6 +258,18 @@ impl DashboardFileUploadMutation {
         rows.push(new_row.clone());
         adapter.set_table(files_location, rows).await;
 
+        // Announced as `files` rather than `update`: the dashboard's CONTENT
+        // is unchanged here, only its file table, and useDashboard's
+        // handleDashboardUpdate bails on an identical content payload — so an
+        // `update` would be silently dropped and the sprite list would stay
+        // stale in every other window. A distinct operation name lets the
+        // sprite refetch key off exactly this, without making every ordinary
+        // dashboard save refetch sprites too.
+        TypiQLBroker::publish(DashboardEntryChanged {
+            operation_name: "files".to_string(),
+            value: entry.clone(),
+        });
+
         serde_json::from_value(new_row).map_err(|e| async_graphql::Error::new(e.to_string()))
     }
 
@@ -358,6 +370,18 @@ impl DashboardFileUploadMutation {
         let mut rows = adapter.get_many(files_location.clone(), vec![]).await;
         rows.retain(|v| v.get("path").and_then(Value::as_str) != Some(path.as_str()));
         adapter.set_table(files_location, rows).await;
+
+        // Announced as `files` rather than `update`: the dashboard's CONTENT
+        // is unchanged here, only its file table, and useDashboard's
+        // handleDashboardUpdate bails on an identical content payload — so an
+        // `update` would be silently dropped and the sprite list would stay
+        // stale in every other window. A distinct operation name lets the
+        // sprite refetch key off exactly this, without making every ordinary
+        // dashboard save refetch sprites too.
+        TypiQLBroker::publish(DashboardEntryChanged {
+            operation_name: "files".to_string(),
+            value: entry.clone(),
+        });
 
         Ok(true)
     }

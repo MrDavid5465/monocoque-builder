@@ -9,7 +9,7 @@ import {
   UPDATE_NIGHT_MODE,
 } from './nightModeQueries';
 import { computeEffectiveNightState, computeToggleDeltaMinutes } from './dayNightSim';
-import { LiveUpdatesContext, LiveUpdatesHub, useHubListener, useLiveUpdatesHub } from './liveUpdatesHub';
+import { LiveUpdatesContext, LiveUpdatesHub, useHubListener, useLiveUpdatesDemand, useLiveUpdatesHub } from './liveUpdatesHub';
 
 export interface NightModeLiveFeed {
   record: NightModeRecord | undefined;
@@ -53,6 +53,9 @@ export function useGlobalNightMode(externalHub?: LiveUpdatesHub, opts?: { liveCl
   nightAmount: number;
   simEnabled: boolean;
   simTimeMs: number | null;
+  /** True when `simTimeMs` is Assetto Corsa's own clock rather than the
+   *  server's simulated one — so its calendar date is the in-game date. */
+  fromGame: boolean;
   toggleNightMode: () => void;
   setSimActive: (active: boolean) => void;
   feed: NightModeLiveFeed;
@@ -113,13 +116,31 @@ export function useGlobalNightMode(externalHub?: LiveUpdatesHub, opts?: { liveCl
   // whenever an ambient hub (explicit or context) is already available.
   const [ownHub, ownHubSubscriber] = useLiveUpdatesHub({
     includeTelemetry: false,
-    includeNightClock: liveClock,
+    includeNightClock: false,
     skip: !!externalHub || !!contextHub,
   });
   const hub = externalHub ?? contextHub ?? ownHub;
+  // Asked for as a demand rather than as an option on the private hub above,
+  // so it reaches whichever hub is actually in use — including a shared one
+  // this hook didn't open. Withdrawn when this consumer unmounts, so the
+  // clock stops being streamed once nothing is displaying it.
+  useLiveUpdatesDemand(hub, { includeNightClock: liveClock });
 
   const [ownLive, setOwnLive] = useState<NightModeRecord | undefined>(undefined);
   const [ownSimTimeMs, setOwnSimTimeMs] = useState<number | null>(null);
+  // Whether `simTimeMs` is the game's own clock rather than the server's
+  // simulated one — which also makes it the game's own calendar DATE, the
+  // part DayNightSimPanel needs for its compute-from-date field.
+  const [ownFromGame, setOwnFromGame] = useState<boolean | null>(null);
+  // Sun elevation rides the same tick as the clock for the same reason
+  // fromGame does: no extra subscription, and it can never disagree with the
+  // instant it arrived beside.
+  //
+  // `undefined` means no tick has arrived yet; `null` means a tick arrived
+  // and said it doesn't know. The distinction is load-bearing — see where
+  // this is resolved below.
+  const [ownSunElevationDeg, setOwnSunElevationDeg] = useState<number | null | undefined>(undefined);
+  const [ownSunRising, setOwnSunRising] = useState<boolean | null | undefined>(undefined);
 
   // One-shot preload so a freshly-mounted popup shows the real current time
   // immediately instead of "—" until the subscription's first push arrives.
@@ -146,10 +167,33 @@ export function useGlobalNightMode(externalHub?: LiveUpdatesHub, opts?: { liveCl
       lastTickAtRef.current = now;
     }
     setOwnSimTimeMs(event.simTimeMs);
+    // Carried on the same tick as the clock, so it needs no separate
+    // subscription and can never disagree with the time it arrived beside.
+    setOwnFromGame(!!event.fromGame);
+    setOwnSunElevationDeg(
+      typeof event.sunElevationDeg === 'number' ? event.sunElevationDeg : null,
+    );
+    setOwnSunRising(typeof event.sunRising === 'boolean' ? event.sunRising : null);
   }, [tickThrottleMs]);
   useHubListener(hub, 'NightClockTick', liveClock ? onNightClockTick : undefined);
 
   const ownSimTimeMsPreloaded = ownSimTimeMs ?? (snapshotData as any)?.nightClockSnapshot?.simTimeMs ?? null;
+  const fromGame = ownFromGame ?? !!(snapshotData as any)?.nightClockSnapshot?.fromGame;
+  // Once ANY tick has arrived, its value wins outright — including when that
+  // value is null. This used to be a `??` chain, which silently fell through
+  // to the snapshot whenever a tick reported null; since the snapshot is a
+  // one-shot query that never re-polls, the blend then froze at whatever
+  // elevation happened to exist at page load while the clock kept ticking.
+  // That showed up as the dashboard's time advancing while its day/night
+  // state sat still.
+  const sunElevationDeg =
+    ownSunElevationDeg !== undefined
+      ? ownSunElevationDeg
+      : ((snapshotData as any)?.nightClockSnapshot?.sunElevationDeg ?? null);
+  const sunRising =
+    ownSunRising !== undefined
+      ? ownSunRising
+      : ((snapshotData as any)?.nightClockSnapshot?.sunRising ?? null);
   // `ownLive`, not `queried` — mirrors the old `live`/`current` split: stays
   // undefined until the first NightModeChanged event even though `queried`
   // (GET_NIGHT_MODES) already has the record, but every consumer of this
@@ -166,7 +210,7 @@ export function useGlobalNightMode(externalHub?: LiveUpdatesHub, opts?: { liveCl
   const resolvedFeed = useMemo<NightModeLiveFeed>(() => ({ record: current, simTimeMs }), [current, simTimeMs]);
 
   const effective = current
-    ? computeEffectiveNightState(current, simTimeMs)
+    ? computeEffectiveNightState(current, simTimeMs, sunElevationDeg, sunRising)
     : { isNight: false, nightAmount: 0 };
 
   const save = useCallback((update: Partial<NightModeRecord>) => {
@@ -214,6 +258,7 @@ export function useGlobalNightMode(externalHub?: LiveUpdatesHub, opts?: { liveCl
     nightAmount: effective.nightAmount,
     simEnabled: !!current?.simEnabled,
     simTimeMs,
+    fromGame,
     toggleNightMode,
     setSimActive,
     feed: resolvedFeed,

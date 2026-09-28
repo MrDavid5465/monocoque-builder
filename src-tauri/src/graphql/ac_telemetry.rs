@@ -1,0 +1,323 @@
+//! GraphQL surface for the AC-only extended telemetry stream.
+//!
+//! The Lua app pushes frames to a plain WebSocket (`ac_telemetry::ingest`);
+//! this is the other side, where the frontend reads them. Kept separate
+//! because the producer is a Lua script that can't reasonably speak GraphQL,
+//! while consumers already speak nothing else.
+
+use crate::ac_telemetry::{self, AcTelemetryFrame};
+use async_graphql::{Context, Object, Result as GqlResult, SimpleObject};
+use futures_util::stream::{Stream, StreamExt};
+use std::time::Duration;
+use tokio_stream::wrappers::IntervalStream;
+
+/// One frame, as the frontend sees it.
+///
+/// A separate type from the wire struct so the GraphQL schema isn't pinned to
+/// whatever the Lua app happens to send — fields can be renamed or dropped on
+/// one side without breaking the other.
+#[derive(SimpleObject, Clone, Default)]
+pub struct AcTelemetry {
+    /// Seconds from midnight in game. The real clock, as opposed to the
+    /// server-side simulation in `night_clock.rs`.
+    pub time_total_seconds: f64,
+    pub day_of_year: i32,
+    /// Seconds since the epoch in the *track's* local timezone, not UTC.
+    /// Carries the in-game date as well as the time.
+    pub timestamp: i64,
+    pub time_multiplier: f32,
+
+    /// The track's geotag as the game reports it, degrees. `None` on a CSP
+    /// without `ac.getTrackCoordinatesDeg`, or before the first frame.
+    pub track_latitude: Option<f64>,
+    pub track_longitude: Option<f64>,
+    /// Milliseconds between this frame arriving from the game and being handed
+    /// to this subscriber. Diagnostic: it isolates time spent waiting inside
+    /// this process from time spent in the game's socket or on the wire, which
+    /// is the split you need when the sway lags and nobody knows which hop
+    /// owns it. 0 on the snapshot query, which reads outside the stream.
+    pub age_ms: f32,
+    pub sun_angle_deg: f32,
+    /// From `ac.getSunPitchAngle()`, and NOT usable as sun elevation —
+    /// measured live it returns exact constants that never move while the
+    /// clock is scrubbed across a dawn. Compute elevation from the clock and
+    /// `equinoxSunTrajectory` instead — see `sun_position::sun_elevation_deg`.
+    pub sun_pitch_deg: f32,
+    /// True when AC swings the sun on a 20th-March trajectory regardless of
+    /// the real date (seasons off, or no session date set).
+    pub equinox_sun_trajectory: bool,
+    /// Track timezone offset in seconds, as the game reports it. Settles
+    /// whether `timeTotalSeconds` is civil local time or UTC — `sun_position`
+    /// computes UTC, so a local clock skews every elevation by this much.
+    pub timezone_offset_sec: i32,
+    pub timezone_base_offset_sec: i32,
+    pub timezone_dst_offset_sec: i32,
+    /// 0→1, the active WeatherFX *style's* "time for headlights" judgement.
+    /// Style-dependent: observed pinned at 1.000 through full daylight under
+    /// PURE, so verify it moves before keying anything on it.
+    pub light_suggestion: f32,
+    pub ambient_lighting_multiplier: f32,
+    /// 0 = under cover, 1 = open sky.
+    pub ambient_occlusion: f32,
+
+    /// Head offset the game applied this frame, car-local metres, relative to
+    /// the driver's rest eye position. Dashboards should follow this rather
+    /// than deriving sway from g-forces: CSP's NeckFX is a washout filter, so
+    /// a proportional mapping drifts out of phase with it mid-corner.
+    pub neck_offset_x: f32,
+    pub neck_offset_y: f32,
+    pub neck_offset_z: f32,
+    /// Head rotation relative to the car, degrees — see the wire struct.
+    pub neck_yaw_deg: f32,
+    pub neck_pitch_deg: f32,
+    pub neck_roll_deg: f32,
+
+    pub sky_occlusion: f32,
+    pub rain_intensity: f32,
+    pub wind_speed_kmh: f32,
+    pub wind_direction_deg: f32,
+
+    pub look_x: f32,
+    pub look_y: f32,
+    pub look_z: f32,
+    pub pos_x: f32,
+    pub pos_y: f32,
+    pub pos_z: f32,
+    /// 0–360, 0 = north.
+    pub compass: f32,
+    /// Lap progress, 0→1.
+    pub spline_position: f32,
+
+    pub headlights_active: bool,
+    pub high_beams: bool,
+    pub brake_lights_active: bool,
+
+    /// False for remote cars and replays, where the car-level fields above
+    /// aren't meaningful.
+    pub physics_available: bool,
+}
+
+/// Outcome of one `acCommand`.
+#[derive(Debug, Clone, async_graphql::SimpleObject)]
+pub struct AcCommandResult {
+    pub id: String,
+    pub ok: bool,
+    pub message: String,
+}
+
+impl From<AcTelemetryFrame> for AcTelemetry {
+    fn from(frame: AcTelemetryFrame) -> Self {
+        Self {
+            // Unknown unless built via `with_age` below.
+            age_ms: 0.0,
+            time_total_seconds: frame.time_total_seconds,
+            day_of_year: frame.day_of_year,
+            timestamp: frame.timestamp,
+            time_multiplier: frame.time_multiplier,
+            track_latitude: frame.track_latitude,
+            track_longitude: frame.track_longitude,
+            sun_angle_deg: frame.sun_angle_deg,
+            sun_pitch_deg: frame.sun_pitch_deg,
+            equinox_sun_trajectory: frame.equinox_sun_trajectory,
+            timezone_offset_sec: frame.timezone_offset_sec,
+            timezone_base_offset_sec: frame.timezone_base_offset_sec,
+            timezone_dst_offset_sec: frame.timezone_dst_offset_sec,
+            light_suggestion: frame.light_suggestion,
+            ambient_lighting_multiplier: frame.ambient_lighting_multiplier,
+            ambient_occlusion: frame.ambient_occlusion,
+            neck_offset_x: frame.neck_offset_x,
+            neck_offset_y: frame.neck_offset_y,
+            neck_offset_z: frame.neck_offset_z,
+            neck_yaw_deg: frame.neck_yaw_deg,
+            neck_pitch_deg: frame.neck_pitch_deg,
+            neck_roll_deg: frame.neck_roll_deg,
+            sky_occlusion: frame.sky_occlusion,
+            rain_intensity: frame.rain_intensity,
+            wind_speed_kmh: frame.wind_speed_kmh,
+            wind_direction_deg: frame.wind_direction_deg,
+            look_x: frame.look_x,
+            look_y: frame.look_y,
+            look_z: frame.look_z,
+            pos_x: frame.pos_x,
+            pos_y: frame.pos_y,
+            pos_z: frame.pos_z,
+            compass: frame.compass,
+            spline_position: frame.spline_position,
+            headlights_active: frame.headlights_active,
+            high_beams: frame.high_beams,
+            brake_lights_active: frame.brake_lights_active,
+            physics_available: frame.physics_available,
+        }
+    }
+}
+
+/// Whether the extended stream is usable, and why not when it isn't.
+///
+/// Three separate conditions, reported separately because each has a
+/// different fix: install the game, install the app, start driving.
+#[derive(SimpleObject, Default)]
+pub struct AcTelemetrySupport {
+    /// An Assetto Corsa install was found.
+    pub game_installed: bool,
+    /// The TyPiQL telemetry Lua app is present in that install.
+    pub app_installed: bool,
+    /// Frames are arriving right now.
+    pub connected: bool,
+    pub reason: Option<String>,
+}
+
+#[derive(Default)]
+pub struct AcTelemetryQuery;
+
+#[Object]
+impl AcTelemetryQuery {
+    /// Whether a dashboard can rely on the extended AC telemetry.
+    ///
+    /// Meant to be queried before subscribing, so a dashboard can fall back
+    /// to plain telemetry rather than sitting on a stream that will never
+    /// produce anything.
+    async fn ac_telemetry_support(&self) -> AcTelemetrySupport {
+        let paths = match crate::ac_capture::paths::CapturePaths::resolve(None, None) {
+            Ok(paths) => paths,
+            Err(reason) => {
+                return AcTelemetrySupport {
+                    reason: Some(reason),
+                    ..Default::default()
+                }
+            }
+        };
+
+        let app_installed = ac_telemetry::install::is_installed(&paths);
+        let connected = ac_telemetry::is_connected();
+        AcTelemetrySupport {
+            game_installed: true,
+            app_installed,
+            connected,
+            reason: if !app_installed {
+                Some("The TyPiQL telemetry app isn't installed in Assetto Corsa yet.".into())
+            } else if !connected {
+                Some("Installed, but no frames are arriving — is the game running?".into())
+            } else {
+                None
+            },
+        }
+    }
+
+    /// The most recent frame, if one arrived recently.
+    /// Results of recent `acCommand` calls, oldest first.
+    ///
+    /// Bounded history rather than a log: useful when a sequence of commands
+    /// was staged and one of them failed, since `acCommand` only ever returns
+    /// its own result.
+    async fn ac_command_history(&self) -> Vec<AcCommandResult> {
+        ac_telemetry::control::recent_results()
+            .into_iter()
+            .map(|r| AcCommandResult {
+                id: r.id,
+                ok: r.ok,
+                message: r.message,
+            })
+            .collect()
+    }
+
+    async fn ac_telemetry_snapshot(&self) -> Option<AcTelemetry> {
+        ac_telemetry::latest().map(AcTelemetry::from)
+    }
+}
+
+#[derive(Default)]
+pub struct AcTelemetryMutation;
+
+#[Object]
+impl AcTelemetryMutation {
+    /// Installs (or refreshes) the telemetry Lua app inside Assetto Corsa.
+    ///
+    /// Explicit rather than automatic: this writes a script into the user's
+    /// game that runs on every launch and opens a network connection. That
+    /// should be something they turn on, not something that appears because
+    /// they opened a settings page.
+    /// Runs one command inside the live session and waits for its result.
+    ///
+    /// Queue-and-wait rather than fire-and-forget: a caller verifying
+    /// something ("set the clock to 22:50, then read the elevation back")
+    /// needs to know the change landed before looking, and the round trip is
+    /// roughly 16ms because commands go out on the next inbound telemetry
+    /// frame. See ac_telemetry::control.
+    ///
+    /// `args` is a JSON object as a string, so commands can gain parameters
+    /// without changing this signature or the schema.
+    async fn ac_command(
+        &self,
+        _ctx: &Context<'_>,
+        cmd: String,
+        args: Option<String>,
+    ) -> GqlResult<AcCommandResult> {
+        if !ac_telemetry::is_connected() {
+            return Err(async_graphql::Error::new(
+                "Assetto Corsa isn't reporting telemetry — is the game running with the \
+                 TyPiQL Telemetry app installed?",
+            ));
+        }
+        let parsed = match args.filter(|a| !a.trim().is_empty()) {
+            Some(raw) => serde_json::from_str(&raw)
+                .map_err(|err| async_graphql::Error::new(format!("args must be JSON: {err}")))?,
+            None => serde_json::json!({}),
+        };
+        let id = ac_telemetry::control::queue(&cmd, parsed);
+
+        // Polled rather than notified: the result arrives on a telemetry frame
+        // handled by a different task, and a 20ms poll is far below the
+        // latency of anything being commanded.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while std::time::Instant::now() < deadline {
+            if let Some(result) = ac_telemetry::control::result_for(&id) {
+                return Ok(AcCommandResult {
+                    id: result.id,
+                    ok: result.ok,
+                    message: result.message,
+                });
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        Err(async_graphql::Error::new(format!(
+            "command {cmd:?} was sent but the game never reported a result"
+        )))
+    }
+
+    async fn install_ac_telemetry_app(&self, _ctx: &Context<'_>) -> GqlResult<bool> {
+        let paths = crate::ac_capture::paths::CapturePaths::resolve(None, None)
+            .map_err(async_graphql::Error::new)?;
+        ac_telemetry::install::install(&paths).map_err(async_graphql::Error::new)?;
+        Ok(true)
+    }
+
+    async fn uninstall_ac_telemetry_app(&self, _ctx: &Context<'_>) -> GqlResult<bool> {
+        let paths = crate::ac_capture::paths::CapturePaths::resolve(None, None)
+            .map_err(async_graphql::Error::new)?;
+        ac_telemetry::install::uninstall(&paths).map_err(async_graphql::Error::new)?;
+        Ok(true)
+    }
+}
+
+/// Builds the stream behind the `acTelemetry` subscription.
+///
+/// Lives here next to the type it yields, but is driven from
+/// `SubscriptionRoot` in `graphql/mod.rs` — the schema macro takes a single
+/// subscription root, so every subscription has to hang off that one type.
+///
+/// Polled from the stored latest frame on an interval rather than pushed per
+/// arrival, matching how `telemetry` and `dashboardUpdates` already work:
+/// consumers render at screen rate, so delivering every inbound frame would
+/// only queue work they'd discard. Yields `None` while nothing is arriving,
+/// so a subscriber can tell "not running" from "running but stationary"
+/// without a second query.
+pub fn stream(rate_hz: u32) -> impl Stream<Item = Option<AcTelemetry>> {
+    let period = Duration::from_millis((1000 / rate_hz.clamp(1, 60)) as u64);
+    IntervalStream::new(tokio::time::interval(period)).map(|_| {
+        ac_telemetry::latest_with_age().map(|(frame, age_ms)| {
+            let mut out = AcTelemetry::from(frame);
+            out.age_ms = age_ms as f32;
+            out
+        })
+    })
+}

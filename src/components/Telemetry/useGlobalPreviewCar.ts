@@ -81,20 +81,26 @@ export function useGlobalPreviewCar(externalHub?: LiveUpdatesHub): {
   // record id yet — has come back, which would otherwise create a duplicate.
   const pendingAddRef = useRef<Promise<any> | null>(null);
 
+  // `touchedAt` is what keeps the pin alive: it's a globally-shared,
+  // persisted override, and the backend expires one that nothing has
+  // re-confirmed (see preview_car.rs). Stamped on every set, including the
+  // periodic re-set a viewing page makes to say it's still there. Sent as
+  // null when clearing, so an empty pin can't look freshly touched.
   const setPreviewCarId = useCallback((carId: string) => {
+    const touchedAt = carId ? Date.now() : null;
     const existing = currentRef.current;
     if (existing?.id) {
-      updatePreviewCar({ variables: { id: existing.id, update: { carId } } });
+      updatePreviewCar({ variables: { id: existing.id, update: { carId, touchedAt } } });
       return;
     }
     if (pendingAddRef.current) {
       pendingAddRef.current.then((res: any) => {
         const id = res?.data?.addPreviewCar?.id;
-        if (id) updatePreviewCar({ variables: { id, update: { carId } } });
+        if (id) updatePreviewCar({ variables: { id, update: { carId, touchedAt } } });
       });
       return;
     }
-    const promise = addPreviewCar({ variables: { values: { carId } } });
+    const promise = addPreviewCar({ variables: { values: { carId, touchedAt } } });
     pendingAddRef.current = promise;
     promise.then(() => { pendingAddRef.current = null; });
   }, [updatePreviewCar, addPreviewCar]);

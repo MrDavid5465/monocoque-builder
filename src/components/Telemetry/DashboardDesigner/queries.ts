@@ -10,6 +10,10 @@ const DASHBOARD_CONTENT_FIELDS = `
   background
   dayNight
   neckFx
+  neckFxGainX
+  neckFxGainY
+  neckFxDisableX
+  neckFxDisableY
   elements
   kioskX
   kioskY
@@ -199,8 +203,8 @@ export const TEMPLATE_CHANGED_SUB = gql`
 // fragments) since this file doesn't otherwise import from those, and a
 // mismatch here would only mean an extra/missing field, not a real bug.
 export const DASHBOARD_UPDATES_SUB = gql`
-  subscription dashboardUpdates($includeTelemetry: Boolean, $includeNightClock: Boolean, $includeAmbientColor: Boolean) {
-    dashboardUpdates(includeTelemetry: $includeTelemetry, includeNightClock: $includeNightClock, includeAmbientColor: $includeAmbientColor) {
+  subscription dashboardUpdates($includeTelemetry: Boolean, $includeNightClock: Boolean, $includeAmbientColor: Boolean, $includeAcTelemetry: Boolean) {
+    dashboardUpdates(includeTelemetry: $includeTelemetry, includeNightClock: $includeNightClock, includeAmbientColor: $includeAmbientColor, includeAcTelemetry: $includeAcTelemetry) {
       ... on DashboardEntryChanged {
         operationName
         value {
@@ -213,6 +217,32 @@ export const DASHBOARD_UPDATES_SUB = gql`
       ... on DeviceDefaultChanged {
         operationName
         value { id deviceName dash group }
+      }
+      # Enough to know a car record moved; consumers refetch the list rather
+      # than patching, since favourite is a cross-record invariant.
+      ... on CarChanged {
+        operationName
+        value { id favorite }
+      }
+      # Admin pages' refetch triggers, routed here by hubSubscriptionRouter.
+      # They refetch on any event, so the id (for subscribe-to-one filtering)
+      # is all they need.
+      ... on MonocoqueSoundDeviceChanged { operationName value { id } }
+      ... on SoundDeviceProfileChanged { operationName value { id } }
+      ... on LedsDeviceProfileChanged { operationName value { id } }
+      ... on ShiftLightProfileChanged { operationName value { id } }
+      ... on SimWindDeviceProfileChanged { operationName value { id } }
+      # Only the NeckFX fields. This member arrives at 60Hz and the type
+      # carries a great deal more (sun angles, weather, world position) —
+      # see useAcNeckFx for the consumer.
+      ... on AcTelemetry {
+        neckOffsetX
+        neckOffsetY
+        neckOffsetZ
+        neckYawDeg
+        neckPitchDeg
+        neckRollDeg
+        physicsAvailable
       }
       ... on TelemetryEvent {
         frame {
@@ -235,11 +265,23 @@ export const DASHBOARD_UPDATES_SUB = gql`
           simSunrise
           simSunset
           simTransitionMinutes
+          simSunriseSunsetDate
+          simLastComputedTrack
         }
       }
       ... on NightClockTick {
         simTimeMs
         realTimeMs
+        fromGame
+        # Drives the dawn/dusk blend (see dayNightSim). Must be selected HERE,
+        # not only in nightModeQueries: dashboards receive ticks through the
+        # hub's own dashboardUpdates subscription, which is this document.
+        # Omitting it silently degraded every dashboard to the clock ramp
+        # while the standalone query looked correct.
+        sunElevationDeg
+        # Which of the two mirrored elevation bands to use. Elevation alone
+        # cannot say whether the sun is climbing or falling.
+        sunRising
       }
       ... on PreviewCarChanged {
         operationName

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation } from '@apollo/client/react';
-import { Stack, Form, IconButton, getTheme } from '../../../lib/denim/lib';
+import { Stack, Form, IconButton, DefaultButton, getTheme } from '../../../lib/denim/lib';
 import { GET_DASHBOARDS } from '../DashboardDesigner/queries';
 import Photo360CrossfadeViewer from '../DashboardDesigner/components/Photo360CrossfadeViewer';
 import { captureCanvasScreenshot } from '../DashboardDesigner/useScreenshot';
@@ -263,7 +263,13 @@ const PanSession: React.FC<{
 };
 
 interface Props {
+  /** The Car record's own id. Still needed for legacy pan rows written before
+   *  alignment was keyed per registration — see `legacyOverride` below. */
   carId: string;
+  /** The car's raw registrations: the same physical car as it appears in each
+   *  game. They share this one 360 photo but not its alignment, since the
+   *  cockpit sits differently in each — so a pan belongs to a registration. */
+  carIds: string[];
   photoId?: string;
   photoUrl?: string;
   nightPhotoUrl?: string;
@@ -271,9 +277,12 @@ interface Props {
   onThumbnailChanged?: () => void;
 }
 
-const DashPanEditor: React.FC<Props> = ({ carId, photoId, photoUrl, nightPhotoUrl, hasThumbnail, onThumbnailChanged }) => {
+const DashPanEditor: React.FC<Props> = ({ carId, carIds, photoId, photoUrl, nightPhotoUrl, hasThumbnail, onThumbnailChanged }) => {
   const theme = getTheme();
   const [selectedDashName, setSelectedDashName] = useState('');
+  // Which registration is being aligned. Defaults to the primary one, which
+  // is the only one for most cars.
+  const [registration, setRegistration] = useState(carIds[0] ?? '');
   const [resetCounter, setResetCounter] = useState(0);
   const { isNight, nightAmount, toggleNightMode, hubSubscriber } = useGlobalNightMode();
 
@@ -286,10 +295,17 @@ const DashPanEditor: React.FC<Props> = ({ carId, photoId, photoUrl, nightPhotoUr
       .filter((d: any) => d.dashboard?.baseDashType === '360')
       .map((d: any) => ({ name: d.name, elements: d.dashboard?.elements }));
   const carDashPans: CarDashPanRecord[] = (panData as any)?.getCarDashPans ?? [];
-  const override = carDashPans.find(p => p.carId === carId && p.dashName === selectedDashName);
+  const panKey = registration || carId;
+  const override = carDashPans.find(p => p.carId === panKey && p.dashName === selectedDashName);
+  // Written before alignment was keyed per registration, so it covered every
+  // registration at once. Read as a starting value so nothing already dialled
+  // in is lost, but never written through — saving always creates a row for
+  // the selected registration, which is what lets the games diverge.
+  const legacyOverride = carDashPans.find(p => p.carId === carId && p.dashName === selectedDashName);
+  const effectiveOverride = override ?? legacyOverride;
   const selectedDash = dash360s.find(d => d.name === selectedDashName);
   const basePan = selectedDash ? parseDashBasePan(selectedDash.elements) : DEFAULT_PAN;
-  const initialPan: Pan = selectedDashName ? (override ?? basePan) : DEFAULT_PAN;
+  const initialPan: Pan = selectedDashName ? (effectiveOverride ?? basePan) : DEFAULT_PAN;
 
   const containerRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(640);
@@ -305,9 +321,16 @@ const DashPanEditor: React.FC<Props> = ({ carId, photoId, photoUrl, nightPhotoUr
   const height = Math.round(width * 9 / 16);
 
   const handleReset = async () => {
-    if (!override) return;
-    if (!(await confirmAsync(`Reset this car's pan for "${selectedDashName}" back to the dashboard's default?`, { danger: true, confirmText: 'Reset' }))) return;
-    await removePan({ variables: { id: override.id } });
+    const target = override ?? legacyOverride;
+    if (!target) return;
+    // A legacy row is shared by every registration, so clearing it is a wider
+    // change than clearing this one's — say so rather than presenting the two
+    // as the same action.
+    const message = override
+      ? `Reset ${registration || 'this car'}'s pan for "${selectedDashName}" back to the dashboard's default?`
+      : `This pan is shared by every registration of this car. Reset it for "${selectedDashName}" back to the dashboard's default?`;
+    if (!(await confirmAsync(message, { danger: true, confirmText: 'Reset' }))) return;
+    await removePan({ variables: { id: target.id } });
     await refetchPans();
     setResetCounter(c => c + 1);
   };
@@ -328,7 +351,7 @@ const DashPanEditor: React.FC<Props> = ({ carId, photoId, photoUrl, nightPhotoUr
             Pick a dashboard to nudge this car's pan; leave it unselected to just look around.
           </span>
         </Stack>
-        {selectedDashName && override && (
+        {selectedDashName && effectiveOverride && (
           <IconButton
             iconProps={{ iconName: 'Delete' }}
             title="Reset to dashboard default"
@@ -337,11 +360,47 @@ const DashPanEditor: React.FC<Props> = ({ carId, photoId, photoUrl, nightPhotoUr
         )}
       </Stack>
 
+      {carIds.length > 1 && (
+        <Stack tokens={{ childrenGap: 3 }}>
+          <span style={{ fontSize: '0.78em', opacity: 0.65 }}>
+            This car is registered in more than one game. They share the photo above but each needs
+            its own alignment — pick which one you're aiming.
+          </span>
+          <Stack horizontal wrap tokens={{ childrenGap: 4 }}>
+            {carIds.map(id => {
+              const active = id === registration;
+              const configured = carDashPans.some(
+                p => p.carId === id && p.dashName === selectedDashName,
+              );
+              return (
+                <DefaultButton
+                  key={id}
+                  onClick={() => setRegistration(id)}
+                  title={configured ? 'Has its own pan for this dashboard' : 'Uses the dashboard default'}
+                  styles={{
+                    root: {
+                      minWidth: 0,
+                      padding: '0 0.7em',
+                      borderColor: active ? theme.palette.themePrimary : undefined,
+                      color: active ? theme.palette.themePrimary : undefined,
+                      fontWeight: active ? 600 : 400,
+                    },
+                  }}
+                >
+                  {id}
+                  {configured && selectedDashName ? ' •' : ''}
+                </DefaultButton>
+              );
+            })}
+          </Stack>
+        </Stack>
+      )}
+
       <div ref={containerRef} style={{ width: '100%' }}>
         {photoUrl ? (
           <PanSession
-            key={`${selectedDashName}-${resetCounter}`}
-            carId={carId}
+            key={`${selectedDashName}-${registration}-${resetCounter}`}
+            carId={panKey}
             dashName={selectedDashName}
             dashOptions={dashOptions}
             onDashNameChange={setSelectedDashName}

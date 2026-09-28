@@ -146,6 +146,17 @@ pub async fn build_router() -> Router {
     let gamma_adapter: Arc<dyn TypiQLAdapter> = Arc::new(adapter.clone());
     tokio::spawn(crate::huenicorn::run_gamma_pusher(gamma_adapter));
 
+    // The preview-car pin cannot outlive the process that served it, and
+    // starting clean doubles as the deliberate "reset it now" action —
+    // restart the app. Awaited rather than spawned so no dashboard can
+    // connect and briefly honour a pin that's about to be dropped.
+    let preview_adapter: Arc<dyn TypiQLAdapter> = Arc::new(adapter.clone());
+    let cleared = crate::preview_car::clear_all(&preview_adapter).await;
+    if cleared > 0 {
+        println!("preview_car: cleared {cleared} pin(s) left over from a previous run");
+    }
+    tokio::spawn(crate::preview_car::run_expiry_watchdog(preview_adapter));
+
     // Every hand-written resolver and every existing typiql type stays on
     // "default" (JsonAdapter) — only DuckDB-backed types (currently just
     // RecordingFrame, see typiql_types.rs) opt into "duckdb" via
@@ -201,6 +212,12 @@ pub async fn build_router() -> Router {
     let router = Router::new()
         .route("/file-proxy", get(file_proxy))
         .route("/list-files", get(list_files))
+        // Where the in-game Lua app pushes extended AC telemetry. A plain
+        // WebSocket rather than part of the GraphQL schema: the producer is a
+        // Lua script, and making it speak `graphql-ws` by hand would be a lot
+        // of fragile work for nothing. The frontend still reads the result
+        // through the `acTelemetry` GraphQL subscription.
+        .route("/ac-telemetry", get(crate::ac_telemetry::ingest::handler))
         .nest(
             "/360-photos",
             Router::new()

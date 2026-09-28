@@ -8,6 +8,14 @@ export interface NightModeRecord {
   simSunrise?: string | null;
   simSunset?: string | null;
   simTransitionMinutes?: number | null;
+  /** Date and track the three fields above were last computed for. Written
+   *  only by setSunriseSunsetFromDate / the backend's auto-recompute (see
+   *  graphql/night_clock.rs), never by editing sunrise/sunset by hand —
+   *  which is what makes the pair usable as a "these were just recomputed
+   *  underneath us" signal in DayNightSimPanel without a manual edit
+   *  tripping it. */
+  simSunriseSunsetDate?: string | null;
+  simLastComputedTrack?: string | null;
 }
 
 // sim_base_sim_time_ms / sim_base_real_time (the simulated-clock anchor) are
@@ -24,6 +32,8 @@ const NIGHT_MODE_FIELDS = `
   simSunrise
   simSunset
   simTransitionMinutes
+  simSunriseSunsetDate
+  simLastComputedTrack
 `;
 
 export const GET_NIGHT_MODES = gql`
@@ -47,6 +57,14 @@ export const UPDATE_NIGHT_MODE = gql`
 export interface NightClockTick {
   simTimeMs: number;
   realTimeMs: number;
+  /** True when simTimeMs is the game's own clock, not the server's simulation. */
+  fromGame?: boolean;
+  /** Sun elevation in degrees at simTimeMs, negative below the horizon, or
+   *  null when unknowable (no track loaded, or no location configured for
+   *  it). Preferred over the sunrise/sunset clock ramp — see dayNightSim. */
+  sunElevationDeg?: number | null;
+  /** Whether the sun is climbing — picks the dawn or dusk elevation band. */
+  sunRising?: boolean | null;
 }
 
 // ONE subscription for both record change events (manual isNight/simEnabled/
@@ -72,6 +90,9 @@ export const NIGHT_MODE_UPDATES = gql`
       ... on NightClockTick {
         simTimeMs
         realTimeMs
+        fromGame
+        sunElevationDeg
+        sunRising
       }
     }
   }
@@ -87,6 +108,9 @@ export const GET_NIGHT_CLOCK_SNAPSHOT = gql`
     nightClockSnapshot {
       simTimeMs
       realTimeMs
+      fromGame
+      sunElevationDeg
+      sunRising
     }
   }
 `;
