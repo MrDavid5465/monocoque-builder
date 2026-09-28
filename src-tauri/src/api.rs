@@ -185,6 +185,12 @@ pub async fn build_router() -> Router {
     let mut adapters: typiql::AdapterMap = std::collections::HashMap::new();
     adapters.insert("default", Arc::new(adapter) as Arc<dyn TypiQLAdapter>);
     adapters.insert("duckdb", Arc::new(duckdb_adapter) as Arc<dyn TypiQLAdapter>);
+    // typiql's log (the `Log` type): its own JSON file, so log writes never
+    // rewrite data.json.
+    adapters.insert(
+        "logs",
+        Arc::new(JsonAdapter::new(data_dir.join("logs"))) as Arc<dyn TypiQLAdapter>,
+    );
 
     let typiql_schema = build_typiql_schema(adapters);
 

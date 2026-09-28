@@ -80,7 +80,7 @@ export const GET_RECORDING = gql`
 `;
 
 // Fetches only the requested frame-index window via getRecordingFrames'
-// standard generated filter args (frameIndexGte/frameIndexLte — free from
+// standard generated filter args (frameIndex_gte/frameIndex_lte — free from
 // the same macro-generated CRUD every other typiql type gets) — this is
 // the actual point of the DuckDB migration: a chart viewing a 500-frame
 // window of a 10,000-frame recording should touch ~500 rows, not all of
@@ -89,7 +89,7 @@ export const GET_RECORDING = gql`
 // 4582-frame recording vs ~570KB/0.2s for a 500-frame window.
 export const GET_RECORDING_FRAMES_WINDOW = gql`
   query getRecordingFramesWindow($recordingId: String!, $lo: Int!, $hi: Int!) {
-    getRecordingFrames(recordingId: $recordingId, frameIndexGte: $lo, frameIndexLte: $hi) {
+    getRecordingFrames(recordingId: $recordingId, frameIndex_gte: $lo, frameIndex_lte: $hi) {
       ${RECORDING_FRAME_FIELDS}
     }
   }

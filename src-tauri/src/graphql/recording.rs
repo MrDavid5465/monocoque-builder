@@ -7,7 +7,7 @@ use async_graphql::{Context, MaybeUndefined, Object, Result as GqlResult};
 use std::time::{SystemTime, UNIX_EPOCH};
 use typiql::{
     resolve_add, resolve_add_many, resolve_list, resolve_remove, resolve_update, FieldFilter,
-    FilterOp, Location, TypiQLBroker,
+    FilterOp, TypiQLBroker,
 };
 
 fn now_unix_secs() -> String {
@@ -254,14 +254,18 @@ impl RecordingControlMutation {
     /// `RecordingFrame` rows (DuckDB), and updates the metadata row's
     /// duration/frameCount/car.
     async fn stop_recording(&self, ctx: &Context<'_>) -> GqlResult<Option<Recording>> {
-        let adapter = crate::graphql::default_adapter(ctx)?;
+        let adapter = crate::graphql::adapter_for::<Recording>(ctx)?;
         let Some((id, frames)) = rec::stop() else {
             return Ok(None);
         };
         crate::graphql::publish_recording_status();
 
         let Some(row_val) = adapter
-            .get_one(Location::Named("recordings".into()), "id", &id)
+            .get_one(
+                <Recording as typiql::TypiQLType>::collection_name().into(),
+                "id",
+                &id,
+            )
             .await
         else {
             return Ok(None);
@@ -286,16 +290,21 @@ impl RecordingControlMutation {
         }
 
         // Keys here must match Recording's own Rust (snake_case) field names,
-        // not the camelCase GraphQL schema names — the JSON adapter stores
-        // and merges raw serde output, and async-graphql's camelCasing only
-        // applies at the GraphQL API boundary, not to storage.
+        // not the camelCase GraphQL schema names — adapters store and merge
+        // raw serde output, and async-graphql's camelCasing only applies at
+        // the GraphQL API boundary, not to storage.
         let patch = serde_json::json!({
             "duration_ms": duration_ms,
             "frame_count": frame_count,
             "car": car,
         });
         let updated = adapter
-            .update(Location::Named("recordings".into()), "id", &id, patch)
+            .update(
+                <Recording as typiql::TypiQLType>::collection_name().into(),
+                "id",
+                &id,
+                patch,
+            )
             .await;
         Ok(updated.and_then(|v| serde_json::from_value(v).ok()))
     }
@@ -305,10 +314,14 @@ impl RecordingControlMutation {
     /// graphql/mod.rs) picks this up transparently on their next tick, no
     /// per-client wiring needed.
     async fn play_recording(&self, ctx: &Context<'_>, id: String) -> GqlResult<bool> {
-        let adapter = crate::graphql::default_adapter(ctx)?;
+        let adapter = crate::graphql::adapter_for::<Recording>(ctx)?;
 
         let Some(row_val) = adapter
-            .get_one(Location::Named("recordings".into()), "id", &id)
+            .get_one(
+                <Recording as typiql::TypiQLType>::collection_name().into(),
+                "id",
+                &id,
+            )
             .await
         else {
             return Ok(false);
@@ -438,7 +451,7 @@ impl RecordingControlMutation {
         lo: i32,
         hi: i32,
     ) -> GqlResult<Option<Recording>> {
-        let adapter = crate::graphql::default_adapter(ctx)?;
+        let adapter = crate::graphql::adapter_for::<Recording>(ctx)?;
 
         let mut recording_frames = resolve_list::<RecordingFrame>(
             ctx,
@@ -472,7 +485,11 @@ impl RecordingControlMutation {
         }
 
         let Some(row_val) = adapter
-            .get_one(Location::Named("recordings".into()), "id", &id)
+            .get_one(
+                <Recording as typiql::TypiQLType>::collection_name().into(),
+                "id",
+                &id,
+            )
             .await
         else {
             return Ok(None);
@@ -484,7 +501,12 @@ impl RecordingControlMutation {
 
         let patch = serde_json::json!({ "duration_ms": duration_ms, "frame_count": frame_count });
         let updated = adapter
-            .update(Location::Named("recordings".into()), "id", &id, patch)
+            .update(
+                <Recording as typiql::TypiQLType>::collection_name().into(),
+                "id",
+                &id,
+                patch,
+            )
             .await;
         let updated: Option<Recording> = updated.and_then(|v| serde_json::from_value(v).ok());
         // Written through the adapter, so the macro's own announcement is

@@ -18,7 +18,7 @@ use crate::graphql::{
 };
 use crate::graphql::{QueryRoot, SubscriptionRoot};
 use crate::telemetry::types::{CourseFlag, SimStatus};
-use typiql::{typiql_schema, typiql_type};
+use typiql::{typiql_log, typiql_schema, typiql_type};
 
 /// A dashboard's location — enough to list it and find its folder. The only
 /// part of a dashboard stored in the shared config file; its actual
@@ -640,17 +640,15 @@ pub struct SimWindDeviceProfile {
     pub car_id: Option<String>,
 }
 
-/// A recorded telemetry session's metadata — small and infrequently
-/// written, so it stays on the "default" (JSON) adapter. The frame data
-/// itself is a real DuckDB-backed type (`RecordingFrame` below), related
-/// here as a has-many field matched on `recording_id` — a recording can be
-/// many thousands of frames, which would force a whole-file rewrite on
-/// every write (and an all-or-nothing read) under JsonAdapter; DuckDB's
-/// columnar storage and native range queries are exactly the shape this
-/// data needs, and typiql's ordinary relation-field machinery makes the
-/// cross-adapter join (JSON parent, DuckDB children) transparent — see
-/// [[project_typiql_rs]] / the DuckDB adapter plan for the full rationale.
-#[typiql_type]
+/// A recorded telemetry session's metadata. On DuckDB with its frames
+/// (`RecordingFrame` below, related here as a has-many field matched on
+/// `recording_id`): a recording's metadata and its data live in one store,
+/// so losing one file can't orphan the other half — which is exactly what
+/// happened when data.json was once overwritten and every recording's row
+/// went with it, leaving its frames unreachable in DuckDB. (A recording can
+/// be many thousands of frames, which is why the frames were on DuckDB from
+/// the start: JsonAdapter would rewrite the whole file on every write.)
+#[typiql_type(adapter = "duckdb")]
 pub struct Recording {
     #[typiql(key)]
     pub id: String,
@@ -780,13 +778,20 @@ pub struct RecordingFrame {
     pub sector2_time: f64,
 }
 
+/// typiql's log: every GraphQL error, plus any operation or relation field
+/// that opts in with `log`. On its own JSON adapter ("logs", a `logs/`
+/// directory beside `data.json`) so logging never rewrites the app's data
+/// file. Queryable as `getLogs` / `getLog`.
+#[typiql_log(adapter = "logs")]
+pub struct Log;
+
 typiql_schema!(
     MonocoqueSoundDevice, ShakerChannel, SoundDeviceProfile, ShakerDspChannel, LfeChannel,
     MonocoqueLedsDevice, LedsDeviceProfile,
     MonocoqueShiftLight, ShiftLightProfile,
     MonocoqueSimWindDevice, SimWindDeviceProfile,
     DashTemplate, ConnectedClient, DashGroup, KnownCar, KnownTrack, DeviceDefault,
-    Car, File, NightMode, CarDashPan, PreviewCar, DashboardEntry, Recording, RecordingFrame, TrackLocation;
+    Car, File, NightMode, CarDashPan, PreviewCar, DashboardEntry, Recording, RecordingFrame, TrackLocation, Log;
     AppConfigQuery, DashboardFileSyncQuery, BuiltinTemplatesQuery, CarPhotoSyncQuery, CarCaptureQuery, AcTelemetryQuery, ShakerDspQuery, TrackGeocodeQuery, QueryRoot;
     AppConfigMutation, DashboardFileUploadMutation, ClientsMutation, CarFileMutation, CarCaptureMutation, AcTelemetryMutation, DashTemplateThumbnailMutation, DashboardMutation, GamepadMutation, NightClockMutation, ShakerDspMutation, RecordingControlMutation, HuenicornMutation;
     SubscriptionRoot

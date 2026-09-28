@@ -69,6 +69,23 @@ pub fn default_adapter(ctx: &Context<'_>) -> async_graphql::Result<Arc<dyn TypiQ
         .ok_or_else(|| async_graphql::Error::new("no adapter registered under name \"default\""))
 }
 
+/// The adapter serving typiql type `T` — what hand-written resolvers that
+/// read or write a type's rows directly should use (rather than
+/// `default_adapter`), so moving the type to another adapter moves them too.
+pub fn adapter_for<T: typiql::TypiQLType>(
+    ctx: &Context<'_>,
+) -> async_graphql::Result<Arc<dyn TypiQLAdapter>> {
+    ctx.data::<AdapterMap>()?
+        .get(T::adapter_name())
+        .cloned()
+        .ok_or_else(|| {
+            async_graphql::Error::new(format!(
+                "no adapter registered under name {:?}",
+                T::adapter_name()
+            ))
+        })
+}
+
 #[derive(async_graphql::SimpleObject, Clone)]
 pub struct TelemetryEvent {
     pub frame: Option<TelemetryFrame>,
