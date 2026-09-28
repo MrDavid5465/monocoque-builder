@@ -264,7 +264,7 @@ const CarDetail: React.FC<Props> = ({ carRecordId, onBack }) => {
         from — without this its photos only appear on a manual refresh. */}
     <Subscriber
       document={CAR_CHANGED}
-      options={{ variables: { id: carRecordId }, onSubscriptionData: () => refetch() }}
+      options={{ variables: { id: carRecordId }, onData: () => refetch() }}
     />
     <div style={{ padding: '1.2em 1.5em' }}>
       <Stack horizontal verticalAlign="center" horizontalAlign="space-between" style={{ marginBottom: '1em' }}>
@@ -323,7 +323,12 @@ const CarDetail: React.FC<Props> = ({ carRecordId, onBack }) => {
 
           <FormCard style={cardStyle}>
             <Form
-              key={car.id}
+              // Remount when either photo changes: per-form reads
+              // initialValues only at mount, so a capture's new photos would
+              // otherwise leave these previews on the old images. The URLs
+              // are content-addressed, so they change exactly when the
+              // image does.
+              key={`${car.id}-${dayPhoto?.url ?? 'none'}-${nightPhoto?.url ?? 'none'}`}
               form={photoSchema}
               name={`car-photos-${car.id}`}
               initialValues={{ dayPhoto, nightPhoto }}
