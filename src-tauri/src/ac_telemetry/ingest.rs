@@ -52,8 +52,37 @@ async fn pump(mut socket: WebSocket) {
         // connection: this is a lossy live signal, and one malformed message
         // during e.g. a session change shouldn't cost the whole stream.
         match serde_json::from_str::<super::AcTelemetryFrame>(&text) {
-            Ok(frame) => super::store(frame),
+            Ok(frame) => {
+                // A frame reporting a command it just ran is the only channel
+                // results come back on -- see control.rs.
+                if !frame.command_id.is_empty() {
+                    super::control::record_result(super::control::CommandResult {
+                        id: frame.command_id.clone(),
+                        ok: frame.command_ok,
+                        message: frame.command_message.clone(),
+                    });
+                }
+                super::store(frame);
+            }
             Err(err) => eprintln!("ac-telemetry: ignoring malformed frame: {err}"),
+        }
+
+        // Commands go out on the next inbound frame rather than waiting for
+        // the ack tick below: at the app's 60Hz that is ~16ms instead of up to
+        // a second.
+        if let Some(command) = super::control::take_next() {
+            match serde_json::to_string(&command) {
+                Ok(payload) => {
+                    if socket.send(Message::Text(payload.into())).await.is_err() {
+                        break;
+                    }
+                    // Sending counts as this connection's ack for now -- the
+                    // app treats any inbound message as proof of life.
+                    last_ack = Some(Instant::now());
+                    continue;
+                }
+                Err(err) => eprintln!("ac-telemetry: undeliverable command: {err}"),
+            }
         }
 
         // Acknowledged after storing, so an ack means "your frame landed",

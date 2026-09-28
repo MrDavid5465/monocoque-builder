@@ -77,6 +77,9 @@ pub struct AcTelemetry {
     pub wind_speed_kmh: f32,
     pub wind_direction_deg: f32,
 
+    pub look_x: f32,
+    pub look_y: f32,
+    pub look_z: f32,
     pub pos_x: f32,
     pub pos_y: f32,
     pub pos_z: f32,
@@ -92,6 +95,14 @@ pub struct AcTelemetry {
     /// False for remote cars and replays, where the car-level fields above
     /// aren't meaningful.
     pub physics_available: bool,
+}
+
+/// Outcome of one `acCommand`.
+#[derive(Debug, Clone, async_graphql::SimpleObject)]
+pub struct AcCommandResult {
+    pub id: String,
+    pub ok: bool,
+    pub message: String,
 }
 
 impl From<AcTelemetryFrame> for AcTelemetry {
@@ -124,6 +135,9 @@ impl From<AcTelemetryFrame> for AcTelemetry {
             rain_intensity: frame.rain_intensity,
             wind_speed_kmh: frame.wind_speed_kmh,
             wind_direction_deg: frame.wind_direction_deg,
+            look_x: frame.look_x,
+            look_y: frame.look_y,
+            look_z: frame.look_z,
             pos_x: frame.pos_x,
             pos_y: frame.pos_y,
             pos_z: frame.pos_z,
@@ -190,6 +204,22 @@ impl AcTelemetryQuery {
     }
 
     /// The most recent frame, if one arrived recently.
+    /// Results of recent `acCommand` calls, oldest first.
+    ///
+    /// Bounded history rather than a log: useful when a sequence of commands
+    /// was staged and one of them failed, since `acCommand` only ever returns
+    /// its own result.
+    async fn ac_command_history(&self) -> Vec<AcCommandResult> {
+        ac_telemetry::control::recent_results()
+            .into_iter()
+            .map(|r| AcCommandResult {
+                id: r.id,
+                ok: r.ok,
+                message: r.message,
+            })
+            .collect()
+    }
+
     async fn ac_telemetry_snapshot(&self) -> Option<AcTelemetry> {
         ac_telemetry::latest().map(AcTelemetry::from)
     }
@@ -206,6 +236,54 @@ impl AcTelemetryMutation {
     /// game that runs on every launch and opens a network connection. That
     /// should be something they turn on, not something that appears because
     /// they opened a settings page.
+    /// Runs one command inside the live session and waits for its result.
+    ///
+    /// Queue-and-wait rather than fire-and-forget: a caller verifying
+    /// something ("set the clock to 22:50, then read the elevation back")
+    /// needs to know the change landed before looking, and the round trip is
+    /// roughly 16ms because commands go out on the next inbound telemetry
+    /// frame. See ac_telemetry::control.
+    ///
+    /// `args` is a JSON object as a string, so commands can gain parameters
+    /// without changing this signature or the schema.
+    async fn ac_command(
+        &self,
+        _ctx: &Context<'_>,
+        cmd: String,
+        args: Option<String>,
+    ) -> GqlResult<AcCommandResult> {
+        if !ac_telemetry::is_connected() {
+            return Err(async_graphql::Error::new(
+                "Assetto Corsa isn't reporting telemetry — is the game running with the \
+                 TyPiQL Telemetry app installed?",
+            ));
+        }
+        let parsed = match args.filter(|a| !a.trim().is_empty()) {
+            Some(raw) => serde_json::from_str(&raw)
+                .map_err(|err| async_graphql::Error::new(format!("args must be JSON: {err}")))?,
+            None => serde_json::json!({}),
+        };
+        let id = ac_telemetry::control::queue(&cmd, parsed);
+
+        // Polled rather than notified: the result arrives on a telemetry frame
+        // handled by a different task, and a 20ms poll is far below the
+        // latency of anything being commanded.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while std::time::Instant::now() < deadline {
+            if let Some(result) = ac_telemetry::control::result_for(&id) {
+                return Ok(AcCommandResult {
+                    id: result.id,
+                    ok: result.ok,
+                    message: result.message,
+                });
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        Err(async_graphql::Error::new(format!(
+            "command {cmd:?} was sent but the game never reported a result"
+        )))
+    }
+
     async fn install_ac_telemetry_app(&self, _ctx: &Context<'_>) -> GqlResult<bool> {
         let paths = crate::ac_capture::paths::CapturePaths::resolve(None, None)
             .map_err(async_graphql::Error::new)?;

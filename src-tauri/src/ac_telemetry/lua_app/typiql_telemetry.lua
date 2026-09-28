@@ -76,9 +76,121 @@ local retryDue = 0
 --- connecting at all.
 --- Acks from TyPiQL. The payload is irrelevant; what matters is that one
 --- arrived, which is the only proof the far end is still there.
-local function onMessage(_data)
+--- Result of the last command, reported on the next outbound frame.
+local commandId, commandOk, commandMessage = '', false, ''
+
+--- Runs one command from TyPiQL. Returns ok, message.
+---
+--- Dispatch lives here rather than in the backend so adding a command is one
+--- change in one file. Everything is explicit and one-shot: this app has no
+--- standing behaviour and does nothing at all unless a command arrives, which
+--- matters because it stays installed during ordinary play.
+local function runCommand(cmd, args)
+  local sim = ac.getSim()
+  if cmd == 'ping' then
+    return true, string.format('pong; track=%s clock=%02d:%02d',
+      ac.getTrackFullID and ac.getTrackFullID() or '?',
+      math.floor(sim.timeTotalSeconds / 3600), math.floor(sim.timeTotalSeconds / 60) % 60)
+
+  elseif cmd == 'set_time' then
+    -- Absolute hour on the track's own clock. setWeatherTimeOffset
+    -- ACCUMULATES (learned the hard way in the capture app), so the shift is
+    -- computed against the clock as it reads right now.
+    local target = tonumber(args.hours)
+    if target == nil then return false, 'set_time needs { "hours": <0-24> }' end
+    local now = sim.timeTotalSeconds / 3600
+    ac.setWeatherTimeOffset(((target - now) % 24) * 3600, true)
+    return true, string.format('was %05.2fh, asked for %05.2fh', now, target)
+
+  elseif cmd == 'set_car_position' then
+    local x, y, z = tonumber(args.x), tonumber(args.y), tonumber(args.z)
+    if x == nil or y == nil or z == nil then
+      return false, 'set_car_position needs { "x":, "y":, "z": }'
+    end
+    if not physics.allowed() then return false, 'physics writes not allowed here' end
+    local dir = vec3(tonumber(args.dirX) or 0, tonumber(args.dirY) or 0, tonumber(args.dirZ) or 1)
+    physics.setCarPosition(0, vec3(x, y, z), dir)
+    physics.setCarVelocity(0, vec3(0, 0, 0))
+    return true, string.format('placed at %.2f,%.2f,%.2f', x, y, z)
+
+  elseif cmd == 'set_headlights' then
+    ac.setHeadlights(args.on == true or args.on == 'true' or args.on == 1)
+    return true, 'headlights set'
+
+  elseif cmd == 'set_apps_hidden' then
+    ac.setAppsHidden(args.hidden == true or args.hidden == 'true' or args.hidden == 1)
+    return true, 'apps visibility set'
+
+  elseif cmd == 'quit' then
+    -- Clean shutdown, the same call the capture app uses when it finishes.
+    -- Needed because a capture has to OWN the session -- 360 mode is written
+    -- into video.ini and CSP only reads that at startup -- so an already
+    -- running game has to go before one can start.
+    ac.shutdownAssettoCorsa()
+    return true, 'shutdown requested'
+
+  elseif cmd == 'find_meshes' then
+    -- Discovery. The generated showroom track composes a donor track's model
+    -- with a showroom's, and the donor's mesh names are not extractable from
+    -- its .kn5 from outside -- so ask the running game instead. The filter is
+    -- the same syntax INI configs use, including CSP's semantic material
+    -- groups like $GrassMaterials.
+    local filter = tostring(args.filter or '')
+    if filter == '' then return false, 'find_meshes needs { "filter": "..." }' end
+    local found = ac.findMeshes(filter)
+    local n = found:size()
+    local names = {}
+    for i = 0, math.min(n, tonumber(args.limit) or 12) - 1 do
+      names[#names + 1] = tostring(found:name(i))
+    end
+    return true, string.format('%d match; %s', n, table.concat(names, ', '))
+
+  elseif cmd == 'set_meshes_visible' then
+    -- Hiding at runtime rather than through ext_config: the effect is
+    -- immediate and verifiable in the same session, instead of costing a
+    -- reload per guess at an INI key.
+    local filter = tostring(args.filter or '')
+    if filter == '' then return false, 'set_meshes_visible needs { "filter": "..." }' end
+    local visible = args.visible == true or args.visible == 'true' or args.visible == 1
+    local found = ac.findMeshes(filter)
+    local n = found:size()
+    found:setVisible(visible)
+    return true, string.format('%s %d mesh(es) matching %s',
+      visible and 'showed' or 'hid', n, filter)
+
+  elseif cmd == 'state' then
+    local car = ac.getCar(0)
+    if car == nil then return false, 'no car' end
+    return true, string.format(
+      'clock=%05.2fh pos=%.2f,%.2f,%.2f look=%.3f,%.3f,%.3f',
+      sim.timeTotalSeconds / 3600,
+      car.position.x, car.position.y, car.position.z,
+      car.look.x, car.look.y, car.look.z)
+  end
+  return false, 'unknown command: ' .. tostring(cmd)
+end
+
+--- Incoming from TyPiQL: either a bare liveness ack or a command.
+---
+--- Any inbound message counts as proof of life regardless of content, which
+--- is what it always did -- commands simply piggyback on the same channel
+--- rather than needing one of their own.
+local function onMessage(data)
   sinceAck = 0
   acked = true
+  local text = tostring(data)
+  if text:sub(1, 1) ~= '{' then return end
+  local ok, parsed = pcall(JSON.parse, text)
+  if not ok or parsed == nil or parsed.cmd == nil then return end
+  -- pcall on a two-value function yields (pcallOk, ok, message); on failure
+  -- the second value is the error instead.
+  local pcallOk, ok, message = pcall(runCommand, parsed.cmd, parsed.args or {})
+  if pcallOk then
+    commandOk, commandMessage = ok == true, tostring(message or '')
+  else
+    commandOk, commandMessage = false, 'error: ' .. tostring(ok)
+  end
+  commandId = tostring(parsed.id or '')
 end
 
 --- Hands the socket back to CSP before dropping the reference.
@@ -216,6 +328,12 @@ local function buildFrame(sim, car)
   local neckX, neckY, neckZ = neckOffset(car)
   local neckYaw, neckPitch, neckRoll = neckRotation(car)
   local position = car ~= nil and car.position or nil
+  -- Normalized forward vector. Reported alongside position because the two
+  -- together are what a capture needs to put a car back exactly where someone
+  -- parked it: physics.setCarPosition takes a heading, and without one it
+  -- aligns to the AI spline, which inside a building points somewhere
+  -- arbitrary.
+  local look = car ~= nil and car.look or nil
 
   -- The track's own geotag, straight from the game. Guarded because
   -- ac.getTrackCoordinatesDeg arrived in CSP 0.2.8 and this app stays
@@ -285,6 +403,14 @@ local function buildFrame(sim, car)
     rain_intensity = sim.rainIntensity,
     wind_speed_kmh = sim.windSpeedKmh,
     wind_direction_deg = sim.windDirectionDeg,
+
+    command_id = commandId,
+    command_ok = commandOk,
+    command_message = commandMessage,
+
+    look_x = look ~= nil and look.x or 0,
+    look_y = look ~= nil and look.y or 0,
+    look_z = look ~= nil and look.z or 0,
 
     pos_x = position ~= nil and position.x or 0,
     pos_y = position ~= nil and position.y or 0,
@@ -365,6 +491,10 @@ function script.update(dt)
   -- Calling the socket is how you send on it; see connect() above.
   local sent, sendErr = pcall(socket, encoded)
   if sent then
+    -- A command result rides exactly one frame. Left set, it would be
+    -- re-reported 60 times a second and evict genuine results from the
+    -- backend's bounded history.
+    commandId = ''
     framesSent = framesSent + 1
     -- Only claims to be streaming while nothing has gone wrong: a send that
     -- doesn't throw is not evidence the socket ever connected.

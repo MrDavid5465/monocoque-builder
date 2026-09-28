@@ -25,6 +25,7 @@
 //! * **Cockpit lighting.** `car.ambientOcclusion` says whether the car is
 //!   under cover, which a day/night dashboard can tint against.
 
+pub mod control;
 pub mod ingest;
 pub mod install;
 
@@ -133,6 +134,22 @@ pub struct AcTelemetryFrame {
     // ---- Position ----------------------------------------------------
     /// World position, metres. Absent from the shared-memory telemetry
     /// entirely, and the thing a live track map needs.
+    /// Id of the last control command the app executed, empty if none. The
+    /// result rides the ordinary telemetry frame rather than a second message
+    /// type: it is already arriving 60 times a second and a command completes
+    /// in one of those ticks.
+    #[serde(default)]
+    pub command_id: String,
+    #[serde(default)]
+    pub command_ok: bool,
+    #[serde(default)]
+    pub command_message: String,
+    /// Normalized forward vector. With `pos_*`, enough to put a car back
+    /// exactly where it was parked — `physics.setCarPosition` needs a heading,
+    /// and given none it aligns to the AI spline.
+    pub look_x: f32,
+    pub look_y: f32,
+    pub look_z: f32,
     pub pos_x: f32,
     pub pos_y: f32,
     pub pos_z: f32,
