@@ -1,0 +1,17 @@
+[package]
+name = "live360"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.104"
+ashpd = { version = "0.13.13", default-features = false, features = ["tokio", "screencast"] }
+enumflags2 = "0.7.12"
+glow = "0.18.0"
+glutin = "0.32.3"
+glutin-winit = "0.5.0"
+libspa-sys = "0.10.1"
+pipewire = { version = "0.10.1", features = ["v0_3_77"] }
+raw-window-handle = "0.6.2"
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "time", "signal"] }
+winit = "0.30.13"
