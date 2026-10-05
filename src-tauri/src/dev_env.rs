@@ -31,8 +31,10 @@ use std::path::PathBuf;
 /// The file name searched for, from the working directory upward.
 const FILE_NAME: &str = ".env.local";
 
-/// Key prefixes the file is allowed to set.
-const ALLOWED_PREFIXES: [&str; 2] = ["MONOCOQUE_BUILDER_", "RUST_"];
+/// Key prefixes the file is allowed to set. `WEBKIT_` is for WebKitGTK's own
+/// switches, which a development container can need (see `.env.local.example`);
+/// it's read before the window exists, which is when WebKit looks.
+const ALLOWED_PREFIXES: [&str; 3] = ["MONOCOQUE_BUILDER_", "RUST_", "WEBKIT_"];
 
 /// Reads `.env.local` into the process environment.
 ///
