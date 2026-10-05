@@ -59,6 +59,8 @@ const MY = gql`
         simdCommand
         monocoqueCommand
         huenicornCommand
+        clientMode
+        clientHost
         debugBuild
         ...GamepadMappingsFields
       }
@@ -93,6 +95,8 @@ const UPDATE_SETTINGS = gql`
         simdCommand
         monocoqueCommand
         huenicornCommand
+        clientMode
+        clientHost
         debugBuild
         ...GamepadMappingsFields
       }
@@ -138,6 +142,11 @@ export interface IUserSettingInput {
   simdCommand?: string;
   monocoqueCommand?: string;
   huenicornCommand?: string;
+  /** This install takes its telemetry from a host over the network, and
+   *  doesn't run simd (see relay/mod.rs). */
+  clientMode?: boolean;
+  /** Host for client mode, `host` or `host:port`; unset = discover. */
+  clientHost?: string | null;
   /** Dev-build overrides, used instead of the commands above in a debug
    *  build and ignored in a release build - see service_commands.rs. */
 }
@@ -162,6 +171,11 @@ export interface ISettings {
   simdCommand?: string;
   monocoqueCommand?: string;
   huenicornCommand?: string;
+  /** This install takes its telemetry from a host over the network, and
+   *  doesn't run simd (see relay/mod.rs). */
+  clientMode?: boolean;
+  /** Host for client mode, `host` or `host:port`; unset = discover. */
+  clientHost?: string | null;
   /** Dev-build overrides, used instead of the commands above in a debug
    *  build and ignored in a release build - see service_commands.rs. */
   /** Read-only: true when the backend serving this is a debug build, i.e.
@@ -237,3 +251,16 @@ const dispatcher = {
 };
 
 export default dispatcher;
+
+/** What client mode is doing right now (see graphql/relay.rs). */
+export const RELAY_STATUS = gql`
+  query relayStatus {
+    relayStatus {
+      clientMode
+      host
+      connected
+      lastFrameAgeMs
+      error
+    }
+  }
+`;

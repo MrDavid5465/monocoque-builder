@@ -222,6 +222,8 @@ pub async fn build_router() -> Router {
         // in-game Lua app over this socket. See `ac_puppet` for why it's a
         // separate app/route rather than folded into `/ac-telemetry`.
         .route("/ac-puppet", get(crate::ac_puppet::channel::handler))
+        // A client install's source of telemetry (see `relay`).
+        .route("/relay", get(crate::relay::host::handler))
         .nest(
             "/360-photos",
             Router::new()

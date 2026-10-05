@@ -223,6 +223,14 @@ pub fn latest_with_age() -> Option<(AcTelemetryFrame, f64)> {
     (age < STALE_AFTER).then(|| (frame.clone(), age.as_secs_f64() * 1000.0))
 }
 
+/// The latest frame with the moment it was stored, while still fresh. The
+/// relay host sends each frame once by comparing these stamps.
+pub fn latest_stamped() -> Option<(AcTelemetryFrame, std::time::Instant)> {
+    let guard = LATEST.lock().ok()?;
+    let (frame, at) = guard.as_ref()?;
+    (at.elapsed() < STALE_AFTER).then(|| (frame.clone(), *at))
+}
+
 /// Whether frames are currently arriving.
 pub fn is_connected() -> bool {
     latest().is_some()

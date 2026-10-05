@@ -103,6 +103,21 @@ fn is_simd_running() -> bool {
     process_liveness::is_running("simd")
 }
 
+/// Stops simd if it's running; see the client-mode branch of
+/// `run_simd_watchdog`. Returns whether there was one to stop.
+fn stop_simd() -> bool {
+    if !is_simd_running() {
+        return false;
+    }
+    if let Err(e) = crate::host_command::host_command("pkill")
+        .args(["-x", "simd"])
+        .output()
+    {
+        eprintln!("run_simd_watchdog: failed to stop simd: {e}");
+    }
+    true
+}
+
 pub fn simd_status() -> SimdStatus {
     SimdStatus {
         running: is_simd_running(),
@@ -282,6 +297,15 @@ pub async fn run_simd_watchdog() {
 
     loop {
         tokio::time::sleep(WATCHDOG_POLL_INTERVAL).await;
+
+        // On a client, SIMAPI.DAT is written by the relay from the host's
+        // telemetry; simd would overwrite it with this machine's (idle) sim.
+        if crate::relay::is_client_mode() {
+            if stop_simd() {
+                eprintln!("run_simd_watchdog: client mode, stopped simd so it can't overwrite the relayed telemetry");
+            }
+            continue;
+        }
 
         if is_simd_running() {
             failed_attempts = 0;

@@ -29,6 +29,8 @@ impl Default for AppConfig {
                 simd_command: "simd".into(),
                 monocoque_command: "monocoque play".into(),
                 huenicorn_command: "huenicorn".into(),
+                client_mode: false,
+                client_host: None,
                 // Nothing unknown in a config this build just created.
                 extra: Default::default(),
             },

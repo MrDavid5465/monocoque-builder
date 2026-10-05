@@ -13,7 +13,7 @@ use crate::graphql::dashboard_files::{DashboardFileSyncQuery, DashboardFileUploa
 use crate::graphql::{
     AcTelemetryMutation, AcTelemetryQuery, CarCaptureMutation, CarCaptureQuery, CarFileMutation,
     CarPhotoSyncQuery, DashTemplateThumbnailMutation, DashboardMutation, GamepadMutation,
-    HuenicornMutation, NightClockMutation, RecordingControlMutation, ShakerDspMutation,
+    HuenicornMutation, NightClockMutation, RecordingControlMutation, RelayQuery, ShakerDspMutation,
     ShakerDspQuery, TrackGeocodeQuery,
 };
 use crate::graphql::{QueryRoot, SubscriptionRoot};
@@ -787,7 +787,7 @@ typiql_schema!(
     MonocoqueSimWindDevice, SimWindDeviceProfile,
     DashTemplate, ConnectedClient, DashGroup, KnownCar, KnownTrack, DeviceDefault,
     Car, File, NightMode, CarDashPan, PreviewCar, DashboardEntry, Recording, RecordingFrame, TrackLocation;
-    AppConfigQuery, DashboardFileSyncQuery, BuiltinTemplatesQuery, CarPhotoSyncQuery, CarCaptureQuery, AcTelemetryQuery, ShakerDspQuery, TrackGeocodeQuery, QueryRoot;
+    AppConfigQuery, DashboardFileSyncQuery, BuiltinTemplatesQuery, CarPhotoSyncQuery, CarCaptureQuery, AcTelemetryQuery, RelayQuery, ShakerDspQuery, TrackGeocodeQuery, QueryRoot;
     AppConfigMutation, DashboardFileUploadMutation, ClientsMutation, CarFileMutation, CarCaptureMutation, AcTelemetryMutation, DashTemplateThumbnailMutation, DashboardMutation, GamepadMutation, NightClockMutation, ShakerDspMutation, RecordingControlMutation, HuenicornMutation;
     SubscriptionRoot
 );

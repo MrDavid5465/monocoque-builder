@@ -105,6 +105,8 @@ pub fn to_gql_settings(s: AppSettings) -> GqlAppSettings {
         simd_command: s.simd_command,
         monocoque_command: s.monocoque_command,
         huenicorn_command: s.huenicorn_command,
+        client_mode: s.client_mode,
+        client_host: s.client_host,
         debug_build: crate::service_commands::is_debug_build(),
     }
 }

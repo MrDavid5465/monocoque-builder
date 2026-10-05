@@ -19,6 +19,7 @@ mod night_state;
 mod pipewire_dsp;
 mod preview_car;
 mod process_liveness;
+mod relay;
 mod service_commands;
 mod service_watchdogs;
 mod sun_position;
@@ -74,6 +75,12 @@ fn main() {
                     tokio::spawn(huenicorn::run_color_poller());
                     tokio::spawn(service_watchdogs::run_simd_watchdog());
                     tokio::spawn(service_watchdogs::run_monocoque_watchdog());
+                    tokio::spawn(relay::client::run());
+                    // A client doesn't offer itself as a host. Held for the
+                    // life of the process; dropping it withdraws the advert.
+                    if !relay::is_client_mode() {
+                        std::mem::forget(relay::discovery::advertise(relay::API_PORT));
+                    }
 
                     let app = api::build_router().await;
 

@@ -3,7 +3,7 @@ import { Modal, useMutation, useQuery, Stack, getStyle } from '../lib';
 import { Pivot, PivotItem, getTheme } from '../../../lib';
 import { userSettings } from './schema';
 import { parseThemeKey, themeKey } from '../../../../themes';
-import dispatcher, { ISettings, GamepadMapping, GAMEPAD_UDEV_STATUS, SETUP_GAMEPAD_UDEV } from '../../../lib/queries';
+import dispatcher, { ISettings, GamepadMapping, GAMEPAD_UDEV_STATUS, SETUP_GAMEPAD_UDEV, RELAY_STATUS } from '../../../lib/queries';
 import { Form, PrimaryButton } from '../../../lib';
 import { getAppId } from '../../../../../graphql/client';
 import { GET_DASHBOARDS } from '../../../../../components/Telemetry/DashboardDesigner/queries';
@@ -65,6 +65,8 @@ const Index: React.FC<Props> = ({ isOpen, dismissModal, settings }) => {
   const [monocoqueCommand, setMonocoqueCommand] = useState<string>(settings.monocoqueCommand ?? 'monocoque play');
   const [huenicornCommand, setHuenicornCommand] = useState<string>(settings.huenicornCommand ?? 'huenicorn');
   const debugBuild: boolean = settings.debugBuild ?? false;
+  const [clientMode, setClientMode] = useState<boolean>(settings.clientMode ?? false);
+  const [clientHost, setClientHost] = useState<string>(settings.clientHost ?? '');
   const [udevWorking, setUdevWorking] = useState(false);
   const [udevMsg, setUdevMsg] = useState<string | null>(null);
 
@@ -140,6 +142,14 @@ const Index: React.FC<Props> = ({ isOpen, dismissModal, settings }) => {
   }, [settings.simdCommand]);
 
   useEffect(() => {
+    setClientMode(settings.clientMode ?? false);
+  }, [settings.clientMode]);
+
+  useEffect(() => {
+    setClientHost(settings.clientHost ?? '');
+  }, [settings.clientHost]);
+
+  useEffect(() => {
     if (settings.monocoqueCommand != null) setMonocoqueCommand(settings.monocoqueCommand);
   }, [settings.monocoqueCommand]);
 
@@ -208,6 +218,15 @@ const Index: React.FC<Props> = ({ isOpen, dismissModal, settings }) => {
 
   const { data: dashData } = useQuery(GET_DASHBOARDS, { skip: !isOpen });
   const { data: clientsData } = useQuery(GET_CONNECTED_CLIENTS, { skip: !isOpen, fetchPolicy: 'network-only' });
+  // Polled, not subscribed: only while this dialog is open, and a live
+  // subscription here would spend a connection from the browser's small
+  // per-origin budget (see liveUpdatesHub).
+  const { data: relayData } = useQuery(RELAY_STATUS, {
+    skip: !isOpen,
+    pollInterval: 2000,
+    fetchPolicy: 'network-only',
+  });
+  const relay = (relayData as { relayStatus?: { connected: boolean; host?: string; error?: string } } | undefined)?.relayStatus;
   const { data: groupsData } = useQuery(GET_DASH_GROUPS, { skip: !isOpen });
   const { data: deviceDefaultsData } = useQuery(GET_DEVICE_DEFAULTS, { skip: !isOpen, fetchPolicy: 'network-only' });
 
@@ -348,6 +367,9 @@ const Index: React.FC<Props> = ({ isOpen, dismissModal, settings }) => {
             simdCommand,
             monocoqueCommand,
             huenicornCommand,
+            clientMode,
+            // Blank means "discover on the LAN"; null clears a saved address.
+            clientHost: clientHost.trim() || null,
             // Explicit null (not '') clears back to unset — omitting the
             // field would mean "leave unchanged" per AppSettingsInput's
             // MaybeUndefined convention.
@@ -537,6 +559,40 @@ const Index: React.FC<Props> = ({ isOpen, dismissModal, settings }) => {
 
           <PivotItem headerText="Services">
             <Stack tokens={{ childrenGap: '1em' }} style={{ paddingTop: '0.77em' }}>
+              {/* Keyed on the toggle only: the address field appears with it,
+                  and per-form reads initialValues once at mount. Keying on
+                  the address too would remount on every keystroke. */}
+              <Form
+                key={`client-mode-${clientMode}`}
+                form={{
+                  clientMode: { type: 'checkbox', label: 'Client mode: take telemetry from another PC' },
+                  ...(clientMode
+                    ? {
+                      clientHost: {
+                        type: 'text',
+                        label: 'Host address (leave blank to find it on the LAN)',
+                        placeholder: '192.168.1.20 or 192.168.1.20:9000',
+                      },
+                      clientStatus: {
+                        type: 'check',
+                        label: 'Host connection',
+                        check: () => (relay?.connected ? 'ok' : relay?.error ? 'fail' : 'unknown'),
+                        okText: `Connected to ${relay?.host ?? 'host'}`,
+                        failText: relay?.error ?? 'Not connected',
+                        unknownText: clientHost.trim() ? `Connecting to ${clientHost.trim()}…` : 'Looking for a host on the LAN…',
+                        description: 'Monocoque, Huenicorn and the dashboards run from the host\'s telemetry, and simd '
+                          + 'is kept off so it can\'t overwrite it. Takes effect when you save.',
+                      },
+                    }
+                    : {}),
+                }}
+                name="clientModeSettings"
+                initialValues={{ clientMode, clientHost }}
+                onChange={(_n: string, { clean }: any) => {
+                  setClientMode(!!clean.clientMode);
+                  if (clean.clientHost !== undefined) setClientHost(clean.clientHost ?? '');
+                }}
+              />
               <span style={{ fontSize: '0.78em', opacity: 0.65 }}>
                 Commands the simd/monocoque/Huenicorn watchdogs use to launch each service
                 when it's found not running. Defaults are bare, PATH-resolved binary names —

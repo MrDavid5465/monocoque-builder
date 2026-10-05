@@ -149,6 +149,13 @@ pub struct GqlAppSettings {
     /// Command used to launch Huenicorn (see `huenicorn::start_huenicorn`).
     /// Defaults to the bare `huenicorn` (PATH-resolved).
     pub huenicorn_command: String,
+    /// This install is a client: it takes telemetry from a host over the
+    /// network (see `relay`) instead of from a local sim, and doesn't run
+    /// simd.
+    pub client_mode: bool,
+    /// Host to connect to in client mode, `host` or `host:port`. Unset means
+    /// discover one on the LAN.
+    pub client_host: Option<String>,
     /// Dev-build overrides for the three commands above — used *instead of*
     /// them in a debug build, ignored entirely in a release build. See
     /// `service_commands` for why the switch is the build type rather than a
@@ -202,6 +209,8 @@ pub struct AppSettingsInput {
     pub simd_command: MaybeUndefined<String>,
     pub monocoque_command: MaybeUndefined<String>,
     pub huenicorn_command: MaybeUndefined<String>,
+    pub client_mode: MaybeUndefined<bool>,
+    pub client_host: MaybeUndefined<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -260,6 +269,12 @@ pub struct AppSettings {
     pub monocoque_command: String,
     #[serde(default = "default_huenicorn_command")]
     pub huenicorn_command: String,
+    /// See `GqlAppSettings::client_mode`.
+    #[serde(default)]
+    pub client_mode: bool,
+    /// See `GqlAppSettings::client_host`.
+    #[serde(default)]
+    pub client_host: Option<String>,
 
     /// Every key in the settings file this build doesn't model, kept verbatim
     /// so writing settings never deletes another build's configuration.

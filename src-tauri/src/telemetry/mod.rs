@@ -6,7 +6,7 @@ use simdata::SimData;
 use std::fs::File;
 use types::{CourseFlag, SimStatus, TelemetryFrame, TyreData};
 
-const SIMAPI_PATH: &str = "/dev/shm/SIMAPI.DAT";
+pub const SIMAPI_PATH: &str = "/dev/shm/SIMAPI.DAT";
 
 pub fn read_simdata() -> Option<SimData> {
     let file = File::open(SIMAPI_PATH)
@@ -35,6 +35,27 @@ pub fn read_simdata() -> Option<SimData> {
     let data = unsafe { std::ptr::read_unaligned(mmap.as_ptr() as *const SimData) };
 
     Some(data)
+}
+
+/// SimData's size: what the relay sends and what a client writes back.
+pub const SIMDATA_SIZE: usize = std::mem::size_of::<SimData>();
+
+/// The current SIMAPI.DAT contents as raw bytes, for relaying to a client
+/// as-is (see `relay`). Quiet when the file is missing: the relay polls this
+/// at frame rate, and no sim running is the normal case.
+pub fn read_simdata_bytes() -> Option<Vec<u8>> {
+    let file = File::open(SIMAPI_PATH).ok()?;
+    let mmap = unsafe { MmapOptions::new().map(&file).ok()? };
+    mmap.get(..SIMDATA_SIZE).map(<[u8]>::to_vec)
+}
+
+/// Decodes relayed SimData bytes. `None` if the length is wrong, which is
+/// how a host and client built from different SimData layouts are caught.
+pub fn simdata_from_bytes(bytes: &[u8]) -> Option<SimData> {
+    if bytes.len() != SIMDATA_SIZE {
+        return None;
+    }
+    Some(unsafe { std::ptr::read_unaligned(bytes.as_ptr() as *const SimData) })
 }
 
 pub fn build_frame(d: SimData) -> TelemetryFrame {

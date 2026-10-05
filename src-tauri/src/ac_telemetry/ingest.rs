@@ -62,7 +62,11 @@ async fn pump(mut socket: WebSocket) {
                         message: frame.command_message.clone(),
                     });
                 }
-                super::store(frame);
+                // On a client this game is the puppet: its frames would fight
+                // the host's, which the relay stores instead.
+                if !crate::relay::client_mode_cached() {
+                    super::store(frame);
+                }
             }
             Err(err) => eprintln!("ac-telemetry: ignoring malformed frame: {err}"),
         }

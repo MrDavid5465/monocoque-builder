@@ -134,6 +134,10 @@ impl AppConfigMutation {
                     s.huenicorn_command,
                     existing.settings.huenicorn_command,
                 ),
+                client_mode: merge_required(s.client_mode, existing.settings.client_mode),
+                // Blank clears the override (back to discovery), same as null.
+                client_host: merge_optional(s.client_host, existing.settings.client_host)
+                    .filter(|h| !h.trim().is_empty()),
                 // Carried straight through from what was read. These are keys
                 // this build doesn't model (see AppSettings::extra); dropping
                 // them here would defeat the point of capturing them.
