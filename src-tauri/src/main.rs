@@ -33,6 +33,7 @@ fn main() {
     // service watchdogs spawned below are exactly the readers. No-op in
     // release builds.
     dev_env::load();
+    disable_webkit_dmabuf_on_nvidia();
 
     std::panic::set_hook(Box::new(|info| {
         let bt = std::backtrace::Backtrace::capture();
@@ -108,4 +109,29 @@ fn main() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+/// WebKitGTK's DMA-BUF renderer doesn't work on NVIDIA here: the window
+/// either comes up blank or the process dies with `Error 71 (Protocol error)
+/// dispatching to Wayland display` (on the host, in the Flatpak, and in the
+/// dev container alike). Turning it off makes WebKit fall back to its shared-
+/// memory path, which renders correctly.
+///
+/// Done here rather than per launcher (the Flatpak manifest, `.env.local`, a
+/// shell export) so every way of starting the app gets it without anyone
+/// having to know. It only applies when the NVIDIA driver is loaded, so other
+/// GPUs keep the faster path, and an explicit value — `=0` included — is left
+/// alone, so it can still be switched back on to test a newer driver.
+///
+/// Must run before the Tauri builder creates the window (WebKit reads it at
+/// initialisation) and before any thread is spawned, same as `dev_env::load`.
+fn disable_webkit_dmabuf_on_nvidia() {
+    const VAR: &str = "WEBKIT_DISABLE_DMABUF_RENDERER";
+    if !cfg!(target_os = "linux") || std::env::var_os(VAR).is_some() {
+        return;
+    }
+    if std::path::Path::new("/proc/driver/nvidia/version").exists() {
+        std::env::set_var(VAR, "1");
+        println!("NVIDIA driver detected: set {VAR}=1 for WebKitGTK");
+    }
 }
