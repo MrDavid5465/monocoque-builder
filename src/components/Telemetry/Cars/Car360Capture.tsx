@@ -5,6 +5,7 @@ import {
   CAPTURE_CAR_PHOTOS_360, CAR_CAPTURE_STATUS, CarCaptureStatus,
   AC_CAPTURE_SUPPORT, AcCaptureSupport, UPDATE_CAR,
 } from '../carQueries';
+import { dropdownMenuProps } from '../../../lib/typical-admin-fabric/lib/templates/menuCallout';
 
 interface Props {
   /** Car record id (not the raw game car id). */
@@ -113,6 +114,7 @@ const Car360Capture: React.FC<Props> = ({ carId, gameCarIds, captureCarId }) => 
   return (
     <Stack tokens={{ childrenGap: 8 }} style={{ marginTop: 12 }}>
       <Dropdown
+        {...dropdownMenuProps}
         label="Car to capture"
         selectedKey={selectedCarId}
         options={installedCars.map(car => ({

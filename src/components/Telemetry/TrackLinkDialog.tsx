@@ -6,6 +6,7 @@ import {
   GET_TRACK_LOCATIONS, ADD_TRACK_LOCATION, UPDATE_TRACK_LOCATION, SEARCH_TRACK_LOCATIONS,
   GeocodeResult, TrackLocationRecord,
 } from './trackLocationQueries';
+import { dropdownMenuProps } from '../../lib/typical-admin-fabric/lib/templates/menuCallout';
 
 interface Props {
   // The raw telemetry track id `setSunriseSunsetFromDate` couldn't match to
@@ -112,6 +113,7 @@ const TrackLinkDialog: React.FC<Props> = ({ liveTrack, onDismiss, onLinked }) =>
         <span style={{ fontSize: '0.85em', fontWeight: 600 }}>Link to an existing location</span>
         <Stack horizontal verticalAlign="end" tokens={{ childrenGap: 8 }}>
           <Dropdown
+            {...dropdownMenuProps}
             placeholder="Select a Track Location"
             selectedKey={selectedLocationId}
             onChange={(_e, option) => setSelectedLocationId(option ? String(option.key) : '')}

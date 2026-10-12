@@ -44,7 +44,7 @@ when in doubt, check what Fluent component the type wraps (see Fabric.tsx).
 | `multicheckbox` | `fields: {[key]: Field}` | — |
 | `radio` | `options: {text,value}[]` | anything `ChoiceGroup` accepts |
 | `select` | `options: {text,value,disabled?}[]` | see "deferred options" below |
-| `multi-select` | `options: {text,value,disabled?}[]` | value is an array |
+| `multi-select` | `options: {text,value,disabled?}[]` | value is an array; `searchable: true` adds a filter box at the top of the menu (`SearchableMultiSelect.tsx`) for long lists |
 | `gamepad-select` | `gamepadMappings: GamepadMapping[]` | `gamepadFilter?: 'button'\|'axis'` — **being replaced**, see below |
 | `image-upload` | `uploadFn(dataUrl, filename) => Promise<{id,filename,url}>` | `resolveUrl?`, `allowClear?`, `uploadLabel?`, `placeholderText?` |
 | `picker` | `options: {text,value}[]` | — |

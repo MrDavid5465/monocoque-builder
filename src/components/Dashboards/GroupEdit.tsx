@@ -6,6 +6,7 @@ import {
   GET_DASH_GROUPS, ADD_DASH_GROUP, UPDATE_DASH_GROUP, GET_KNOWN_CARS,
 } from '../Telemetry/Groups/queries';
 import { GET_DASHBOARDS } from '../Telemetry/DashboardDesigner/queries';
+import { dropdownMenuProps } from '../../lib/typical-admin-fabric/lib/templates/menuCallout';
 
 const groupSchema = {
   name: { label: 'Group name' },
@@ -153,6 +154,7 @@ const GroupEdit: React.FC = () => {
 
       <Stack tokens={{ childrenGap: 4 }} style={{ marginTop: '0.75em' }}>
         <Dropdown
+          {...dropdownMenuProps}
           label="Default dashboard"
           selectedKey={defaultDash}
           options={allDashOptions}

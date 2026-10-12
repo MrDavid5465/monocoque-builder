@@ -5,6 +5,7 @@ import { GET_KNOWN_CARS } from '../Groups/queries';
 import {
   GET_CARS, UPDATE_CAR, DELETE_CAR, UPLOAD_CAR_PHOTO, UPLOAD_CAR_PHOTO_NIGHT, DELETE_CAR_PHOTO_NIGHT,
   SYNC_CAR_PHOTOS, CAR_CHANGED, SET_FAVORITE_CAR, CarRecord, CarPhotoRef, parseCarIds,
+  AC_CAPTURE_SUPPORT,
 } from '../carQueries';
 import Subscriber from '../../../lib/typical-admin/Subscriber';
 import { useGlobalPreviewCar } from '../useGlobalPreviewCar';
@@ -71,6 +72,16 @@ const CarDetail: React.FC<Props> = ({ carRecordId, onBack }) => {
   const cars: CarRecord[] = (carsData as any)?.getCars ?? [];
   const car = cars.find(c => c.id === carRecordId);
   const knownCarIds: string[] = ((knownCarsData as any)?.getKnownCars ?? []).map((c: any) => c.id);
+  // AC's own names for its cars (ui_car.json), read by the backend for the 360
+  // capture already — cache-first, so Car360Capture's identical query on this
+  // page shares the one request. Lists every installed AC car as an option
+  // too, so an ID can be added before the car has ever been driven. Empty
+  // when AC isn't installed, leaving just the IDs seen in telemetry.
+  const { data: acSupportData } = useQuery(AC_CAPTURE_SUPPORT, { fetchPolicy: 'cache-first' });
+  const acCarNames = new Map<string, string>(
+    (((acSupportData as any)?.acCaptureSupport?.cars ?? []) as Array<{ id: string; name?: string | null }>)
+      .map(c => [c.id, c.name || ''])
+  );
 
   const shakerProfiles: ProfileRef[] = (shakerProfilesData as any)?.getSoundDeviceProfiles ?? [];
   const ledsProfiles: ProfileRef[] = (ledsProfilesData as any)?.[ledsProfileResultKey] ?? [];
@@ -84,6 +95,12 @@ const CarDetail: React.FC<Props> = ({ carRecordId, onBack }) => {
   const claimedByOthers = new Set(
     cars.filter(c => c.id !== carRecordId).flatMap(parseCarIds)
   );
+  const carIdOptions = [...new Set([...knownCarIds, ...acCarNames.keys()])]
+    .map(id => {
+      const name = acCarNames.get(id);
+      return { text: name ? `${name} (${id})` : id, value: id, disabled: claimedByOthers.has(id) };
+    })
+    .sort((a, b) => a.text.localeCompare(b.text));
 
   const rawIds = car ? parseCarIds(car) : [];
   const dayPhoto = car?.dayPhoto;
@@ -145,7 +162,8 @@ const CarDetail: React.FC<Props> = ({ carRecordId, onBack }) => {
     carIds: {
       type: 'multi-select' as const,
       label: 'Game car IDs',
-      options: knownCarIds.map(id => ({ text: id, value: id, disabled: claimedByOthers.has(id) })),
+      searchable: true,
+      options: carIdOptions,
     },
   };
 
