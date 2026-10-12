@@ -77,7 +77,11 @@ const configSchema = {
     type: 'text' as const,
     label: 'Day/night cycle length (hours)',
   },
-  simTransitionMinutes: { type: 'slider' as const, label: 'Dawn/dusk transition (minutes)', min: 0, max: 240, step: 5 },
+  // No dawn/dusk transition slider: the blend follows the sun's actual
+  // elevation, and the backend recomputes the stored transition width from
+  // the track's position whenever it recomputes sunrise/sunset
+  // (night_clock.rs). A manual value was overwritten on the next track
+  // change, and only ever reached the clock-ramp fallback anyway.
 };
 
 // Shared by the gear-icon popup (Canvas.tsx) and the Settings modal's
@@ -231,9 +235,7 @@ const DayNightSimPanel: React.FC = () => {
   }), [current?.simEnabled]);
   const configInitialValues = useMemo(() => ({
     cycleHours: currentHours.toFixed(2),
-    simTransitionMinutes: current?.simTransitionMinutes ?? 40,
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [currentHours, current?.simTransitionMinutes]);
+  }), [currentHours]);
 
   // Multi-field onChange convention (per DashPanEditor's
   // handleDashPanFormChange): fires on ANY field change with the full raw
@@ -243,7 +245,7 @@ const DayNightSimPanel: React.FC = () => {
   // Deliberately TWO separate handlers, one per <Form> below — NOT one
   // shared handler branching on field presence. A single shared handler
   // here was a real bug: it unconditionally checked `raw.simEnabled`, but
-  // the config Form's `raw` (sunrise/sunset/cycleHours/transition) never
+  // the config Form's `raw` (cycleHours) never
   // has a `simEnabled` key at all, so `!!raw.simEnabled` was always `false`
   // whenever the config Form's onChange fired — including on every mount,
   // i.e. every time the popup opened — and got diffed against the REAL
@@ -259,15 +261,6 @@ const DayNightSimPanel: React.FC = () => {
   };
 
   const handleConfigFormChange = (_n: string, { raw }: any) => {
-    const patch: Partial<NightModeRecord> = {};
-    let changed = false;
-
-    if (raw.simTransitionMinutes != null && raw.simTransitionMinutes !== current?.simTransitionMinutes) {
-      patch.simTransitionMinutes = raw.simTransitionMinutes;
-      changed = true;
-    }
-    if (changed) debouncedSave(patch);
-
     const hours = parseFloat(raw.cycleHours);
     if (Number.isFinite(hours) && hours > 0 && Math.abs(hours - currentHours) > 0.005) {
       debouncedSetCycleHours(hours);
