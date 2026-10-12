@@ -5,6 +5,8 @@ import { GET_DASHBOARDS } from '../DashboardDesigner/queries';
 import Photo360CrossfadeViewer from '../DashboardDesigner/components/Photo360CrossfadeViewer';
 import { captureCanvasScreenshot } from '../DashboardDesigner/useScreenshot';
 import { useGlobalNightMode } from '../useGlobalNightMode';
+import { useHubListener, useLiveUpdatesDemand } from '../liveUpdatesHub';
+import { computeTelemetryValues } from '../useLiveTelemetry';
 import { UPLOAD_CAR_THUMBNAIL } from '../carQueries';
 import {
   GET_CAR_DASH_PANS,
@@ -207,6 +209,9 @@ const PanSession: React.FC<{
             displayHeight={isFullscreen ? windowSize.h : height}
             onChange={handleChange}
             onLoaded={handleViewerLoaded}
+            // In the page, one finger scrolls it; fullscreen has no page to
+            // scroll, so one-finger panning comes back there.
+            twoFingerTouch={!isFullscreen}
           />
           {!nightPhotoUrl && (
             <div style={{
@@ -283,6 +288,29 @@ const DashPanEditor: React.FC<Props> = ({ carId, carIds, photoId, photoUrl, nigh
   // Which registration is being aligned. Defaults to the primary one, which
   // is the only one for most cars.
   const [registration, setRegistration] = useState(carIds[0] ?? '');
+
+  // The registration the game is reporting right now, when it's one of this
+  // car's. That's the one an active kiosk is showing, so it's the one you
+  // almost always mean to aim; the primary default sent you aligning the s1
+  // of a car while driving its s2. "Live" uses the kiosk's own rule (sim
+  // Active), so the marker always names the alignment the kiosk applies.
+  //
+  // Only demanded for cars with several registrations, which are the only
+  // ones with a choice to make. It rides the page's existing hub connection,
+  // and setLiveCarId bails out on an unchanged string, so frames at
+  // telemetry rate don't re-render this.
+  const multiRegistration = carIds.length > 1;
+  const [liveCarId, setLiveCarId] = useState('');
+  useLiveUpdatesDemand(null, { includeTelemetry: multiRegistration });
+  useHubListener(null, 'TelemetryEvent', multiRegistration ? (event: any) => {
+    const { car, simStatus } = computeTelemetryValues(event.frame);
+    setLiveCarId(simStatus === 'Active' && carIds.includes(car) ? car : '');
+  } : undefined);
+  // Follows the live registration until you pick one yourself.
+  const pickedRegistrationRef = useRef(false);
+  useEffect(() => {
+    if (liveCarId && !pickedRegistrationRef.current) setRegistration(liveCarId);
+  }, [liveCarId]);
   const [resetCounter, setResetCounter] = useState(0);
   const { isNight, nightAmount, toggleNightMode, hubSubscriber } = useGlobalNightMode();
 
@@ -375,8 +403,11 @@ const DashPanEditor: React.FC<Props> = ({ carId, carIds, photoId, photoUrl, nigh
               return (
                 <DefaultButton
                   key={id}
-                  onClick={() => setRegistration(id)}
-                  title={configured ? 'Has its own pan for this dashboard' : 'Uses the dashboard default'}
+                  onClick={() => { pickedRegistrationRef.current = true; setRegistration(id); }}
+                  title={[
+                    id === liveCarId ? 'The car the game is running now.' : '',
+                    configured ? 'Has its own pan for this dashboard' : 'Uses the dashboard default',
+                  ].filter(Boolean).join(' ')}
                   styles={{
                     root: {
                       minWidth: 0,
@@ -388,6 +419,7 @@ const DashPanEditor: React.FC<Props> = ({ carId, carIds, photoId, photoUrl, nigh
                   }}
                 >
                   {id}
+                  {id === liveCarId ? ' (live)' : ''}
                   {configured && selectedDashName ? ' •' : ''}
                 </DefaultButton>
               );

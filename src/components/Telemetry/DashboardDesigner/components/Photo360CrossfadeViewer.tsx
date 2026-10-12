@@ -25,6 +25,8 @@ interface Props {
   displayHeight: number;
   onChange: (yaw: number, pitch: number, fov: number, roll: number) => void;
   readOnly?: boolean;
+  // Straight pass-through — see Photo360Viewer's own doc comment.
+  twoFingerTouch?: boolean;
   telemetryData?: Record<string, number>;
   // Forwarded via the `...rest` spread below — see Photo360Viewer's own doc
   // comment on why AC's head movement arrives as a ref off its own

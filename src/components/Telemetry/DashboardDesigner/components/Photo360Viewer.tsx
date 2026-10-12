@@ -49,6 +49,14 @@ interface Props {
   displayHeight: number;
   onChange: (yaw: number, pitch: number, fov: number, roll: number) => void;
   readOnly?: boolean;
+  // Touch needs two fingers to pan (midpoint drag) and zoom (pinch); one
+  // finger is left to the browser, so it scrolls the page the viewer sits in.
+  // For viewers embedded in a scrolling page (the car page's pan editor),
+  // where a one-finger pan trapped the scroll and a pinch zoomed the whole
+  // page instead of the view. Off by default: the dashboard designer's
+  // canvas doesn't scroll, so one-finger panning stays right there. Mouse
+  // and pen drag the same either way.
+  twoFingerTouch?: boolean;
   // NeckFX-style telemetry sway — nudges the pan (not the persisted yaw/pitch)
   // based on lateral/longitudinal g, mirroring the canvas sway effect used for
   // non-360 backgrounds. Never written back via onChange.
@@ -181,7 +189,7 @@ const NIGHT_DARKEN_AT_FULL_NIGHT = 0.4;
 const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
   photoUrl, nightPhotoUrl, nightAmount = 0, ambientColor = null, ambientTintIntensity = 0,
   ambientSaturationBoostDay = 1, ambientSaturationBoostNight = 1,
-  yaw, pitch, fov, roll, displayWidth, displayHeight, onChange, readOnly = false,
+  yaw, pitch, fov, roll, displayWidth, displayHeight, onChange, readOnly = false, twoFingerTouch = false,
   telemetryData, neckFxRef, swayEnabled = false, swayGainX = 1, swayGainY = 1, swayDisableX = false, swayDisableY = false,
   onLoaded, tintOverlayRef,
 }, ref) => {
@@ -849,6 +857,8 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
   }, []);
 
   const onPointerDown = useCallback((e: React.PointerEvent) => {
+    // Touch is handled by the two-finger listener below instead.
+    if (twoFingerTouch && e.pointerType === 'touch') return;
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
     const live = livePanRef.current;
     dragRef.current = {
@@ -856,7 +866,7 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
       startYaw: live ? live.yaw : stateRef.current.yaw,
       startPitch: live ? live.pitch : stateRef.current.pitch,
     };
-  }, []);
+  }, [twoFingerTouch]);
 
   const onPointerMove = useCallback((e: React.PointerEvent) => {
     const d = dragRef.current;
@@ -923,11 +933,70 @@ const Photo360Viewer = forwardRef<Photo360Handle, Props>(({
     return () => el.removeEventListener('wheel', handler);
   }, [readOnly, emitPan]);
 
+  // Two-finger pan + pinch zoom, for `twoFingerTouch`. Touch events rather
+  // than pointer events: `touch-action: pan-x pan-y` lets the browser take a
+  // one-finger scroll, and once it does it sends pointercancel and stops
+  // pointer events for those touches, while touch events keep arriving. Native
+  // non-passive listeners for the same reason as the wheel handler above —
+  // React's are passive, and preventDefault on a two-finger touchmove is what
+  // stops that gesture from also scrolling the page.
+  useEffect(() => {
+    const el = mountRef.current;
+    if (!el || readOnly || !twoFingerTouch) return;
+    let gesture: { midX: number; midY: number; dist: number; yaw: number; pitch: number; fov: number } | null = null;
+    const measure = (t: TouchList) => {
+      const a = t[0], b = t[1];
+      return {
+        midX: (a.clientX + b.clientX) / 2, midY: (a.clientY + b.clientY) / 2,
+        dist: Math.max(1, Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY)),
+      };
+    };
+    // (Re)baselines on every change in finger count, so lifting or adding a
+    // finger mid-gesture never makes the view jump.
+    const begin = (e: TouchEvent) => {
+      if (e.touches.length !== 2) {
+        if (gesture) { gesture = null; emitPan(true); }
+        return;
+      }
+      const live = livePanRef.current;
+      gesture = {
+        ...measure(e.touches),
+        yaw: live ? live.yaw : stateRef.current.yaw,
+        pitch: live ? live.pitch : stateRef.current.pitch,
+        fov: live ? live.fov : stateRef.current.fov,
+      };
+    };
+    const move = (e: TouchEvent) => {
+      if (!gesture || e.touches.length !== 2) return;
+      if (e.cancelable) e.preventDefault();
+      const m = measure(e.touches);
+      const fov = Math.max(5, Math.min(120, gesture.fov * gesture.dist / m.dist));
+      // Same direct-manipulation mapping and sensitivity as the mouse drag.
+      const sensitivity = fov / 400;
+      livePanRef.current = {
+        yaw: gesture.yaw - (m.midX - gesture.midX) * sensitivity,
+        pitch: Math.max(-85, Math.min(85, gesture.pitch - (m.midY - gesture.midY) * sensitivity)),
+        fov,
+      };
+      emitPan();
+    };
+    el.addEventListener('touchstart', begin, { passive: true });
+    el.addEventListener('touchmove', move, { passive: false });
+    el.addEventListener('touchend', begin, { passive: true });
+    el.addEventListener('touchcancel', begin, { passive: true });
+    return () => {
+      el.removeEventListener('touchstart', begin);
+      el.removeEventListener('touchmove', move);
+      el.removeEventListener('touchend', begin);
+      el.removeEventListener('touchcancel', begin);
+    };
+  }, [readOnly, twoFingerTouch, emitPan]);
+
   return (
     <div style={{ position: 'relative', width: displayWidth, height: displayHeight, cursor: readOnly ? 'default' : 'grab', flexShrink: 0 }}>
       <div
         ref={mountRef}
-        style={{ width: displayWidth, height: displayHeight, overflow: 'hidden' }}
+        style={{ width: displayWidth, height: displayHeight, overflow: 'hidden', touchAction: twoFingerTouch && !readOnly ? 'pan-x pan-y' : undefined }}
         onPointerDown={readOnly ? undefined : onPointerDown}
         onPointerMove={readOnly ? undefined : onPointerMove}
         onPointerUp={readOnly ? undefined : onPointerUp}
