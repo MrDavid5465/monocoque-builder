@@ -519,7 +519,7 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
   // `dashboard?.` — this sits above the component's null-dashboard guard,
   // because a hook can't be called conditionally. No dashboard means no sway,
   // which is the right answer anyway.
-  const neckFxSampleRef = useAcNeckFx(hub, !!dashboard?.neckFx);
+  const neckFxSampleRef = useAcNeckFx(hub, kioskMode && !!dashboard?.neckFx);
   const getCanvasEl = useCallback(
     () => canvasRef.current?.getCanvasEl() ?? null,
     [canvasRef],

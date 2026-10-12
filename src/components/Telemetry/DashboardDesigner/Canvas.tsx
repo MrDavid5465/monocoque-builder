@@ -1245,8 +1245,10 @@ const Canvas = React.memo(forwardRef<CanvasHandle, Props>(({
 
   const telemetryDataRef = useRef<Record<string, number>>({});
   telemetryDataRef.current = telemetryData ?? {};
-  const neckFxRef = useRef(dashboard.neckFx);
-  neckFxRef.current = dashboard.neckFx;
+  // Kiosk only — in the editor the canvas must stay put under the cursor, or
+  // every drag/handle hit lands against a moving target.
+  const neckFxRef = useRef(kioskMode && dashboard.neckFx);
+  neckFxRef.current = kioskMode && dashboard.neckFx;
   // When a live 360° background is showing, telemetry sways the photo's pan instead
   // (see Photo360Viewer) — swaying the whole canvas too would move interactive
   // buttons off-target and expose the canvas edges.
@@ -1628,13 +1630,31 @@ const Canvas = React.memo(forwardRef<CanvasHandle, Props>(({
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
     >
+      {/* Pan/zoom lives on this wrapper as a transform, not as CSS `zoom` on
+        * the canvas div itself. `zoom` also multiplies the element's own
+        * left/top, so the canvas actually sat at offset*scale while every
+        * screen→canvas conversion (handles, wheel/pinch anchoring) assumed
+        * offset — and how pointer coords inside a zoomed subtree are reported
+        * differs between engines (Chromium standardized it in v128; WebKitGTK,
+        * the Tauri webview, has its own legacy behaviour). Drags tracked the
+        * cursor at the wrong ratio as a result. A transform behaves the same
+        * in every engine. It can't go on innerRef either: NeckFX
+        * overwrites innerRef's style.transform every frame. */}
       <div
-        ref={innerRef}
         style={{
           position: 'absolute',
           left: view.offsetX, top: view.offsetY,
           width: dashboard.canvasWidth, height: dashboard.canvasHeight,
-          zoom: view.scale,
+          transform: `scale(${view.scale})`,
+          transformOrigin: '0 0',
+        }}
+      >
+      <div
+        ref={innerRef}
+        style={{
+          position: 'absolute',
+          left: 0, top: 0,
+          width: dashboard.canvasWidth, height: dashboard.canvasHeight,
           // Edit-mode-only — the canvas itself has no background color of its
           // own (only whatever `dashboard.background` sprite/photo is set),
           // so with none set it was rendering fully transparent over this
@@ -1815,6 +1835,7 @@ const Canvas = React.memo(forwardRef<CanvasHandle, Props>(({
             )}
           </>
         )}
+      </div>
       </div>
     </div>
   );

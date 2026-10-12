@@ -31,8 +31,9 @@ export async function captureCanvasScreenshot(
     cacheBust: true,
     style: {
       // Capture the inner canvas element at its natural CSS size (e.g.
-      // 1280×800), ignoring the CSS `zoom` applied for fit-to-container
-      // display. pixelRatio scales the output down to thumbnail width.
+      // 1280×800), ignoring the pan/zoom transform on its wrapper div
+      // (and NeckFX's transform on the element itself). pixelRatio scales
+      // the output down to thumbnail width.
       // position:static removes the absolute offsetX/offsetY so content
       // starts at (0,0).
       zoom: '1',
