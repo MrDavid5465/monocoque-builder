@@ -160,6 +160,10 @@ impl DashboardFileSyncQuery {
         // after upgrading existing records to carry mtime) still needs to be
         // persisted, or the fast path above never gets anything to compare
         // against and every future sync falls back to a full re-hash forever.
+        // The url has to be compared too: it embeds the dashboard entry's id,
+        // so a dashboard whose entry was re-created kept serving every sprite
+        // from the old id's /dash-assets link, which no longer exists — all
+        // of them 404 although the files themselves never changed.
         let existing_matches = existing.len() == current.len()
             && current.iter().all(|c| {
                 let path = c.get("path").and_then(Value::as_str).unwrap_or_default();
@@ -168,6 +172,7 @@ impl DashboardFileSyncQuery {
                     .map(|f| {
                         f.id == c.get("id").and_then(Value::as_str).unwrap_or_default()
                             && f.mtime == c.get("mtime").and_then(Value::as_i64)
+                            && f.url == c.get("url").and_then(Value::as_str).unwrap_or_default()
                     })
                     .unwrap_or(false)
             });
