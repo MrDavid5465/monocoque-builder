@@ -8,9 +8,9 @@ import { LiveUpdatesContext, LiveUpdateTypename } from './liveUpdatesHub';
 // The change events the admin pages subscribe to, all carried by the hub.
 // Adding an admin page for a new type means adding its `<Type>Changed` here,
 // to the backend's DashboardUpdateEvent, and to DASHBOARD_UPDATES_SUB —
-// otherwise its Subscriber warns in the console and falls back to a
-// connection of its own.
-const ROUTED: ReadonlySet<string> = new Set<LiveUpdateTypename>([
+// otherwise its Subscriber logs an error and the page gets no live updates
+// (it never opens a connection of its own under this router).
+export const HUB_ROUTED_TYPENAMES: ReadonlySet<string> = new Set<LiveUpdateTypename>([
   'CarChanged',
   'DashboardEntryChanged',
   'MonocoqueSoundDeviceChanged',
@@ -28,7 +28,7 @@ export const HubSubscriptionRouter: React.FC<{ children: React.ReactNode }> = ({
   const router = useMemo<SubscriptionRouter | null>(
     () =>
       hub && {
-        carries: (typename) => ROUTED.has(typename),
+        carries: (typename) => HUB_ROUTED_TYPENAMES.has(typename),
         listen: (typename, id, onEvent) =>
           hub.subscribe(typename as LiveUpdateTypename, (event) => {
             if (id === undefined || event?.value?.id === id) onEvent();

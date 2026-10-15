@@ -1,5 +1,6 @@
 import React from 'react';
-import { useQuery, useMutation, useSubscription } from '@apollo/client/react';
+import { useQuery, useMutation } from '@apollo/client/react';
+import { useHubCacheSync } from '../../Telemetry/hubCacheSync';
 import { getTheme, Form } from '../../../lib/denim-fabric/lib';
 import { confirmAsync } from '../../../lib/denim-fabric/shared/ConfirmDialog';
 import DetailsGrid from '../../../lib/typical-admin-fabric/lib/List';
@@ -39,7 +40,7 @@ const FieldCell: React.FC<{
 const LedsDevices: React.FC<Props> = ({ profileId = null }) => {
   const theme = getTheme();
   const { data } = useQuery(GET_LEDS);
-  useSubscription(LEDS_CHANGED);
+  useHubCacheSync(LEDS_CHANGED);
   const [create] = useMutation(CREATE_LEDS, { refetchQueries: [{ query: GET_LEDS }] });
   const [update] = useMutation(UPDATE_LEDS, { refetchQueries: [{ query: GET_LEDS }] });
   const [remove] = useMutation(REMOVE_LEDS, { refetchQueries: [{ query: GET_LEDS }] });

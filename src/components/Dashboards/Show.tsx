@@ -1,17 +1,17 @@
 import React from "react";
-import { useSubscription } from "@apollo/client/react";
-import dispatcher from "../Telemetry/queries";
+import { useLiveTelemetryFrame } from "../Telemetry/useLiveTelemetry";
 
 // Raw telemetry-values debug dump — ported verbatim from the old #/telemetry
 // app's Show/index.tsx (undocumented, not linked from any nav, reachable
 // only by direct URL — kept because it was explicitly asked for, not because
 // it's discoverable).
 const Show: React.FC = () => {
-  const { data, loading, error } : { data?: any, loading?: boolean, error?: any }  = useSubscription(dispatcher.telemetry);
-  const t = data?.telemetry;
+  // On the shared hub at the ~30Hz the standalone subscription ran at. A
+  // dropped connection is the hub's to recover (it reconnects on its own),
+  // so there's no error state of this page's own any more.
+  const { frame: t, received } = useLiveTelemetryFrame({ rateHz: 30 });
 
-  if (loading) return <p>Waiting for sim...</p>;
-  if (error) return <p>Error: {error.message}</p>;
+  if (!received) return <p>Waiting for sim...</p>;
   if (!t) return <p>No data</p>;
   return (
     <div style={{ fontFamily: "monospace", padding: "1rem" }}>

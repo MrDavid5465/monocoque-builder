@@ -18,7 +18,7 @@ const useQueryMock = vi.fn();
 vi.mock('@apollo/client/react', () => ({
   useQuery: (...args: any[]) => useQueryMock(...args),
   useMutation: vi.fn().mockReturnValue([vi.fn().mockResolvedValue({}), { loading: false }]),
-  useSubscription: vi.fn().mockReturnValue({ data: undefined }),
+  useApolloClient: () => ({}),
 }));
 
 vi.mock('../lib/denim-fabric/lib', () => ({

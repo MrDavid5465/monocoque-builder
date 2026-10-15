@@ -18,8 +18,11 @@ interface Props {
 //      SubscriptionRouter.tsx);
 //   2. the shared MergedSubscriptionService, when a MergedSubscriptionProvider
 //      is mounted (see MergedSubscriptions.tsx), so every mounted screen
-//      shares one connection;
-//   3. otherwise, a subscription (and connection) of its own.
+//      shares one connection.
+// An app that provides a router has chosen one shared connection, so an event
+// type neither of those carries is reported as an error and left
+// unsubscribed rather than given a connection of its own. Only with no router
+// and no merged service does this subscribe directly.
 const Subscriber: React.FC<Props> = ({ document, options }) => {
   const router = useContext(SubscriptionRouterContext);
   const onDataRef = useRef(options.onData);
@@ -44,18 +47,19 @@ const Subscriber: React.FC<Props> = ({ document, options }) => {
 
   useEffect(() => {
     if (router && !routed && !merged) {
-      console.warn(
-        `Subscriber: the shared stream doesn't carry ${typename ?? 'this subscription'}; ` +
-          'opening a separate connection for it.',
+      console.error(
+        `Subscriber: the shared stream doesn't carry ${typename ?? 'this subscription'}, ` +
+          'so this view gets no live updates. Add it to the app\'s SubscriptionRouter.',
       );
     }
   }, [router, routed, merged, typename]);
 
   // Always called, for the rules of hooks; `skip` keeps it from connecting
-  // when the router or the merged service has it.
+  // when the router or the merged service has it, and never alongside an
+  // app-provided router.
   useSubscription(document, {
     variables: options.variables,
-    skip: routed || viaService,
+    skip: routed || viaService || !!router,
     onData: () => onDataRef.current(),
   });
   return null;

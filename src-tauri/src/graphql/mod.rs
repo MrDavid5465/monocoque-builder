@@ -36,14 +36,18 @@ use crate::huenicorn::{
 use crate::gamepad as gamepad_device;
 use crate::service_watchdogs::{self, MonocoqueStatus, SimdStatus};
 use crate::telemetry::recording as telemetry_recording;
-use crate::telemetry::{build_frame, read_simdata, types::TelemetryFrame};
+use crate::telemetry::{
+    build_frame, read_simdata,
+    types::{SimStatus, TelemetryFrame},
+};
 use crate::typiql_types::{
     CarChanged, CarDashPanChanged, DashTemplateChanged, DashboardEntryChanged,
     DeviceDefaultChanged, LfeChannelChanged, MonocoqueSoundDeviceChanged, NightModeChanged,
     PreviewCarChanged, ShakerChannelChanged, ShakerDspChannelChanged,
 };
 use crate::typiql_types::{
-    LedsDeviceProfileChanged, ShiftLightProfileChanged, SimWindDeviceProfileChanged,
+    LedsDeviceProfileChanged, MonocoqueLedsDeviceChanged, MonocoqueShiftLightChanged,
+    MonocoqueSimWindDeviceChanged, ShiftLightProfileChanged, SimWindDeviceProfileChanged,
     SoundDeviceProfileChanged,
 };
 use async_graphql::{Context, Object, SimpleObject, Subscription};
@@ -89,6 +93,58 @@ pub fn adapter_for<T: typiql::TypiQLType>(
 #[derive(async_graphql::SimpleObject, Clone)]
 pub struct TelemetryEvent {
     pub frame: Option<TelemetryFrame>,
+}
+
+/// The slice of telemetry the nav bar's status dot needs — whether a sim is
+/// running, and which car and track it reports (the header also registers
+/// those as known cars/tracks). Sent on `dashboard_updates` only when it
+/// changes, so every page can show it without carrying the full ~60Hz
+/// telemetry stream.
+#[derive(async_graphql::SimpleObject, Clone, PartialEq)]
+pub struct TelemetryStatus {
+    pub sim_status: SimStatus,
+    pub car: String,
+    pub track: String,
+}
+
+impl TelemetryStatus {
+    fn of(frame: Option<&TelemetryFrame>) -> Self {
+        match frame {
+            Some(frame) => TelemetryStatus {
+                sim_status: frame.sim_status,
+                car: frame.car.clone(),
+                track: frame.track.clone(),
+            },
+            None => TelemetryStatus {
+                sim_status: SimStatus::Off,
+                car: String::new(),
+                track: String::new(),
+            },
+        }
+    }
+}
+
+/// The tick interval for `dashboard_updates`' telemetry member at `hz`, in
+/// whole milliseconds as it always was (60Hz -> 16ms, 30Hz -> 33ms), and
+/// clamped to 1..=120Hz.
+fn telemetry_interval(hz: u32) -> Duration {
+    Duration::from_millis(u64::from(1000 / hz.clamp(1, 120)))
+}
+
+/// Polls the current frame at the rate the old standalone `telemetry`
+/// subscription ran (33ms) and yields a `TelemetryStatus` only when it
+/// differs from the last one sent — always including the first, so a fresh
+/// connection learns the current state straight away.
+fn telemetry_status_stream() -> impl Stream<Item = TelemetryStatus> {
+    let mut last: Option<TelemetryStatus> = None;
+    IntervalStream::new(tokio::time::interval(Duration::from_millis(33))).filter_map(move |_| {
+        let status = TelemetryStatus::of(current_frame().as_ref());
+        let changed = last.as_ref() != Some(&status);
+        if changed {
+            last = Some(status.clone());
+        }
+        futures_util::future::ready(changed.then_some(status))
+    })
 }
 
 #[derive(async_graphql::Union, Clone)]
@@ -144,6 +200,19 @@ enum DashboardUpdateEvent {
     LedsDeviceProfile(LedsDeviceProfileChanged),
     ShiftLightProfile(ShiftLightProfileChanged),
     SimWindDeviceProfile(SimWindDeviceProfileChanged),
+    // The device and channel rows the Shakers/LEDs/Shift Lights/SimWind
+    // pages edit inline. Those pages keep Apollo's cache in step with these
+    // events (the frontend's useHubCacheSync), which is what their own
+    // per-type subscriptions used to do. Event-driven, so no include flag.
+    ShakerChannel(ShakerChannelChanged),
+    ShakerDspChannel(ShakerDspChannelChanged),
+    LfeChannel(LfeChannelChanged),
+    MonocoqueLedsDevice(MonocoqueLedsDeviceChanged),
+    MonocoqueShiftLight(MonocoqueShiftLightChanged),
+    MonocoqueSimWindDevice(MonocoqueSimWindDeviceChanged),
+    // The nav bar's sim/car/track status — see `TelemetryStatus`. Sent only
+    // on change, so it needs no include flag either.
+    TelemetryStatus(TelemetryStatus),
 }
 
 /// One tick of the server-authoritative simulated in-game clock (see
@@ -555,6 +624,11 @@ impl SubscriptionRoot {
         // NeckFX sway has any use for it, and at 60Hz it would otherwise
         // roughly double this stream's message rate for every window.
         #[graphql(default = false)] include_ac_telemetry: bool,
+        // How often the telemetry member ticks, when included. 60 is what the
+        // dashboards drive gauges at; a page that only lists or charts frames
+        // (the raw-values page, the live recording chart) asks for the 30 the
+        // standalone `telemetry` subscription used to run at.
+        #[graphql(default = 60)] telemetry_hz: u32,
     ) -> async_graphql::Result<impl Stream<Item = DashboardUpdateEvent>> {
         let adapter = default_adapter(ctx)?;
 
@@ -569,7 +643,7 @@ impl SubscriptionRoot {
             .boxed();
         let s4: std::pin::Pin<Box<dyn Stream<Item = DashboardUpdateEvent> + Send>> =
             if include_telemetry {
-                IntervalStream::new(tokio::time::interval(Duration::from_millis(16)))
+                IntervalStream::new(tokio::time::interval(telemetry_interval(telemetry_hz)))
                     .map(|_| {
                         DashboardUpdateEvent::Telemetry(TelemetryEvent {
                             frame: current_frame(),
@@ -653,6 +727,27 @@ impl SubscriptionRoot {
             TypiQLBroker::<SimWindDeviceProfileChanged>::subscribe()
                 .map(DashboardUpdateEvent::SimWindDeviceProfile)
                 .boxed(),
+            TypiQLBroker::<ShakerChannelChanged>::subscribe()
+                .map(DashboardUpdateEvent::ShakerChannel)
+                .boxed(),
+            TypiQLBroker::<ShakerDspChannelChanged>::subscribe()
+                .map(DashboardUpdateEvent::ShakerDspChannel)
+                .boxed(),
+            TypiQLBroker::<LfeChannelChanged>::subscribe()
+                .map(DashboardUpdateEvent::LfeChannel)
+                .boxed(),
+            TypiQLBroker::<MonocoqueLedsDeviceChanged>::subscribe()
+                .map(DashboardUpdateEvent::MonocoqueLedsDevice)
+                .boxed(),
+            TypiQLBroker::<MonocoqueShiftLightChanged>::subscribe()
+                .map(DashboardUpdateEvent::MonocoqueShiftLight)
+                .boxed(),
+            TypiQLBroker::<MonocoqueSimWindDeviceChanged>::subscribe()
+                .map(DashboardUpdateEvent::MonocoqueSimWindDevice)
+                .boxed(),
+            telemetry_status_stream()
+                .map(DashboardUpdateEvent::TelemetryStatus)
+                .boxed(),
         ];
 
         Ok(futures_util::stream::select_all(
@@ -660,5 +755,90 @@ impl SubscriptionRoot {
                 .into_iter()
                 .chain(admin),
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::typiql_types::build_typiql_schema;
+    use typiql_adapter_json::JsonAdapter;
+
+    #[test]
+    fn telemetry_interval_keeps_the_old_whole_millisecond_ticks() {
+        assert_eq!(telemetry_interval(60), Duration::from_millis(16));
+        assert_eq!(telemetry_interval(30), Duration::from_millis(33));
+        // Clamped to 1..=120Hz.
+        assert_eq!(telemetry_interval(0), Duration::from_millis(1000));
+        assert_eq!(telemetry_interval(1000), Duration::from_millis(8));
+    }
+
+    #[test]
+    fn telemetry_status_without_a_frame_is_off() {
+        let status = TelemetryStatus::of(None);
+        assert_eq!(status.sim_status, SimStatus::Off);
+        assert!(status.car.is_empty() && status.track.is_empty());
+    }
+
+    async fn next(
+        events: &mut (impl Stream<Item = async_graphql::Response> + Unpin),
+    ) -> async_graphql::Response {
+        tokio::time::timeout(Duration::from_secs(5), events.next())
+            .await
+            .expect("an event within 5s")
+            .expect("the stream to stay open")
+    }
+
+    /// The hub's merged subscription, end to end against a real schema: it
+    /// opens with the current telemetry status, and a device row written
+    /// through the generated CRUD arrives on it as its `<Type>Changed` event
+    /// — the event the LEDs page used to hold a subscription of its own for.
+    #[test]
+    fn dashboard_updates_carries_status_and_device_changes() {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let dir = std::env::temp_dir().join(format!("hub-test-{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir_all(&dir).unwrap();
+            let mut adapters: AdapterMap = std::collections::HashMap::new();
+            adapters.insert("default", Arc::new(JsonAdapter::new(dir.clone())) as Arc<dyn TypiQLAdapter>);
+            adapters.insert(
+                "duckdb",
+                Arc::new(typiql_adapter_duckdb::DuckDbAdapter::new(dir.join("r.duckdb")).unwrap())
+                    as Arc<dyn TypiQLAdapter>,
+            );
+            adapters.insert("logs", Arc::new(JsonAdapter::new(dir.join("logs"))) as Arc<dyn TypiQLAdapter>);
+            let schema = build_typiql_schema(adapters);
+
+            let mut events = schema.execute_stream(
+                "subscription { dashboardUpdates(includeTelemetry: false, includeNightClock: false, \
+                 includeAmbientColor: false) { __typename \
+                 ... on TelemetryStatus { simStatus } \
+                 ... on MonocoqueLedsDeviceChanged { operationName value { id devpath } } } }",
+            );
+            let first = next(&mut events).await;
+            assert!(first.errors.is_empty(), "{:?}", first.errors);
+            let first = first.data.into_json().unwrap();
+            assert_eq!(first["dashboardUpdates"]["__typename"], "TelemetryStatus");
+
+            let added = schema
+                .execute(
+                    "mutation { addMonocoqueLedsDevice(values: { devpath: \"/dev/hub-test\", \
+                     baud: 115200, numLeds: 6, startLed: 0, endLed: 5, config: \"\" }) { id } }",
+                )
+                .await;
+            assert!(added.errors.is_empty(), "{:?}", added.errors);
+
+            let changed = loop {
+                let event = next(&mut events).await.data.into_json().unwrap();
+                if event["dashboardUpdates"]["__typename"] == "MonocoqueLedsDeviceChanged" {
+                    break event;
+                }
+            };
+            assert_eq!(changed["dashboardUpdates"]["value"]["devpath"], "/dev/hub-test");
+            let _ = std::fs::remove_dir_all(&dir);
+        });
     }
 }

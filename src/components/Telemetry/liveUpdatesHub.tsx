@@ -25,9 +25,22 @@ export type LiveUpdateTypename =
   | 'SoundDeviceProfileChanged'
   | 'LedsDeviceProfileChanged'
   | 'ShiftLightProfileChanged'
-  | 'SimWindDeviceProfileChanged';
+  | 'SimWindDeviceProfileChanged'
+  | 'ShakerChannelChanged'
+  | 'ShakerDspChannelChanged'
+  | 'LfeChannelChanged'
+  | 'MonocoqueLedsDeviceChanged'
+  | 'MonocoqueShiftLightChanged'
+  | 'MonocoqueSimWindDeviceChanged'
+  | 'TelemetryStatus';
 
 type Listener = (event: any) => void;
+
+// Events that describe current state rather than a change, and that the
+// backend sends only when that state changes. The hub keeps the latest of
+// each and hands it to a listener as soon as it registers, so a component
+// mounted after the last change still knows the current state.
+const STATE_TYPENAMES: ReadonlySet<LiveUpdateTypename> = new Set<LiveUpdateTypename>(['TelemetryStatus']);
 
 // What a consumer needs the shared connection to carry. The optional members
 // of dashboardUpdates are off unless something asks for them, because each is
@@ -37,7 +50,17 @@ export interface LiveUpdatesDemand {
   includeNightClock?: boolean;
   includeAmbientColor?: boolean;
   includeAcTelemetry?: boolean;
+  // Every TelemetryFrame field on TelemetryEvent, not just the ones the
+  // dashboards bind to. Implies includeTelemetry. Only the live recording
+  // chart wants it.
+  includeFullTelemetryFrame?: boolean;
+  // How often this consumer wants telemetry frames, when it asks for them
+  // (default 60, the dashboards' rate). The connection ticks at the highest
+  // rate any telemetry consumer asks for.
+  telemetryHz?: number;
 }
+
+const DEFAULT_TELEMETRY_HZ = 60;
 
 export interface LiveUpdatesHub {
   subscribe: (typename: LiveUpdateTypename, listener: Listener) => () => void;
@@ -105,17 +128,21 @@ const LiveUpdatesSubscriber: React.FC<{
   includeNightClock: boolean;
   includeAmbientColor: boolean;
   includeAcTelemetry: boolean;
+  includeFullTelemetryFrame: boolean;
+  telemetryHz: number;
   skip: boolean;
   listenersRef: React.MutableRefObject<Map<LiveUpdateTypename, Set<Listener>>>;
+  latestRef: React.MutableRefObject<Map<LiveUpdateTypename, any>>;
   onDown: () => void;
-}> = ({ includeTelemetry, includeNightClock, includeAmbientColor, includeAcTelemetry, skip, listenersRef, onDown }) => {
+}> = ({ includeTelemetry, includeNightClock, includeAmbientColor, includeAcTelemetry, includeFullTelemetryFrame, telemetryHz, skip, listenersRef, latestRef, onDown }) => {
   useSubscription(DASHBOARD_UPDATES_SUB, {
     skip,
     fetchPolicy: 'no-cache',
-    variables: { includeTelemetry, includeNightClock, includeAmbientColor, includeAcTelemetry },
+    variables: { includeTelemetry, includeNightClock, includeAmbientColor, includeAcTelemetry, includeFullTelemetryFrame, telemetryHz },
     onData: ({ data }: any) => {
       const event = data.data?.dashboardUpdates;
       if (!event) return;
+      if (STATE_TYPENAMES.has(event.__typename)) latestRef.current.set(event.__typename, event);
       listenersRef.current.get(event.__typename)?.forEach(l => l(event));
     },
     onError: onDown,
@@ -154,6 +181,7 @@ export function useLiveUpdatesHub(opts: {
     skip = false,
   } = opts;
   const listenersRef = useRef(new Map<LiveUpdateTypename, Set<Listener>>());
+  const latestRef = useRef(new Map<LiveUpdateTypename, any>());
 
   // Live demands, plus a counter to force the recompute below when the set
   // changes. The set itself is a ref so registering never re-renders the
@@ -177,6 +205,8 @@ export function useLiveUpdatesHub(opts: {
       listenersRef.current.set(typename, set);
     }
     set.add(listener);
+    const latest = latestRef.current.get(typename);
+    if (latest !== undefined) listener(latest);
     return () => { set!.delete(listener); };
   }, []);
 
@@ -194,8 +224,15 @@ export function useLiveUpdatesHub(opts: {
   // unmounts, or changes what it needs, not per frame.
   const flags = useMemo(() => {
     const demands = [...demandsRef.current];
+    const telemetryDemands = demands.filter(d => d.includeTelemetry || d.includeFullTelemetryFrame);
+    const telemetryHz = Math.max(
+      includeTelemetry ? DEFAULT_TELEMETRY_HZ : 0,
+      ...telemetryDemands.map(d => d.telemetryHz ?? DEFAULT_TELEMETRY_HZ),
+    );
     return {
-      telemetry: includeTelemetry || demands.some(d => d.includeTelemetry),
+      telemetryHz: telemetryHz > 0 ? telemetryHz : DEFAULT_TELEMETRY_HZ,
+      telemetry: includeTelemetry || demands.some(d => d.includeTelemetry || d.includeFullTelemetryFrame),
+      fullTelemetryFrame: demands.some(d => d.includeFullTelemetryFrame),
       nightClock: includeNightClock || demands.some(d => d.includeNightClock),
       ambientColor: includeAmbientColor || demands.some(d => d.includeAmbientColor),
       acTelemetry: includeAcTelemetry || demands.some(d => d.includeAcTelemetry),
@@ -220,8 +257,11 @@ export function useLiveUpdatesHub(opts: {
       includeNightClock={flags.nightClock}
       includeAmbientColor={flags.ambientColor}
       includeAcTelemetry={flags.acTelemetry}
+      includeFullTelemetryFrame={flags.fullTelemetryFrame}
+      telemetryHz={flags.telemetryHz}
       skip={skip || subscriptionDown}
       listenersRef={listenersRef}
+      latestRef={latestRef}
       onDown={onDown}
     />
   );
@@ -279,11 +319,19 @@ export function useLiveUpdatesDemand(
     includeNightClock = false,
     includeAmbientColor = false,
     includeAcTelemetry = false,
+    includeFullTelemetryFrame = false,
+    telemetryHz,
   } = demand;
 
   useEffect(() => {
     if (!activeHub) return;
-    if (!includeTelemetry && !includeNightClock && !includeAmbientColor && !includeAcTelemetry) {
+    if (
+      !includeTelemetry &&
+      !includeNightClock &&
+      !includeAmbientColor &&
+      !includeAcTelemetry &&
+      !includeFullTelemetryFrame
+    ) {
       return;
     }
     return activeHub.request({
@@ -291,8 +339,10 @@ export function useLiveUpdatesDemand(
       includeNightClock,
       includeAmbientColor,
       includeAcTelemetry,
+      includeFullTelemetryFrame,
+      telemetryHz,
     });
-  }, [activeHub, includeTelemetry, includeNightClock, includeAmbientColor, includeAcTelemetry]);
+  }, [activeHub, includeTelemetry, includeNightClock, includeAmbientColor, includeAcTelemetry, includeFullTelemetryFrame, telemetryHz]);
 }
 
 // Convenience component for the common case: open a hub and provide it to

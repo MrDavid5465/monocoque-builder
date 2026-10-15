@@ -70,9 +70,14 @@ vitest's glob — pre-existing, not a regression. Everything else should pass.
   consumer. See `set_car_photo` / `night_clock.rs` for the pattern.
 - **Live updates go through one hub.** `LiveUpdatesProvider` at the app root
   owns the single `dashboardUpdates` subscription; consumers declare what it
-  must carry with `useLiveUpdatesDemand` and listen with `useHubListener`.
-  Don't open a new subscription — the browser's per-origin connection limit is
-  a real constraint here, and exhausting it silently stalls unrelated requests.
+  must carry with `useLiveUpdatesDemand` and listen with `useHubListener`
+  (or `useHubCacheSync` to keep Apollo's cache in step with a `<Type>Changed`
+  event, as a plain `useSubscription` used to). Don't open a new subscription
+  — the browser's per-origin connection limit is a real constraint here, and
+  exhausting it silently stalls unrelated requests. An event the hub doesn't
+  carry yet gets a variant in the backend's `DashboardUpdateEvent` (plus an
+  include flag if it's high-rate). ESLint and `hubOnlySubscriptions.test.ts`
+  fail on any `useSubscription` outside the hub.
 - **Companion services need dev commands.** In a debug build, a missing
   `MONOCOQUE_BUILDER_*_DEV_COMMAND` is a *refusal*, not a fallback, so simd /
   monocoque / huenicorn simply won't start. Copy `.env.local.example` to

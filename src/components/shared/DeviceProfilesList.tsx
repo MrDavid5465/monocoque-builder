@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { DocumentNode } from 'graphql';
-import { useQuery, useMutation, useSubscription } from '@apollo/client/react';
+import { useQuery, useMutation } from '@apollo/client/react';
+import { useHubCacheSync } from '../Telemetry/hubCacheSync';
 import { useNavigate, useLocation } from 'react-router';
 import { getTheme } from '../../lib/denim-fabric/lib';
 import { confirmAsync } from '../../lib/denim-fabric/shared/ConfirmDialog';
@@ -39,9 +40,9 @@ const DeviceProfilesList: React.FC<DeviceProfilesListConfig & { dispatcher?: any
   const base = pathname.replace(/\/$/, '');
 
   const { data: profilesData } = useQuery(getProfilesQuery);
-  useSubscription(profileChangedSubscription);
+  useHubCacheSync(profileChangedSubscription);
   const { data: devicesData } = useQuery(getDevicesQuery);
-  useSubscription(deviceChangedSubscription);
+  useHubCacheSync(deviceChangedSubscription);
 
   const [removeProfile] = useMutation(removeProfileMutation, { refetchQueries: [{ query: getProfilesQuery }] });
   const [addDevice] = useMutation(createDeviceMutation, { refetchQueries: [{ query: getDevicesQuery }] });

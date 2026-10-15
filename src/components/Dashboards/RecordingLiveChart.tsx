@@ -1,8 +1,8 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { LineChart } from '@fluentui/react-charting';
 import { Stack, DefaultButton, useMutation } from '../../lib/denim-fabric/lib';
-import { useSubscription } from '@apollo/client/react';
-import { RECORDING_LIVE_TELEMETRY_SUB, STOP_RECORDING } from '../Telemetry/Recordings/queries';
+import { STOP_RECORDING } from '../Telemetry/Recordings/queries';
+import { useLiveTelemetryFrame } from '../Telemetry/useLiveTelemetry';
 import { buildTimeSeries, collectFieldNames, flattenLiveFrame, ChartPoint } from '../Telemetry/Recordings/chartUtils';
 
 const PALETTE = [
@@ -22,14 +22,16 @@ const WINDOW_FRAMES = 500;
 // same shape as RecordingChart's own windowed view but driven by arrival
 // order instead of a user-controlled slider.
 const RecordingLiveChart: React.FC<{ sampleRateHz: number }> = ({ sampleRateHz }) => {
-  const { data } = useSubscription(RECORDING_LIVE_TELEMETRY_SUB);
   const [stopRecording, { loading: stopping }] = useMutation(STOP_RECORDING);
 
   const framesRef = useRef<any[]>([]);
   const [count, setCount] = useState(0);
 
-  useEffect(() => {
-    const frame = (data as any)?.telemetry;
+  // Every TelemetryFrame field (`full`), on the shared hub, at the ~30Hz the
+  // standalone `telemetry` subscription this used to hold ran at. Appended
+  // in the callback rather than from rendered state, so frames that arrive
+  // within one render batch are all kept.
+  const onFrame = useCallback((frame: any) => {
     if (!frame) return;
     // Append every tick, same as the backend's own recorder (telemetry/
     // recording.rs's start()) pushes a frame on every interval tick it gets
@@ -39,7 +41,8 @@ const RecordingLiveChart: React.FC<{ sampleRateHz: number }> = ({ sampleRateHz }
     flat.frameIndex = framesRef.current.length;
     framesRef.current.push(flat);
     setCount(framesRef.current.length);
-  }, [data]);
+  }, []);
+  useLiveTelemetryFrame({ full: true, rateHz: 30, onFrame });
 
   const windowPosition = Math.max(count - WINDOW_FRAMES, 0);
   const windowFrames = useMemo(
