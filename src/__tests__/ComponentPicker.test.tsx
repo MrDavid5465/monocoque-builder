@@ -6,7 +6,7 @@ vi.mock('@apollo/client/react', () => ({
   useQuery: vi.fn().mockReturnValue({ data: undefined, loading: false }),
 }));
 
-vi.mock('../lib/denim/lib', () => ({
+vi.mock('../lib/denim-fabric/lib', () => ({
   Stack: ({ children, horizontal, ...rest }: any) =>
     horizontal ? <div data-dir="h" {...rest}>{children}</div> : <div {...rest}>{children}</div>,
   IconButton: ({ onClick, title, iconProps }: any) => (

@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { IconButton, useMutation } from '../../lib/denim/lib';
+import { IconButton, useMutation } from '../../lib/denim-fabric/lib';
 import { GET_RECORDINGS, IMPORT_RECORDING } from '../Telemetry/Recordings/queries';
 import { parseImportedCsv } from '../Telemetry/Recordings/chartUtils';
 

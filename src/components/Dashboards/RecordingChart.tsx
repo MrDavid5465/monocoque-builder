@@ -2,8 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import { LineChart } from '@fluentui/react-charting';
 import { Spinner } from '@fluentui/react';
-import { Stack, IconButton, PrimaryButton, DefaultButton, Modal, Form, useMutation } from '../../lib/denim/lib';
-import { confirmAsync } from '../../lib/denim/components/ConfirmDialog';
+import { Stack, IconButton, PrimaryButton, DefaultButton, Modal, Form, useMutation } from '../../lib/denim-fabric/lib';
+import { confirmAsync } from '../../lib/denim-fabric/shared/ConfirmDialog';
 import { useQuery, useApolloClient } from '@apollo/client/react';
 import { GET_RECORDING, GET_RECORDING_FRAMES_WINDOW, PLAY_RECORDING, STOP_PLAYBACK, CROP_RECORDING, RECORDING_STATUS } from '../Telemetry/Recordings/queries';
 import {

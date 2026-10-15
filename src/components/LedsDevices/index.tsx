@@ -5,7 +5,7 @@ import ReactiveAdmin from '../../lib/typical-admin-fabric';
 import LedsDeviceList from '../Shakers/LedsDevices';
 import DeviceProfilesList from '../shared/DeviceProfilesList';
 import { useDeviceProfileCard } from '../shared/useDeviceProfileCard';
-import { getTheme, Form, FormCard } from '../../lib/denim/lib';
+import { getTheme, Form, FormCard } from '../../lib/denim-fabric/lib';
 import {
   GET_PROFILES, ADD_PROFILE, REMOVE_PROFILE, PROFILE_CHANGED,
   profileResultKey, addProfileResultKey, STORAGE_KEY,
@@ -25,6 +25,8 @@ const profileSchema = {
 };
 const dispatcher = { list: GET_PROFILES, show: GET_PROFILES, new: ADD_PROFILE, edit: ADD_PROFILE, delete: REMOVE_PROFILE, subscribe: PROFILE_CHANGED };
 const name = { singular: 'LedsDeviceProfile', plural: 'LedsDeviceProfiles' };
+// Display text for headings and confirms: `name` above is the GraphQL type stem.
+const labels = { singular: 'LED profile', plural: 'LED profiles' };
 
 const ProfilesList: React.FC<any> = (props) => (
   <DeviceProfilesList
@@ -94,7 +96,7 @@ const LedsMain: React.FC = () => {
 const LedsDevices: React.FC = () => (
   <Routes>
     <Route path="/profiles/:id/edit" element={<ProfileEdit />} />
-    <Route path="/profiles/*" element={<ReactiveAdmin dispatcher={dispatcher} name={name} schemaDefinition={profileSchema} components={{ list: ProfilesList }} />} />
+    <Route path="/profiles/*" element={<ReactiveAdmin dispatcher={dispatcher} name={name} labels={labels} schemaDefinition={profileSchema} components={{ list: ProfilesList }} />} />
     <Route path="/*" element={<LedsMain />} />
   </Routes>
 );

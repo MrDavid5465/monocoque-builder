@@ -1,7 +1,6 @@
 import React from 'react';
 import { useMutation, useLocation, useNavigate } from './lib';
 import { Name, IDispatcher, ITACallBacks } from './';
-import { confirmAsync } from '../denim/components/ConfirmDialog';
 
 interface Props {
   dispatcher: IDispatcher;
@@ -28,10 +27,11 @@ const Delete: React.FC<Props> = ({
     refetchQueries: [{ query: dispatcher.list }],
   });
 
-  async function handleSubmit() {
-    const response = await confirmAsync(
+  // Unstyled core: the native dialog. Styled variants (e.g.
+  // typical-admin-fabric) supply their own Delete with an in-app dialog.
+  function handleSubmit() {
+    const response = window.confirm(
       `Are you sure you'd like to delete this ${name.singular}?`,
-      { danger: true },
     );
     response && removeItem({ variables: { id } });
   }

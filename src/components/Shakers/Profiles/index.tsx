@@ -28,10 +28,14 @@ const profileSchema = {
   },
 };
 
+// Display text: `name` is the GraphQL type stem ("SoundDeviceProfile").
+const labels = { singular: 'Shaker profile', plural: 'Shaker profiles' };
+
 const ProfilesAdmin: React.FC = () => (
   <ReactiveAdmin
     dispatcher={dispatcher}
     name={name}
+    labels={labels}
     schemaDefinition={profileSchema}
     components={{ list: ProfilesList }}
   />

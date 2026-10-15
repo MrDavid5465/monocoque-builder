@@ -1,6 +1,6 @@
 import React from 'react';
 import { Label, Stack } from '@fluentui/react';
-import { Form } from '../../lib/denim/lib';
+import { Form } from '../../lib/denim-fabric/lib';
 import { TyreGrid } from '../shared/TyreGrid';
 import { useRowCommit } from '../../lib/per-form/useRowCommit';
 import { TYRE_SHORT } from './EffectRow';

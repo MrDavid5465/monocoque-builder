@@ -1,13 +1,13 @@
 import React, { useMemo, useState, useRef, useEffect } from 'react';
-import { Stack, IconButton, Icon, PrimaryButton, DefaultButton, getTheme, useQuery, Form } from '../../../lib/denim/lib';
+import { Stack, IconButton, Icon, PrimaryButton, DefaultButton, getTheme, useQuery, Form } from '../../../lib/denim-fabric/lib';
 import { ComponentNode, DashboardConfig, ComponentType } from '../../../types/dashboard';
 import { SequenceConfig, DEFAULT_SWEEP_CONFIG, DEFAULT_SINE_CONFIG } from './useTelemetryPlayback';
 import { getSchema, ALL_SCHEMAS } from './components/registry';
-import { confirmAsync } from '../../../lib/denim/components/ConfirmDialog';
+import { confirmAsync } from '../../../lib/denim-fabric/shared/ConfirmDialog';
 import { findNodeById, flattenNodes, isDescendantOf } from './components/utils';
 import { GET_DASH_GROUPS } from '../Groups/queries';
 import { Section } from '../../../lib/per-form';
-import { GamepadMapping } from '../../../lib/denim/lib/queries';
+import { GamepadMapping } from '../../../graphql/appSettings';
 import ComponentPicker, { PICKER_WIDTH } from './ComponentPicker';
 import { DashTemplate } from './useTemplates';
 import { DraggingBindingField, buildBindingFieldSchema, buildBindingInitialValues, reassembleBinding } from './components/telemetryBinding';

@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { Stack, useQuery, useMutation, Form, getTheme } from '../../lib/denim/lib';
+import { Stack, useQuery, useMutation, Form, getTheme } from '../../lib/denim-fabric/lib';
 import {
   GET_GAME_CONFIG,
   INSTALL_AC_TELEMETRY_APP,

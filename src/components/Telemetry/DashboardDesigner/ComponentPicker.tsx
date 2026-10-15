@@ -1,13 +1,13 @@
 import React, { useRef, useState } from 'react';
 import { useQuery } from '@apollo/client/react';
-import { Stack, IconButton, Icon, PrimaryButton, DefaultButton, getTheme } from '../../../lib/denim/lib';
+import { Stack, IconButton, Icon, PrimaryButton, DefaultButton, getTheme } from '../../../lib/denim-fabric/lib';
 import { DashboardConfig, ComponentNode, ComponentType } from '../../../types/dashboard';
 import { ALL_SCHEMAS, SPRITE_TYPES, FREEFORM_TYPES } from './components/registry';
 import { findNodeById } from './components/utils';
 import { DashTemplate, TemplateSprite } from './useTemplates';
 import { deepCopyNode, collectFileRefs } from './components/utils';
 import { GET_BUILTIN_TEMPLATES } from './queries';
-import { confirmAsync } from '../../../lib/denim/components/ConfirmDialog';
+import { confirmAsync } from '../../../lib/denim-fabric/shared/ConfirmDialog';
 
 interface SpriteFile {
   file: string;

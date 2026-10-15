@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useQuery, useMutation } from '@apollo/client/react';
-import { Stack, PrimaryButton, Dropdown } from '../../../lib/denim/lib';
+import { Stack, PrimaryButton, Dropdown } from '../../../lib/denim-fabric/lib';
 import {
   CAPTURE_CAR_PHOTOS_360, CAR_CAPTURE_STATUS, CarCaptureStatus,
   AC_CAPTURE_SUPPORT, AcCaptureSupport, UPDATE_CAR,

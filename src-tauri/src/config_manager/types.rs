@@ -15,6 +15,11 @@ pub struct GqlAppEntry {
     pub front_end: String,
     pub default_route: String,
     pub links: Vec<GqlAppLink>,
+    /// Sidebar group heading (e.g. "RIG"); none lists the app under the
+    /// shell's default group.
+    pub group: Option<String>,
+    /// Fluent UI icon name shown next to the app in the sidebar.
+    pub icon: Option<String>,
 }
 
 /// One Huenicorn channel's day/night gamma pair, as pushed to that
@@ -217,6 +222,12 @@ pub struct AppEntry {
     pub front_end: String,
     pub default_route: String,
     pub links: Vec<AppLink>,
+    /// Sidebar group heading (e.g. "RIG"); see `applications()`.
+    #[serde(default)]
+    pub group: Option<String>,
+    /// Fluent UI icon name (MDL2), e.g. "Speakers".
+    #[serde(default)]
+    pub icon: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

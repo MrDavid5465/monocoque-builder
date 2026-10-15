@@ -1,173 +1,109 @@
-import gql from 'graphql-tag';
+import { gql } from '@apollo/client';
+import type { DocumentNode } from 'graphql';
+
+// The GraphQL contract Denim needs from a backend. Every part is optional:
+// see README, "Server contract", and buildMyQuery below. This file has no
+// UI-kit imports: it is part of the headless core.
 
 export interface IApplication {
+  /** Label in the nav (waffle panel, header, sidebar). */
   name: string;
+  /** URL segment: the application owns `/<path>/*`. */
   path: string;
+  /** `/<path>` redirects to `/<path>/<defaultRoute>`; "" for none. */
   defaultRoute: string;
+  /** Key into the shell's `components` map. */
   frontEnd: string;
+  /** Sub-pages, `/<path>/<link.path>`. */
   links: Array<ILink>;
+  /**
+   * Optional heading the application is listed under in a grouped nav (e.g.
+   * "RIG", "LIGHTING"). Groups appear in the order their first application
+   * appears; applications without one go under the shell's default group.
+   * Skins without groups ignore it.
+   */
+  group?: string | null;
+  /**
+   * Optional icon name. The core treats it as an opaque string; denim-fabric
+   * reads it as a Fluent UI icon name (e.g. "Devices3", "Lightbulb").
+   */
+  icon?: string | null;
 }
 export interface ILink {
   path: string;
   text: string;
 }
-const GAMEPAD_MAPPINGS_FRAGMENT = gql`
-  fragment GamepadMappingsFields on AppSettings {
-    gamepadMappings {
-      id
-      name
-      mappingType
-      index
-    }
+
+/** Fields Denim selects on each `my.applications` entry. */
+export const APPLICATION_FIELDS = `
+  path
+  defaultRoute
+  name
+  links {
+    path
+    text
   }
+  frontEnd
 `;
 
-const MY = gql`
-  query my {
-    my {
-      applications {
-        path
-        defaultRoute
-        name
-        links {
-          path
-          text
-        }
-        frontEnd
-      }
-      settings {
-        launchPage
-        theme
-        fontSize
-        deviceMap
-        typiqlDataDir
-        steerMaxDeg
-        setupComplete
-        shakerDspEnabled
-        shakerLfeSourceDevice
-        shakerLfeLpfHz
-        huenicornEnabled
-        ambientTintIntensity
-        ambientPrimaryChannel
-        ambientSaturationBoostDay
-        ambientSaturationBoostNight
-        ambientChannelGamma {
-          channelId
-          day
-          night
-        }
-        simdCommand
-        monocoqueCommand
-        huenicornCommand
-        debugBuild
-        ...GamepadMappingsFields
-      }
-    }
-  }
-  ${GAMEPAD_MAPPINGS_FRAGMENT}
+/**
+ * Optional `Application` fields a shell may also select, e.g. "group icon".
+ * Not in APPLICATION_FIELDS because a backend that lacks them would reject
+ * the whole query; pass them through `<DenimProvider applicationFields>`.
+ */
+export const OPTIONAL_APPLICATION_FIELDS = 'group icon';
+
+/** Fields Denim itself selects on `my.settings` (settingsSource="server"). */
+export const DENIM_SETTINGS_FIELDS = `
+  launchPage
+  theme
+  fontSize
 `;
-const UPDATE_SETTINGS = gql`
-  mutation updateSettings($settings: AppSettingsInput) {
+
+export interface IMyQueryOptions {
+  /** Select `my.applications` (false when <Denim applications={...}> is given). */
+  applications?: boolean;
+  /** Select `my.settings` (settingsSource="server"). */
+  settings?: boolean;
+  /** Extra AppSettings fields an app's settings tabs read, e.g. "deviceName units". */
+  settingsFields?: string;
+  /** Extra Application fields to select, e.g. "group icon". */
+  applicationFields?: string;
+}
+
+/**
+ * Builds the `my` query for the parts of the contract an app uses. With
+ * neither part there is nothing to ask, and <Denim> doesn't query at all.
+ */
+export function buildMyQuery({
+  applications = true,
+  settings = false,
+  settingsFields = '',
+  applicationFields = '',
+}: IMyQueryOptions = {}): DocumentNode {
+  const parts = [
+    applications ? `applications { ${APPLICATION_FIELDS} ${applicationFields} }` : '',
+    settings ? `settings { ${DENIM_SETTINGS_FIELDS} ${settingsFields} }` : '',
+  ]
+    .filter(Boolean)
+    .join('\n');
+  return gql(`query my { my { ${parts || '__typename'} } }`);
+}
+
+const MY = buildMyQuery();
+
+// `$settings` is declared non-null so this document is valid against both a
+// nullable `updateSettings(settings: AppSettingsInput)` and a non-null one.
+// Only `__typename` is selected, so the mutation may return any object type;
+// Denim refetches `my` afterwards rather than reading the result.
+export const UPDATE_SETTINGS = gql`
+  mutation updateSettings($settings: AppSettingsInput!) {
     updateSettings(settings: $settings) {
-      settings {
-        launchPage
-        theme
-        fontSize
-        deviceMap
-        typiqlDataDir
-        steerMaxDeg
-        setupComplete
-        shakerDspEnabled
-        shakerLfeSourceDevice
-        shakerLfeLpfHz
-        huenicornEnabled
-        ambientTintIntensity
-        ambientPrimaryChannel
-        ambientSaturationBoostDay
-        ambientSaturationBoostNight
-        ambientChannelGamma {
-          channelId
-          day
-          night
-        }
-        simdCommand
-        monocoqueCommand
-        huenicornCommand
-        debugBuild
-        ...GamepadMappingsFields
-      }
+      __typename
     }
   }
-  ${GAMEPAD_MAPPINGS_FRAGMENT}
 `;
-export interface GamepadMapping {
-  id: string;
-  name: string;
-  /** "button" or "axis" */
-  mappingType: string;
-  /** Button 0–31 or axis 0–5 */
-  index: number;
-}
 
-/** One Huenicorn channel's day/night gamma pair — see ChannelGamma in
- *  src-tauri/src/config_manager/types.rs for what the numbers mean. */
-export interface IChannelGamma {
-  channelId: number;
-  day: number;
-  night: number;
-}
-
-export interface IUserSettingInput {
-  launchPage: string;
-  theme: string;
-  fontSize: number;
-  deviceMap: Record<string, string>;
-  typiqlDataDir?: string;
-  steerMaxDeg?: number;
-  setupComplete?: boolean;
-  gamepadMappings?: GamepadMapping[];
-  shakerDspEnabled?: boolean;
-  shakerLfeSourceDevice?: string;
-  shakerLfeLpfHz?: number;
-  huenicornEnabled?: boolean;
-  ambientTintIntensity?: number;
-  ambientPrimaryChannel?: number;
-  ambientSaturationBoostDay?: number;
-  ambientSaturationBoostNight?: number;
-  ambientChannelGamma?: IChannelGamma[];
-  simdCommand?: string;
-  monocoqueCommand?: string;
-  huenicornCommand?: string;
-  /** Dev-build overrides, used instead of the commands above in a debug
-   *  build and ignored in a release build - see service_commands.rs. */
-}
-export interface ISettings {
-  launchPage: string;
-  theme: string;
-  fontSize: number;
-  deviceMap: Record<string, string>;
-  typiqlDataDir?: string;
-  steerMaxDeg?: number;
-  setupComplete?: boolean;
-  gamepadMappings?: GamepadMapping[];
-  shakerDspEnabled?: boolean;
-  shakerLfeSourceDevice?: string;
-  shakerLfeLpfHz?: number;
-  huenicornEnabled?: boolean;
-  ambientTintIntensity?: number;
-  ambientPrimaryChannel?: number;
-  ambientSaturationBoostDay?: number;
-  ambientSaturationBoostNight?: number;
-  ambientChannelGamma?: IChannelGamma[];
-  simdCommand?: string;
-  monocoqueCommand?: string;
-  huenicornCommand?: string;
-  /** Dev-build overrides, used instead of the commands above in a debug
-   *  build and ignored in a release build - see service_commands.rs. */
-  /** Read-only: true when the backend serving this is a debug build, i.e.
-   *  the dev commands above are the ones actually in effect. */
-  debugBuild?: boolean;
-}
 export interface IAppNav {
   text: string;
   path: string;
@@ -176,12 +112,16 @@ export interface IAppNav {
 
 export interface IUser {
   applications: Array<IApplication>;
-  settings: Partial<ISettings>;
+  settings?: Record<string, any> | null;
 }
 
 export interface IMy {
   my: Partial<IUser>;
 }
+
+// File helpers, kept for apps that use them. Denim itself never sends these
+// (Photo hands the image to its `submit` prop), so a backend doesn't need
+// them unless the app does.
 export interface IFile {
   id: string;
   name: string;
@@ -208,24 +148,6 @@ const GET_FILE = gql`
       name
       file
     }
-  }
-`;
-
-// Whether the backend can create the virtual gamepad (i.e. open
-// /dev/uinput). Deliberately a GraphQL query rather than a Tauri command:
-// the backend is the process that would actually open the device, so it's
-// the only one that can answer honestly, and going through typiql means the
-// browser build gets the same answer as the desktop one. Same reasoning
-// already applied to gamepadButton/gamepadAxis — see gamepad.rs.
-export const GAMEPAD_UDEV_STATUS = gql`
-  query gamepadUdevStatus {
-    gamepadUdevStatus
-  }
-`;
-
-export const SETUP_GAMEPAD_UDEV = gql`
-  mutation setupGamepadUdev {
-    setupGamepadUdev
   }
 `;
 

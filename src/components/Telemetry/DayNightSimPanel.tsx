@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { DefaultButton, Stack, TextField, Toggle, Separator, getTheme, useQuery, useMutation, Form } from '../../lib/denim/lib';
+import { DefaultButton, Stack, TextField, Toggle, Separator, getTheme, useQuery, useMutation, Form } from '../../lib/denim-fabric/lib';
 import {
   GET_NIGHT_MODES,
   ADD_NIGHT_MODE,

@@ -1,9 +1,9 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { useQuery, useMutation, useSubscription } from '@apollo/client/react';
 import { PrimaryButton } from '@fluentui/react';
-import { getTheme, Form, FormCard } from '../../lib/denim/lib';
-import settingsDispatcher from '../../lib/denim/lib/queries';
-import { confirmAsync } from '../../lib/denim/components/ConfirmDialog';
+import { getTheme, Form, FormCard } from '../../lib/denim-fabric/lib';
+import settingsDispatcher from '../../graphql/appSettings';
+import { confirmAsync } from '../../lib/denim-fabric/shared/ConfirmDialog';
 import { GET_ITEMS, UPDATE_ITEM, CREATE_ITEM, REMOVE_ITEM } from './queries';
 import { SHAKER_UPDATES } from './shakerUpdatesQueries';
 import { EffectRow, EFFECTS, EFFECT_LABELS, ShakerRec } from './EffectRow';

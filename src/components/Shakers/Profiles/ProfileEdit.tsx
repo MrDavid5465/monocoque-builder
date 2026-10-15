@@ -1,7 +1,7 @@
 import React from 'react';
 import { useParams, useNavigate } from 'react-router';
 import { useQuery } from '@apollo/client/react';
-import { getTheme } from '../../../lib/denim/lib';
+import { getTheme } from '../../../lib/denim-fabric/lib';
 import ShakerMatrix from '../ShakerMatrix';
 import { GET_PROFILE } from './queries';
 

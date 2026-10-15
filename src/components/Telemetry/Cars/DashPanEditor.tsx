@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation } from '@apollo/client/react';
-import { Stack, Form, IconButton, DefaultButton, getTheme } from '../../../lib/denim/lib';
+import { Stack, Form, IconButton, DefaultButton, getTheme } from '../../../lib/denim-fabric/lib';
 import { GET_DASHBOARDS } from '../DashboardDesigner/queries';
 import Photo360CrossfadeViewer from '../DashboardDesigner/components/Photo360CrossfadeViewer';
 import { captureCanvasScreenshot } from '../DashboardDesigner/useScreenshot';
@@ -15,7 +15,7 @@ import {
   REMOVE_CAR_DASH_PAN,
   CarDashPanRecord,
 } from '../carDashPanQueries';
-import { confirmAsync } from '../../../lib/denim/components/ConfirmDialog';
+import { confirmAsync } from '../../../lib/denim-fabric/shared/ConfirmDialog';
 
 const THUMB_W = 280;
 

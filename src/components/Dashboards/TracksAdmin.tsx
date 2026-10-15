@@ -1,6 +1,5 @@
 import React from 'react';
-import ReactiveAdmin from '../../lib/typical-admin-fabric';
-import SwitchableList from '../../lib/typical-admin-fabric/SwitchableList';
+import { AdminMasterDetail } from '../../lib/denim-fabric';
 import TrackEdit from './TrackEdit';
 import { GET_TRACK_LOCATIONS, ADD_TRACK_LOCATION, REMOVE_TRACK_LOCATION } from '../Telemetry/trackLocationQueries';
 
@@ -18,28 +17,26 @@ const trackSchema = {
 };
 const schemaDefinition = { list: { columns: trackSchema, buttons: { add: true } }, show: {}, edit: {}, new: {} };
 
-// Table view (no natural thumbnail for a track location), same shape as
-// GroupsAdmin.
+// Module level: AdminMasterDetail memoizes on them.
+const labels = { singular: 'Track', plural: 'Tracks' };
+const listColumns = ['name'];
+const listProps = { queryResultKey: 'getTrackLocations', idField: 'id', columnSelectable: true, storageKey: 'tracks-columns' };
+
+// List | detail (denim-fabric's AdminMasterDetail): the list stays on screen
+// beside the open record, and TrackEdit renders show/edit/new in the detail
+// pane (a phone shows one pane at a time, with a back bar). Selection is the
+// URL, so deep links (/dashboards/tracks/<id>/show) keep working.
+// queryResultKey: List defaults it to `get${name.plural}`, which is not the
+// resolver's name here (it rendered an empty table once for that reason).
 const TracksAdmin: React.FC = () => (
-  <ReactiveAdmin
+  <AdminMasterDetail
     dispatcher={dispatcher}
     name={name}
+    labels={labels}
     schemaDefinition={schemaDefinition}
+    listColumns={listColumns}
+    listProps={listProps}
     components={{
-      list: (props: any) => (
-        <SwitchableList
-          {...props}
-          // Type name is TrackLocation (query getTrackLocations) but the
-          // display name here is "Track"/"Tracks" — SwitchableList defaults
-          // to `get${name.plural}` ("getTracks"), which doesn't exist.
-          queryResultKey="getTrackLocations"
-          titleField="name"
-          idField="id"
-          defaultView="list"
-          columnSelectable
-          storageKey="tracks-columns"
-        />
-      ),
       show: TrackEdit,
       edit: TrackEdit,
       new: TrackEdit,

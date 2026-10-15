@@ -20,6 +20,7 @@
     "@apollo/react-hooks": "^4.0.0",
     "@fluentui/react": "^8.125.6",
     "@fluentui/react-charting": "^5.25.11",
+    "@fluentui/react-motion": "^9.16.4",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-opener": "^2",
     "@types/react-router": "^5.1.20",

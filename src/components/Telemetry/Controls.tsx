@@ -18,7 +18,7 @@ const blinkClass = mergeStyles({
   animation: `${blink} 1s ease-in-out infinite`,
 });
 
-type DotMode = 'recording' | 'playing' | 'active' | 'idle';
+export type DotMode = 'recording' | 'playing' | 'active' | 'idle';
 
 // Priority order when more than one is true at once: an in-progress
 // recording is the most consequential state to surface globally (it's
@@ -31,7 +31,7 @@ const MODE_COLOR: Record<DotMode, string> = {
   idle: '#666',
 };
 
-const MODE_TITLE: Record<DotMode, string> = {
+export const MODE_TITLE: Record<DotMode, string> = {
   recording: 'Recording in progress',
   playing: 'Playing back a recording',
   active: 'Telemetry active',
@@ -62,7 +62,16 @@ const StatusDot: React.FC<{ mode: DotMode }> = ({ mode }) => (
   </div>
 );
 
-const TelemetryControls: React.FC = () => {
+interface TelemetryControlsProps {
+  /** Receives the current mode, for a host that shows it elsewhere (the
+   *  sidebar shell shows it as the Dashboards app's status dot). */
+  onMode?: (mode: DotMode) => void;
+  /** Runs the side effects (car/track registration, the hub listener)
+   *  without drawing the dot itself. */
+  hideDot?: boolean;
+}
+
+const TelemetryControls: React.FC<TelemetryControlsProps> = ({ onMode, hideDot }) => {
   const onDashRoute = !!useMatch('/dashboards/:name/show');
   const { car, track, simStatus } = useLiveTelemetry(onDashRoute);
   const isActive = simStatus === 'Active';
@@ -99,6 +108,9 @@ const TelemetryControls: React.FC = () => {
   const isRecording = liveStatus?.isRecording ?? !!(statusData as any)?.recordingStatus?.isRecording;
   const isPlaying = liveStatus?.isPlaying ?? !!(statusData as any)?.recordingStatus?.isPlaying;
   const mode: DotMode = isRecording ? 'recording' : isPlaying ? 'playing' : isActive ? 'active' : 'idle';
+  useEffect(() => {
+    onMode?.(mode);
+  }, [mode, onMode]);
 
   const [registerCar] = useMutation(REGISTER_CAR, {
     refetchQueries: [{ query: GET_KNOWN_CARS }],
@@ -124,7 +136,7 @@ const TelemetryControls: React.FC = () => {
     }
   }, [track, simStatus, onDashRoute, registerTrack]);
 
-  return <>{ownHubSubscriber}<StatusDot mode={mode} /></>;
+  return <>{ownHubSubscriber}{!hideDot && <StatusDot mode={mode} />}</>;
 };
 
 export default TelemetryControls;

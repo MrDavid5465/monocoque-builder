@@ -1,34 +1,27 @@
-import React, { useEffect } from "react";
+import React, { useCallback, useContext, useEffect, useState } from "react";
 import "./App.css";
 
 import Logo from "./Logo";
-import { THEMES } from "./lib/themes";
-import { Link, Navigate } from "react-router-dom";
-import Denim, {
-  getStyle as getDenimStyle,
-} from "./lib/denim";
+import { Link, Navigate, useLocation } from "react-router-dom";
+import { SidebarShell } from "./lib/denim-fabric";
+import type { IApplication, IAppStatus } from "./lib/denim-fabric";
+import { ConfirmDialogHost } from "./lib/denim-fabric/shared/ConfirmDialog";
 
-import qStyles from "./lib/styles";
-import { getTheme, mergeStyleSets } from "@fluentui/react";
 import Shakers from "./components/Shakers"
 import LedsDevices from "./components/LedsDevices";
 import ShiftLights from "./components/ShiftLights";
 import SimWindDevices from "./components/SimWindDevices";
 import AmbientLights from "./components/AmbientLights";
 import Dashboards from "./components/Dashboards";
-import TelemetryControls from "./components/Telemetry/Controls";
+import TelemetryControls, { DotMode, MODE_TITLE } from "./components/Telemetry/Controls";
 import { useMutation, useQuery } from "@apollo/client/react";
 import { HEARTBEAT_CLIENT } from "./components/Telemetry/clientsQueries";
 import { getAppId } from "./graphql/client";
-import dispatcher, { IMy } from "./lib/denim/lib/queries";
+import dispatcher, { IMy, SETTINGS_FIELDS, APPLICATION_FIELDS } from "./graphql/appSettings";
 import SetupWizard from "./components/Onboarding/SetupWizard";
-import { ConfirmDialogHost } from "./lib/denim/components/ConfirmDialog";
+import { settingsTabs } from "./components/Settings/settingsTabs";
 import { LiveUpdatesProvider } from "./components/Telemetry/liveUpdatesHub";
 import { HubSubscriptionRouter } from "./components/Telemetry/hubSubscriptionRouter";
-
-export const getStyle = () => {
-  return { ...getDenimStyle(), ...mergeStyleSets(qStyles(getTheme())) };
-};
 
 const ClientHeartbeat: React.FC = () => {
   const [heartbeat] = useMutation(HEARTBEAT_CLIENT);
@@ -50,19 +43,54 @@ const SetupGuard: React.FC = () => {
   return <SetupWizard onComplete={() => setWizardDone(true)} />;
 };
 
-// Root landing ("/") — the user's own Launch Page setting wins when set,
-// otherwise falls back to the Dashboards app. Already resolved from cache by
-// the time this renders: Denim's own top-level `my` query gates rendering
-// any routes at all until it resolves, so this never shows a loading flash.
-const DefaultLanding: React.FC = () => {
-  const { data, loading } = useQuery<IMy>(dispatcher.my, { fetchPolicy: 'cache-first' });
-  if (loading || !data) return null;
-  const launchPage = data.my?.settings?.launchPage;
-  return <Navigate to={launchPage ? `/${launchPage}` : '/dashboards/default'} replace />;
+// ── Telemetry status ─────────────────────────────────────────────────────────
+//
+// The old top bar carried TelemetryControls on every non-kiosk page: a
+// recording/playback/live dot, plus car/track registration while the sim is
+// live. SidebarShell has no always-visible header slot (its footer only
+// shows in the full-width sidebar), so the controls run here, beside the
+// shell, and their dot becomes the Dashboards app's status dot in the
+// sidebar (visible in the full sidebar, the icon rail and the phone menu).
+const TelemetryModeContext = React.createContext<DotMode | undefined>(undefined);
+
+const MODE_TONE: Record<DotMode, IAppStatus['tone']> = {
+  recording: 'error',
+  playing: 'busy',
+  active: 'ok',
+  idle: 'off',
 };
 
+// Called by the shell once per application (a hook, so module level).
+function useMonocoqueAppStatus(app: IApplication): IAppStatus | undefined {
+  const mode = useContext(TelemetryModeContext);
+  if (app.path !== 'dashboards' || !mode) return undefined;
+  return { tone: MODE_TONE[mode], label: MODE_TITLE[mode] };
+}
+
+// Not on kiosk routes: the old header wasn't either, and a kiosk dashboard
+// runs its own telemetry stream (a second one would cost a connection).
+const TelemetryMonitor: React.FC<{ onMode: (mode: DotMode) => void }> = ({ onMode }) => {
+  const { pathname } = useLocation();
+  if (pathname === '/kiosk' || pathname.startsWith('/kiosk/')) return null;
+  return <TelemetryControls hideDot onMode={onMode} />;
+};
+
+// The `/` page when no Launch Page is set: the Dashboards app's
+// device/group-driven default. With a Launch Page the shell redirects there.
+// (On a phone, `/` is the sidebar's menu screen instead.)
+const defaultLanding = <Navigate to="/dashboards/default" replace />;
+
+const components = { Shakers, LedsDevices, ShiftLights, SimWindDevices, AmbientLights, Dashboards };
+
+const Brand: React.FC<{ className?: string }> = ({ className }) => (
+  <Link to="/dashboards/default" aria-label="Monocoque Builder home" style={{ display: 'flex' }}>
+    <Logo className={className} />
+  </Link>
+);
+
 const App: React.FC = () => {
-  const style = getStyle();
+  const [telemetryMode, setTelemetryMode] = useState<DotMode | undefined>(undefined);
+  const onMode = useCallback((mode: DotMode) => setTelemetryMode(mode), []);
   return (
     <>
       <ClientHeartbeat />
@@ -83,18 +111,25 @@ const App: React.FC = () => {
         includeAcTelemetry={false}
       >
       <HubSubscriptionRouter>
-      <Denim
+      <TelemetryMonitor onMode={onMode} />
+      <TelemetryModeContext.Provider value={telemetryMode}>
+      <SidebarShell
+        title="Monocoque Builder"
         Logo={Logo}
-        Brand={(props) => (
-          <Link to="/dashboards/default">
-            <Logo className={style.logoLink} {...props} />
-          </Link>
-        )}
-        RootComponent={DefaultLanding}
-        Controls={TelemetryControls}
-        components={{ Shakers, LedsDevices, ShiftLights, SimWindDevices, AmbientLights, Dashboards }}
-        themes={THEMES}
-        />
+        Brand={Brand}
+        defaultGroup="SYSTEM"
+        components={components}
+        // Settings live on the server (shared by every device of the rig).
+        // The same fields as the app's own `my` query (graphql/appSettings),
+        // so the two never fight over Apollo's cache entry.
+        settingsSource="server"
+        settingsFields={SETTINGS_FIELDS}
+        applicationFields={APPLICATION_FIELDS}
+        settingsTabs={settingsTabs}
+        useAppStatus={useMonocoqueAppStatus}
+        welcome={defaultLanding}
+      />
+      </TelemetryModeContext.Provider>
       </HubSubscriptionRouter>
       </LiveUpdatesProvider>
     </>

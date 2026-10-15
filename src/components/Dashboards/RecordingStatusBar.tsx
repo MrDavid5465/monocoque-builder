@@ -1,5 +1,5 @@
 import React from 'react';
-import { Stack, DefaultButton, useMutation, useQuery } from '../../lib/denim/lib';
+import { Stack, DefaultButton, useMutation, useQuery } from '../../lib/denim-fabric/lib';
 import { GET_RECORDINGS, STOP_RECORDING, STOP_PLAYBACK, RECORDING_STATUS } from '../Telemetry/Recordings/queries';
 
 // Global daemon-control status, prepended above the plain SwitchableList in

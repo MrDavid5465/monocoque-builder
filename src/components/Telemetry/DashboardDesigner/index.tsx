@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback, useContext } from 'react';
-import { Stack, IconButton, getTheme, useQuery, useMutation } from '../../../lib/denim/lib';
-import dispatcher from '../../../lib/denim/lib/queries';
+import { Stack, IconButton, getTheme, useQuery, useMutation } from '../../../lib/denim-fabric/lib';
+import dispatcher from '../../../graphql/appSettings';
+import { FullBleed } from '../../../lib/denim-fabric';
 import { useNavigate } from 'react-router';
 import Canvas, { CanvasTool } from './Canvas';
 import ObjectExplorer from './ObjectExplorer';
@@ -30,7 +31,7 @@ import {
   isDescendantOf,
 } from './components/utils';
 import { captureAllNodeThumbnails, captureNodeThumbnail } from './useScreenshot';
-import { confirmAsync } from '../../../lib/denim/components/ConfirmDialog';
+import { confirmAsync } from '../../../lib/denim-fabric/shared/ConfirmDialog';
 
 interface Props {
   dashboardName: string;
@@ -1157,7 +1158,10 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
     return (
       <LiveUpdatesContext.Provider value={hub}>
       {hubSubscriber}
-      <Stack style={{ height: 'calc(100dvh - 3.85em)', width: '100%', overflow: 'hidden' }}>
+      {/* FullBleed: the canvas fills the shell's whole content area (the
+          sidebar shell has no fixed top bar to subtract any more). */}
+      <FullBleed>
+      <Stack style={{ height: '100%', width: '100%', overflow: 'hidden' }}>
         <Stack.Item grow style={{ position: 'relative', minHeight: 0, overflow: 'hidden' }}>
           {editAreaEl}
         </Stack.Item>
@@ -1195,6 +1199,7 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
           <ObjectExplorer {...explorerProps} />
         </div>
       </Stack>
+      </FullBleed>
       </LiveUpdatesContext.Provider>
     );
   }
@@ -1203,13 +1208,15 @@ const DashboardDesigner: React.FC<Props> = ({ dashboardName, kioskMode }) => {
   return (
     <LiveUpdatesContext.Provider value={hub}>
     {hubSubscriber}
-    <Stack horizontal style={{ height: 'calc(100vh - 3.85em)', width: '100%', overflow: 'hidden' }}>
+    <FullBleed>
+    <Stack horizontal style={{ height: '100%', width: '100%', overflow: 'hidden' }}>
       {panelSide === 'left' && <ObjectExplorer {...explorerProps} />}
       <Stack.Item grow style={{ position: 'relative', overflow: 'hidden' }}>
         {editAreaEl}
       </Stack.Item>
       {panelSide === 'right' && <ObjectExplorer {...explorerProps} />}
     </Stack>
+    </FullBleed>
     </LiveUpdatesContext.Provider>
   );
 };

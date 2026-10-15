@@ -21,7 +21,7 @@ vi.mock('@apollo/client/react', () => ({
   useSubscription: vi.fn().mockReturnValue({ data: undefined }),
 }));
 
-vi.mock('../lib/denim/lib', () => ({
+vi.mock('../lib/denim-fabric/lib', () => ({
   getTheme: () => ({
     palette: {
       themePrimary: '#0078d4', themeSecondary: '#2b88d8', redDark: '#a4262c',

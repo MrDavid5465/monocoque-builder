@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client/react';
 import { useLocation, useNavigate } from 'react-router';
-import { Stack, PrimaryButton, IconButton, Form } from '../../lib/denim/lib';
+import { Stack, PrimaryButton, IconButton, Form } from '../../lib/denim-fabric/lib';
 import { GET_KNOWN_CARS } from '../Telemetry/Groups/queries';
 import { ADD_CAR, GET_CARS, CarRecord, parseCarIds } from '../Telemetry/carQueries';
 

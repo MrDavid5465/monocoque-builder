@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Dialog, DialogType, DialogFooter } from '@fluentui/react';
-import { Stack, TextField, DefaultButton, Dropdown, getTheme, useQuery, useMutation } from '../../lib/denim/lib';
+import { Stack, TextField, DefaultButton, Dropdown, getTheme, useQuery, useMutation } from '../../lib/denim-fabric/lib';
 import { useLazyQuery } from '@apollo/client/react';
 import {
   GET_TRACK_LOCATIONS, ADD_TRACK_LOCATION, UPDATE_TRACK_LOCATION, SEARCH_TRACK_LOCATIONS,

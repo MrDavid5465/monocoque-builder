@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client/react';
 import { Checkbox } from '@fluentui/react';
-import { Form, FormCard } from '../../lib/denim/lib';
+import { Form, FormCard } from '../../lib/denim-fabric/lib';
 import {
   GET_HUENICORN_CHANNELS,
   GET_HUENICORN_DISPLAY_INFO,

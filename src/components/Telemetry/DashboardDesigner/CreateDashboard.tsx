@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { Stack, PrimaryButton, DefaultButton, Form, getTheme } from '../../../lib/denim/lib';
+import { Stack, PrimaryButton, DefaultButton, Form, getTheme } from '../../../lib/denim-fabric/lib';
 import { BASE_DASH_TYPES, BaseDashType } from '../../../types/dashboard';
 import { IFormRef } from '../../../lib/typical-admin-fabric/lib/templates/Form';
 

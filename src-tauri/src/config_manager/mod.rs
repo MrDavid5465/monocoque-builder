@@ -122,5 +122,7 @@ pub fn to_gql_entry(a: AppEntry) -> GqlAppEntry {
                 text: l.text,
             })
             .collect(),
+        group: a.group,
+        icon: a.icon,
     }
 }

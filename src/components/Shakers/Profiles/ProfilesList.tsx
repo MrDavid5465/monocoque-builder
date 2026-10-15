@@ -1,8 +1,8 @@
 import React, { useMemo } from 'react';
 import { useQuery, useMutation, useSubscription } from '@apollo/client/react';
 import { useNavigate, useLocation } from 'react-router';
-import { getTheme } from '../../../lib/denim/lib';
-import { confirmAsync } from '../../../lib/denim/components/ConfirmDialog';
+import { getTheme } from '../../../lib/denim-fabric/lib';
+import { confirmAsync } from '../../../lib/denim-fabric/shared/ConfirmDialog';
 import DetailsGrid from '../../../lib/typical-admin-fabric/lib/List';
 import { RowButtonConfig } from '../../../lib/typical-admin-fabric/lib/ListControls';
 import { DisplaySchema } from '../../../lib/typical-admin';

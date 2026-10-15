@@ -1,7 +1,8 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router';
-import { Stack, IconButton, getTheme, useQuery } from '../../../lib/denim/lib';
-import dispatcher from '../../../lib/denim/lib/queries';
+import { Stack, IconButton, getTheme, useQuery } from '../../../lib/denim-fabric/lib';
+import dispatcher from '../../../graphql/appSettings';
+import { FullBleed } from '../../../lib/denim-fabric';
 import Canvas, { CanvasHandle } from '../DashboardDesigner/Canvas';
 import ObjectExplorer from '../DashboardDesigner/ObjectExplorer';
 import { useTelemetryPlayback, SequenceConfig } from '../DashboardDesigner/useTelemetryPlayback';
@@ -11,7 +12,7 @@ import { DashboardConfig, ComponentNode } from '../../../types/dashboard';
 import { mockSprites } from '../../../mock/dashboardMock';
 import { detectTemplateType } from '../DashboardDesigner/components/utils';
 import { captureNodeThumbnail } from '../DashboardDesigner/useScreenshot';
-import { confirmAsync } from '../../../lib/denim/components/ConfirmDialog';
+import { confirmAsync } from '../../../lib/denim-fabric/shared/ConfirmDialog';
 import {
   findNodeById,
   updateNodeById,
@@ -198,7 +199,8 @@ const TemplateEditor: React.FC<Props> = ({ template }) => {
   };
 
   return (
-    <Stack style={{ height: 'calc(100vh - 3.85em)', width: '100%', overflow: 'hidden' }}>
+    <FullBleed>
+    <Stack style={{ height: '100%', width: '100%', overflow: 'hidden' }}>
       {/* Header bar */}
       <Stack
         horizontal
@@ -268,6 +270,7 @@ const TemplateEditor: React.FC<Props> = ({ template }) => {
         {panelSide === 'right' && <ObjectExplorer {...explorerProps} />}
       </Stack>
     </Stack>
+    </FullBleed>
   );
 };
 

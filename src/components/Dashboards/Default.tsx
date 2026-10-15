@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { useQuery } from '@apollo/client/react';
-import dispatcher from '../../lib/denim/lib/queries';
+import dispatcher from '../../graphql/appSettings';
 import { getAppId } from '../../graphql/client';
 import { GET_DASH_GROUPS } from '../Telemetry/Groups/queries';
 import { TELEMETRY_SNAPSHOT } from '../Telemetry/queries';

@@ -1,6 +1,6 @@
 import React from 'react';
 import { useMutation } from '@apollo/client/react';
-import { IconButton, getTheme } from '../../lib/denim/lib';
+import { IconButton, getTheme } from '../../lib/denim-fabric/lib';
 import ReactiveAdmin from '../../lib/typical-admin-fabric';
 import SwitchableList from '../../lib/typical-admin-fabric/SwitchableList';
 import CarShow from './CarShow';

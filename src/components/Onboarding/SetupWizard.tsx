@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { Stack, Dialog, PrimaryButton, DefaultButton, TextField, useQuery, useMutation } from '../../lib/denim/lib';
+import { Stack, Dialog, PrimaryButton, DefaultButton, TextField, useQuery, useMutation } from '../../lib/denim-fabric/lib';
 import { DialogType, Text } from '@fluentui/react';
-import { getTheme } from '../../lib/denim/lib';
-import dispatcher from '../../lib/denim/lib/queries';
+import { getTheme } from '../../lib/denim-fabric/lib';
+import dispatcher from '../../graphql/appSettings';
 
 
 interface Props {

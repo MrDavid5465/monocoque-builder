@@ -36,20 +36,28 @@ const dashboardSchema = {
   },
 };
 const schemaDefinition = { list: { columns: dashboardSchema, buttons: { add: true } }, show: dashboardSchema, edit: {}, new: {} };
+// Readable headings ("Dashboards", not the type-name "Listing Dashboards").
+const labels = {};
+
+// Module level, not an inline arrow in `components`: an inline one is a new
+// component type on every render, which remounts the whole thumbnail grid.
+const DashboardsList: React.FC<any> = props => (
+  <SwitchableList {...props} queryResultKey="getDashboardEntries" titleField="name" thumbnailField="thumbnailDay" idField="name" defaultView="card" thumbnailFit="contain" />
+);
+const components = {
+  list: DashboardsList,
+  show: DashboardShow,
+  edit: DashboardEdit,
+  new: DashboardNew,
+};
 
 const DashboardsAdmin: React.FC = () => (
   <ReactiveAdmin
     dispatcher={dispatcher}
     name={name}
+    labels={labels}
     schemaDefinition={schemaDefinition}
-    components={{
-      list: (props: any) => (
-        <SwitchableList {...props} queryResultKey="getDashboardEntries" titleField="name" thumbnailField="thumbnailDay" idField="name" defaultView="card" thumbnailFit="contain" />
-      ),
-      show: DashboardShow,
-      edit: DashboardEdit,
-      new: DashboardNew,
-    }}
+    components={components}
   />
 );
 

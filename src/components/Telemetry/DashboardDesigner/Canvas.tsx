@@ -1,7 +1,7 @@
 import React, { useRef, useState, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react';
 import { Callout, DirectionalHint } from '@fluentui/react';
 import { DashboardConfig, ComponentNode } from '../../../types/dashboard';
-import { GamepadMapping } from '../../../lib/denim/lib/queries';
+import { GamepadMapping } from '../../../graphql/appSettings';
 import { applyBinding, formatValue, fillFraction, colorFraction, computeRotation, computeTranslate, isHiddenByLimit, cropInsetPx, maxInsetPx, insetToClipPath, EdgeInset } from './canvasUtils';
 import GifGaugeNode from './GifGaugeNode';
 import ArcGaugeFaceNode from './ArcGaugeFaceNode';

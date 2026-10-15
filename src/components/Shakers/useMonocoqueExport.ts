@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation } from '@apollo/client/react';
-import settingsDispatcher from '../../lib/denim/lib/queries';
+import settingsDispatcher from '../../graphql/appSettings';
 import { GET_ITEMS } from './queries';
 import { GET_SHAKER_CHANNELS } from './channelQueries';
 import { WRITE_MONOCOQUE_CONFIG, RELOAD_MONOCOQUE } from './dspQueries';

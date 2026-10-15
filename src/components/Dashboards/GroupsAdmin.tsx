@@ -1,6 +1,5 @@
 import React from 'react';
-import ReactiveAdmin from '../../lib/typical-admin-fabric';
-import SwitchableList from '../../lib/typical-admin-fabric/SwitchableList';
+import { AdminMasterDetail } from '../../lib/denim-fabric';
 import GroupEdit from './GroupEdit';
 import { GET_DASH_GROUPS, ADD_DASH_GROUP, REMOVE_DASH_GROUP } from '../Telemetry/Groups/queries';
 
@@ -18,29 +17,26 @@ const groupSchema = {
 };
 const schemaDefinition = { list: { columns: groupSchema, buttons: { add: true } }, show: {}, edit: {}, new: {} };
 
-// No natural thumbnail for a group — table view, not the card/thumbnail view
-// DashboardsAdmin/CarsAdmin use.
+// Module level: AdminMasterDetail memoizes on them.
+const labels = { singular: 'Dashboard group', plural: 'Dashboard groups' };
+const listColumns = ['name', 'defaultDash'];
+const listProps = { queryResultKey: 'getDashGroups', idField: 'id', columnSelectable: true, storageKey: 'groups-columns' };
+
+// List | detail (denim-fabric's AdminMasterDetail): the list stays on screen
+// beside the open record, and GroupEdit renders show/edit/new in the detail
+// pane (a phone shows one pane at a time, with a back bar). Selection is the
+// URL, so deep links (/dashboards/groups/<id>/show) keep working.
+// queryResultKey: List defaults it to `get${name.plural}`, which is not the
+// resolver's name here (it rendered an empty table once for that reason).
 const GroupsAdmin: React.FC = () => (
-  <ReactiveAdmin
+  <AdminMasterDetail
     dispatcher={dispatcher}
     name={name}
+    labels={labels}
     schemaDefinition={schemaDefinition}
+    listColumns={listColumns}
+    listProps={listProps}
     components={{
-      list: (props: any) => (
-        <SwitchableList
-          {...props}
-          titleField="name"
-          idField="id"
-          // List defaults the result key to `get${name.plural}` — "getGroups"
-          // here — but the resolver is `getDashGroups`, so every row was
-          // silently dropped and the table rendered headers with no rows.
-          // Invisible until this repo actually had a group to list.
-          queryResultKey="getDashGroups"
-          defaultView="list"
-          columnSelectable
-          storageKey="groups-columns"
-        />
-      ),
       show: GroupEdit,
       edit: GroupEdit,
       new: GroupEdit,

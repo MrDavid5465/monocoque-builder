@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
-import { Stack, PrimaryButton, IconButton, Form } from '../../lib/denim/lib';
+import { Stack, PrimaryButton, IconButton, Form } from '../../lib/denim-fabric/lib';
 import { useCreateDashboard } from '../Telemetry/DashboardDesigner/useDashboard';
 import { BaseDashType } from '../../types/dashboard';
 

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { LineChart } from '@fluentui/react-charting';
-import { Stack, DefaultButton, useMutation } from '../../lib/denim/lib';
+import { Stack, DefaultButton, useMutation } from '../../lib/denim-fabric/lib';
 import { useSubscription } from '@apollo/client/react';
 import { RECORDING_LIVE_TELEMETRY_SUB, STOP_RECORDING } from '../Telemetry/Recordings/queries';
 import { buildTimeSeries, collectFieldNames, flattenLiveFrame, ChartPoint } from '../Telemetry/Recordings/chartUtils';

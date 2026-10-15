@@ -36,20 +36,117 @@ impl Default for AppConfig {
     }
 }
 
+/// The app's own page plus its Profiles page. The root link ("") is listed
+/// explicitly: on a phone the sidebar shell shows an app's links as pills only
+/// when there is more than one, and it has no pill of its own for the app's
+/// root, so without it Profiles was unreachable there.
+fn with_profiles(root_text: &str) -> Vec<AppLink> {
+    vec![
+        AppLink {
+            path: "".into(),
+            text: root_text.into(),
+        },
+        AppLink {
+            path: "profiles".into(),
+            text: "Profiles".into(),
+        },
+    ]
+}
+
+// Sidebar groups. The sidebar lists groups in the order their first app
+// appears below, so this list is ordered by group: RIG, LIGHTING, DASHBOARDS.
+// An app with `group: None` falls under the shell's default group ("SYSTEM",
+// set in App.tsx). Icons are Fluent UI MDL2 names (the shell registers the
+// whole MDL2 font, so any name in @fluentui/font-icons-mdl2 works).
+const RIG: &str = "RIG";
+const LIGHTING: &str = "LIGHTING";
+const DASHBOARDS: &str = "DASHBOARDS";
+
+fn entry(
+    name: &str,
+    path: &str,
+    front_end: &str,
+    group: &str,
+    icon: &str,
+    links: Vec<AppLink>,
+) -> AppEntry {
+    AppEntry {
+        name: name.into(),
+        path: path.into(),
+        front_end: front_end.into(),
+        // Empty for every app. The Dashboards list is that app's INDEX route
+        // rather than a child of it, so there is nothing to redirect to --
+        // `/dashboards` renders the list directly. It used to be
+        // "dashboards", which bounced `/dashboards` to `/dashboards/dashboards`
+        // and put the app's own name in the URL twice.
+        default_route: "".into(),
+        links,
+        group: Some(group.into()),
+        icon: Some(icon.into()),
+    }
+}
+
 pub fn applications() -> Vec<AppEntry> {
     vec![
-        AppEntry {
-            name: "Dashboards".into(),
-            path: "dashboards".into(),
-            front_end: "Dashboards".into(),
-            // Empty, like every other app. The dashboards list is this app's
-            // INDEX route rather than a child of it, so there is nothing to
-            // redirect to -- `/dashboards` renders the list directly. It used
-            // to be "dashboards", which bounced `/dashboards` to
-            // `/dashboards/dashboards` and put the app's own name in the URL
-            // twice.
-            default_route: "".into(),
-            links: vec![
+        // ── RIG: hardware the driver feels ──────────────────────────────
+        entry(
+            "Shakers",
+            "shakers",
+            "Shakers",
+            RIG,
+            "Speakers",
+            with_profiles("Channels"),
+        ),
+        entry(
+            "SimWind",
+            "sim-wind",
+            "SimWindDevices",
+            RIG,
+            "WindDirection",
+            with_profiles("Devices"),
+        ),
+        // ── LIGHTING ────────────────────────────────────────────────────
+        entry(
+            "LED Controllers",
+            "leds",
+            "LedsDevices",
+            LIGHTING,
+            "Lightbulb",
+            with_profiles("Devices"),
+        ),
+        entry(
+            "Shift Lights",
+            "shift-lights",
+            "ShiftLights",
+            LIGHTING,
+            "SpeedHigh",
+            with_profiles("Devices"),
+        ),
+        // No "Profiles" link — there's no list of records to manage here,
+        // Huenicorn's own web UI owns the channel/screen-region list (see
+        // AmbientLights/index.tsx's own doc comment).
+        entry(
+            "Ambient Lights",
+            "ambient-lights",
+            "AmbientLights",
+            LIGHTING,
+            "Sunny",
+            vec![],
+        ),
+        // ── DASHBOARDS ──────────────────────────────────────────────────
+        entry(
+            "Dashboards",
+            "dashboards",
+            "Dashboards",
+            DASHBOARDS,
+            "ViewDashboard",
+            vec![
+                // The dashboards list itself (see with_profiles for why the
+                // root is an explicit link).
+                AppLink {
+                    path: "".into(),
+                    text: "Dashboards".into(),
+                },
                 AppLink {
                     path: "cars".into(),
                     text: "Cars".into(),
@@ -71,57 +168,7 @@ pub fn applications() -> Vec<AppEntry> {
                     text: "Tracks".into(),
                 },
             ],
-        },
-        AppEntry {
-            name: "Shakers".into(),
-            path: "shakers".into(),
-            front_end: "Shakers".into(),
-            default_route: "".into(),
-            links: vec![AppLink {
-                path: "profiles".into(),
-                text: "Profiles".into(),
-            }],
-        },
-        AppEntry {
-            name: "LED Controllers".into(),
-            path: "leds".into(),
-            front_end: "LedsDevices".into(),
-            default_route: "".into(),
-            links: vec![AppLink {
-                path: "profiles".into(),
-                text: "Profiles".into(),
-            }],
-        },
-        AppEntry {
-            name: "Shift Lights".into(),
-            path: "shift-lights".into(),
-            front_end: "ShiftLights".into(),
-            default_route: "".into(),
-            links: vec![AppLink {
-                path: "profiles".into(),
-                text: "Profiles".into(),
-            }],
-        },
-        AppEntry {
-            name: "SimWind".into(),
-            path: "sim-wind".into(),
-            front_end: "SimWindDevices".into(),
-            default_route: "".into(),
-            links: vec![AppLink {
-                path: "profiles".into(),
-                text: "Profiles".into(),
-            }],
-        },
-        // No "Profiles" link — there's no list of records to manage here,
-        // Huenicorn's own web UI owns the channel/screen-region list (see
-        // AmbientLights/index.tsx's own doc comment).
-        AppEntry {
-            name: "Ambient Lights".into(),
-            path: "ambient-lights".into(),
-            front_end: "AmbientLights".into(),
-            default_route: "".into(),
-            links: vec![],
-        },
+        ),
     ]
 }
 
@@ -188,4 +235,54 @@ pub fn write_app_config(config: &AppConfig) -> Result<(), String> {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
     fs::write(path, text).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_app_has_a_group_and_an_icon() {
+        for app in applications() {
+            assert!(
+                app.group.as_deref().is_some_and(|g| !g.is_empty()),
+                "{} has no group",
+                app.name
+            );
+            assert!(
+                app.icon.as_deref().is_some_and(|i| !i.is_empty()),
+                "{} has no icon",
+                app.name
+            );
+        }
+    }
+
+    #[test]
+    fn groups_are_contiguous_in_rig_lighting_dashboards_order() {
+        let mut order: Vec<String> = Vec::new();
+        for app in applications() {
+            let g = app.group.unwrap();
+            if order.last() != Some(&g) {
+                assert!(
+                    !order.contains(&g),
+                    "group {g} is split; the sidebar would list it at its first app only"
+                );
+                order.push(g);
+            }
+        }
+        assert_eq!(order, vec![RIG, LIGHTING, DASHBOARDS]);
+    }
+
+    #[test]
+    fn gql_entry_carries_group_and_icon() {
+        let gql: Vec<_> = applications()
+            .into_iter()
+            .map(super::super::to_gql_entry)
+            .collect();
+        let dash = gql.iter().find(|a| a.path == "dashboards").unwrap();
+        assert_eq!(dash.group.as_deref(), Some(DASHBOARDS));
+        assert_eq!(dash.icon.as_deref(), Some("ViewDashboard"));
+        assert_eq!(dash.links.len(), 6);
+        assert_eq!(dash.links[0].path, "", "the list itself comes first");
+    }
 }

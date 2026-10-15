@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { IconButton, Icon } from '@fluentui/react';
-import { getTheme } from '../../lib/denim/lib';
+import { getTheme } from '../../lib/denim-fabric/lib';
 import { cornersToConfig, configToCorners, type Corner } from './tyreGridUtils';
 
 // A bespoke multi-button corner-selector grid — no standard Fluent control

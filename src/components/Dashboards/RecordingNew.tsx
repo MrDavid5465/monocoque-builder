@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Stack, PrimaryButton, IconButton, Form, useMutation, useQuery } from '../../lib/denim/lib';
+import { Stack, PrimaryButton, IconButton, Form, useMutation, useQuery } from '../../lib/denim-fabric/lib';
 import { GET_RECORDINGS, START_RECORDING, RECORDING_STATUS } from '../Telemetry/Recordings/queries';
 
 const START_RECORDING_SCHEMA = {

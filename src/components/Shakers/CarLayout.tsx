@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { useQuery, useMutation, useSubscription } from '@apollo/client/react';
-import { getTheme } from '../../lib/denim/lib';
-import { confirmAsync } from '../../lib/denim/components/ConfirmDialog';
+import { getTheme } from '../../lib/denim-fabric/lib';
+import { confirmAsync } from '../../lib/denim-fabric/shared/ConfirmDialog';
 import { GET_ITEMS, CREATE_ITEM, UPDATE_ITEM, REMOVE_ITEM, ITEM_CHANGED } from './queries';
 import { toInput, nextDspSlot, nextPan } from './ShakerMatrix';
 import { EffectRow, EFFECTS, EFFECT_LABELS, TYRE_SHORT, ShakerRec } from './EffectRow';

@@ -1,7 +1,7 @@
 import React from "react";
 
 import { getCurrentWindow } from "@tauri-apps/api/window";
-// import { div } from "../../lib/denim/lib";
+// import { div } from "../../lib/denim-fabric/lib";
 
 export const TitleBar: React.FC = () => {
   const appWindow = getCurrentWindow();

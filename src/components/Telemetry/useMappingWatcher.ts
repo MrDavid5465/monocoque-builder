@@ -1,6 +1,6 @@
 import { useRef, useEffect, useCallback } from 'react';
 import { useMutation, useQuery } from '@apollo/client/react';
-import dispatcher from '../../lib/denim/lib/queries';
+import dispatcher from '../../graphql/appSettings';
 import { getAppId } from '../../graphql/client';
 import { GET_DEVICE_DEFAULTS } from './deviceDefaultsQueries';
 import { GET_DASH_GROUPS } from './Groups/queries';

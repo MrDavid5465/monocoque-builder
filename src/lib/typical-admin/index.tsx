@@ -6,6 +6,10 @@ import List from './List';
 import Create from './Create';
 import Show from './Show';
 import { SchemaDefinition } from '../per-form';
+import type { ITALabels } from './labels';
+
+export { resolveLabels, label, DEFAULT_LABELS, LEGACY_LABELS } from './labels';
+export type { ITALabels, LabelTemplate, ResolvedLabels } from './labels';
 
 export interface Name {
   singular: string;
@@ -73,6 +77,10 @@ interface Props {
   components?: IComponents;
   schemaDefinition: ITASchema;
   callBacks?: ITACallBacks;
+  /** Display text, separate from `name`'s GraphQL stems (see labels.ts).
+   *  Passed on to every slot. Without it the headings are the old
+   *  "Listing Projects" / "Showing Project". */
+  labels?: ITALabels;
 }
 
 const Index: React.FC<Props> = ({
@@ -81,6 +89,7 @@ const Index: React.FC<Props> = ({
   components = {},
   schemaDefinition,
   callBacks,
+  labels,
 }) => {
   // const { pathname } = useLocation()
   return (
@@ -100,6 +109,7 @@ const Index: React.FC<Props> = ({
               schemaDefinition: schemaDefinition.list,
               callBacks,
               components,
+              labels,
             })
           ) : (
             <List
@@ -123,6 +133,7 @@ const Index: React.FC<Props> = ({
                 schemaDefinition: schemaDefinition.new,
                 callBacks,
                 components,
+                labels,
               })
             ) : (
               <Create
@@ -146,6 +157,7 @@ const Index: React.FC<Props> = ({
               schemaDefinition: schemaDefinition.show,
               callBacks,
               components,
+              labels,
             })
           ) : (
             <Show
@@ -169,6 +181,7 @@ const Index: React.FC<Props> = ({
                 schemaDefinition: schemaDefinition.edit,
                 callBacks,
                 components,
+                labels,
               })
             ) : (
               <Update

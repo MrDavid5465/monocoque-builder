@@ -1,7 +1,7 @@
 import React from 'react';
 import { IconButton, Icon } from '@fluentui/react';
-import { Form } from '../../lib/denim/lib';
-import { getTheme } from '../../lib/denim/lib';
+import { Form } from '../../lib/denim-fabric/lib';
+import { getTheme } from '../../lib/denim-fabric/lib';
 import { useRowCommit } from '../../lib/per-form/useRowCommit';
 import { dspOffSchema, dspOnSchema } from './schemas';
 import { ShakerDspChannel } from './dspQueries';

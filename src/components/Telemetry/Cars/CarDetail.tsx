@@ -1,6 +1,6 @@
 import React, { useEffect, useContext } from 'react';
 import { useQuery, useMutation } from '@apollo/client/react';
-import { Stack, IconButton, Form, FormCard } from '../../../lib/denim/lib';
+import { Stack, IconButton, Form, FormCard } from '../../../lib/denim-fabric/lib';
 import { GET_KNOWN_CARS } from '../Groups/queries';
 import {
   GET_CARS, UPDATE_CAR, DELETE_CAR, UPLOAD_CAR_PHOTO, UPLOAD_CAR_PHOTO_NIGHT, DELETE_CAR_PHOTO_NIGHT,
@@ -12,7 +12,7 @@ import { useGlobalPreviewCar } from '../useGlobalPreviewCar';
 import { LiveUpdatesContext, useLiveUpdatesDemand, useLiveUpdatesHub } from '../liveUpdatesHub';
 import DashPanEditor from './DashPanEditor';
 import Car360Capture from './Car360Capture';
-import { confirmAsync } from '../../../lib/denim/components/ConfirmDialog';
+import { confirmAsync } from '../../../lib/denim-fabric/shared/ConfirmDialog';
 import { GET_PROFILES as GET_SHAKER_PROFILES, UPDATE_PROFILE as UPDATE_SHAKER_PROFILE } from '../../Shakers/Profiles/queries';
 import { GET_PROFILES as GET_LEDS_PROFILES, UPDATE_PROFILE as UPDATE_LEDS_PROFILE, profileResultKey as ledsProfileResultKey } from '../../LedsDevices/Profiles/queries';
 import { GET_PROFILES as GET_SHIFT_LIGHT_PROFILES, UPDATE_PROFILE as UPDATE_SHIFT_LIGHT_PROFILE, profileResultKey as shiftLightProfileResultKey } from '../../ShiftLights/Profiles/queries';
