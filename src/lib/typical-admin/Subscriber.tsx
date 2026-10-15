@@ -13,7 +13,10 @@ interface Props {
 
 // Calls `options.onData` whenever `document`'s subscription fires. Rides the
 // app's shared stream when a SubscriptionRouter carries this event type (see
-// SubscriptionRouter.tsx); otherwise holds a subscription of its own.
+// SubscriptionRouter.tsx). An app that provides a router has chosen one
+// shared connection, so an event type it doesn't carry is reported as an
+// error and left unsubscribed rather than given a connection of its own.
+// Only with no router at all does this subscribe directly.
 const Subscriber: React.FC<Props> = ({ document, options }) => {
   const router = useContext(SubscriptionRouterContext);
   const onDataRef = useRef(options.onData);
@@ -30,18 +33,18 @@ const Subscriber: React.FC<Props> = ({ document, options }) => {
 
   useEffect(() => {
     if (router && !routed) {
-      console.warn(
-        `Subscriber: the shared stream doesn't carry ${typename ?? 'this subscription'}; ` +
-          'opening a separate connection for it.',
+      console.error(
+        `Subscriber: the shared stream doesn't carry ${typename ?? 'this subscription'}, ` +
+          'so this view gets no live updates. Add it to the app\'s SubscriptionRouter.',
       );
     }
   }, [router, routed, typename]);
 
   // Always called, for the rules of hooks; `skip` keeps it from connecting
-  // when the router has it.
+  // whenever the app provides a router.
   useSubscription(document, {
     variables: options.variables,
-    skip: routed,
+    skip: !!router,
     onData: () => onDataRef.current(),
   });
   return null;

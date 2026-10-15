@@ -1,11 +1,11 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { useQuery, useMutation, useSubscription } from '@apollo/client/react';
+import { useQuery, useMutation } from '@apollo/client/react';
 import { PrimaryButton } from '@fluentui/react';
 import { getTheme, Form, FormCard } from '../../lib/denim/lib';
 import settingsDispatcher from '../../lib/denim/lib/queries';
 import { confirmAsync } from '../../lib/denim/components/ConfirmDialog';
-import { GET_ITEMS, UPDATE_ITEM, CREATE_ITEM, REMOVE_ITEM } from './queries';
-import { SHAKER_UPDATES } from './shakerUpdatesQueries';
+import { GET_ITEMS, UPDATE_ITEM, CREATE_ITEM, REMOVE_ITEM, ITEM_CHANGED } from './queries';
+import { useHubCacheSync } from '../Telemetry/hubCacheSync';
 import { EffectRow, EFFECTS, EFFECT_LABELS, ShakerRec } from './EffectRow';
 import { LfeRow } from './LfeRow';
 import ChannelHeader from './ChannelHeader';
@@ -13,15 +13,15 @@ import {
   GET_AUDIO_SINKS, ENABLE_SHAKER_DSP, DISABLE_SHAKER_DSP, RELOAD_SHAKER_DSP,
   WRITE_MONOCOQUE_CONFIG, RELOAD_MONOCOQUE, APPLY_DSP_CHANNEL_LIVE,
   GET_DSP_CHANNELS, ADD_DSP_CHANNEL, UPDATE_DSP_CHANNEL, REMOVE_DSP_CHANNEL,
-  AudioSinkInfo, ShakerDspChannel,
+  DSP_CHANNEL_CHANGED, AudioSinkInfo, ShakerDspChannel,
 } from './dspQueries';
 import {
   GET_LFE_CHANNELS, ADD_LFE_CHANNEL, UPDATE_LFE_CHANNEL, REMOVE_LFE_CHANNEL,
-  APPLY_LFE_CHANNEL_LIVE, APPLY_LFE_LPF_LIVE, LfeChannel,
+  APPLY_LFE_CHANNEL_LIVE, APPLY_LFE_LPF_LIVE, LFE_CHANNEL_CHANGED, LfeChannel,
 } from './lfeQueries';
 import {
   GET_SHAKER_CHANNELS, ADD_SHAKER_CHANNEL, UPDATE_SHAKER_CHANNEL, REMOVE_SHAKER_CHANNEL,
-  ShakerChannel,
+  SHAKER_CHANNEL_CHANGED, ShakerChannel,
 } from './channelQueries';
 import { ADD_PROFILE, GET_PROFILES, SoundDeviceProfile } from './Profiles/queries';
 import { GET_SHIFT_LIGHTS, ShiftLightRec } from './ShiftLights/queries';
@@ -83,10 +83,13 @@ const ShakerMatrix: React.FC<{ profileId?: string | null }> = ({ profileId = nul
   const [dspStatus, setDspStatus] = React.useState<string | null>(null);
 
   const { data } = useQuery(GET_ITEMS);
-  // One merged subscription for all 4 of this page's live-update sources —
-  // see shakerUpdatesQueries.ts / graphql/mod.rs's shaker_updates doc
-  // comment for why this replaced 4 separate useSubscription calls.
-  useSubscription(SHAKER_UPDATES);
+  // This page's 4 live-update sources, kept in Apollo's cache from the app's
+  // one hub connection (it used to hold a merged shakerUpdates subscription
+  // of its own, after 4 separate ones had exhausted the connection pool).
+  useHubCacheSync(ITEM_CHANGED);
+  useHubCacheSync(SHAKER_CHANNEL_CHANGED);
+  useHubCacheSync(DSP_CHANNEL_CHANGED);
+  useHubCacheSync(LFE_CHANNEL_CHANGED);
 
   const allRecords: ShakerRec[] = useMemo(
     () => (data as any)?.getMonocoqueSoundDevices ?? [],
@@ -140,20 +143,11 @@ const ShakerMatrix: React.FC<{ profileId?: string | null }> = ({ profileId = nul
   // ── Other device categories, read-only here — exporting from this page
   // still has to write the WHOLE monocoque config, so it needs every
   // category's live rows too, not just this page's own Sound devices (see
-  // monocoqueConfig.ts's doc comment). Deliberately plain useQuery, no
-  // useSubscription — this page only runs 2 long-lived connections now
-  // (the always-on dashboardUpdates plus this page's own merged
-  // shakerUpdates, see the SHAKER_UPDATES subscription above), but the
-  // browser's ~6-connection HTTP/1.1 pool still means more would risk
-  // starving this page's own mutations (see
-  // feedback_subscription_connection_limit — this is exactly the bug that
-  // merge fixed: 4 separate subscriptions here plus the global one hung
-  // "Enable DSP" and any other mutation with no error, since the request
-  // was queued behind a full connection pool, not actually blocked
-  // server-side). handleExport explicitly refetches all three right before
-  // building the combined config instead, so a stale cache (e.g. edited on
-  // another page in another tab) can't silently drop a device from the
-  // exported file.
+  // monocoqueConfig.ts's doc comment). Deliberately plain useQuery, not
+  // kept live from the hub: nothing on this page shows them. handleExport
+  // explicitly refetches all three right before building the combined
+  // config instead, so a stale cache (e.g. edited on another page in another
+  // tab) can't silently drop a device from the exported file.
   const { refetch: refetchShiftLights } = useQuery(GET_SHIFT_LIGHTS);
   const { refetch: refetchLeds } = useQuery(GET_LEDS);
   const { refetch: refetchSimWind } = useQuery(GET_SIM_WINDS);
@@ -586,14 +580,8 @@ const ShakerMatrix: React.FC<{ profileId?: string | null }> = ({ profileId = nul
   const profileSkipFirst = useRef(true);
   const profilePrevRef = useRef('');
 
-  // Deliberately no useSubscription(PROFILE_CHANGED) here — this page
-  // already holds 2 long-lived subscriptions (the merged SHAKER_UPDATES
-  // above, plus the global dashboardUpdates elsewhere), and the browser's
-  // per-origin HTTP/1.1 connection limit (6) means one more can silently
-  // starve out every other request on the page, including this card's own
-  // mutations — see SHAKER_UPDATES' own doc comment for what happens when
-  // this page runs too many of these.
-  // refetchQueries on each mutation below keeps the list fresh without one.
+  // Not kept live from the hub (no useHubCacheSync(PROFILE_CHANGED)):
+  // refetchQueries on each mutation below keeps the list fresh.
   const { data: profilesData } = useQuery(GET_PROFILES);
   const [addProfile] = useMutation(ADD_PROFILE, { refetchQueries: [{ query: GET_PROFILES }] });
 

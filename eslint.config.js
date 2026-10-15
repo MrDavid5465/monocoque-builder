@@ -65,6 +65,49 @@ export default tseslint.config(
     },
   },
   {
+    // Every GraphQL subscription goes through the live-updates hub
+    // (src/components/Telemetry/liveUpdatesHub.tsx): one dashboardUpdates
+    // connection for the whole app, carrying what consumers ask for with
+    // useLiveUpdatesDemand, delivered with useHubListener / useHubCacheSync.
+    // A subscription of a component's own is another long-lived connection
+    // against the browser's ~6-per-origin limit, which stalls unrelated
+    // requests once exhausted. src/__tests__/hubOnlySubscriptions.test.ts
+    // checks the same thing for runs that skip lint.
+    files: ['src/**/*.{ts,tsx}'],
+    ignores: [
+      // The hub's own subscription.
+      'src/components/Telemetry/liveUpdatesHub.tsx',
+      // typical-admin's no-router fallback, for apps without a hub. This app
+      // always provides one (HubSubscriptionRouter), which skips it.
+      'src/lib/typical-admin/Subscriber.tsx',
+      '**/__tests__/**',
+    ],
+    rules: {
+      'no-restricted-imports': ['error', {
+        paths: ['@apollo/client', '@apollo/client/react', '@apollo/client/react/hooks', '@apollo/react-hooks'].map(name => ({
+          name,
+          importNames: ['useSubscription'],
+          message: 'Subscribe through the live-updates hub (useHubListener / useHubCacheSync / useLiveUpdatesDemand), not a connection of your own.',
+        })).concat([{
+          name: '@apollo/react-components',
+          importNames: ['Subscription'],
+          message: 'Subscribe through the live-updates hub (useHubListener / useHubCacheSync / useLiveUpdatesDemand), not a connection of your own.',
+        }]),
+      }],
+      'no-restricted-syntax': ['error',
+        {
+          // client.subscribe({ query }) — ApolloClient's imperative subscribe.
+          selector: "CallExpression[callee.property.name='subscribe'] > ObjectExpression > Property[key.name='query']",
+          message: 'Subscribe through the live-updates hub, not client.subscribe.',
+        },
+        {
+          selector: "CallExpression[callee.property.name='subscribeToMore'], Property[key.name='subscribeToMore']",
+          message: 'Subscribe through the live-updates hub, not subscribeToMore.',
+        },
+      ],
+    },
+  },
+  {
     // Test-only mocks stub out third-party components/hooks (Fluent UI,
     // Apollo) whose real prop/return types are large and irrelevant to
     // what the test exercises — typing a mock to match, say, IButtonProps

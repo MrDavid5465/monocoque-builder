@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
-import { useQuery, useMutation, useSubscription } from '@apollo/client/react';
+import { useQuery, useMutation } from '@apollo/client/react';
+import { useHubCacheSync } from '../Telemetry/hubCacheSync';
 import { getTheme } from '../../lib/denim/lib';
 import { confirmAsync } from '../../lib/denim/components/ConfirmDialog';
 import { GET_ITEMS, CREATE_ITEM, UPDATE_ITEM, REMOVE_ITEM, ITEM_CHANGED } from './queries';
@@ -182,7 +183,7 @@ const CarLayout: React.FC<{ profileId?: string | null }> = ({ profileId = null }
   const theme = getTheme();
 
   const { data } = useQuery(GET_ITEMS);
-  useSubscription(ITEM_CHANGED);
+  useHubCacheSync(ITEM_CHANGED);
 
   const allRecords: ShakerRec[] = useMemo(
     () => (data as any)?.getMonocoqueSoundDevices ?? [],
@@ -199,7 +200,7 @@ const CarLayout: React.FC<{ profileId?: string | null }> = ({ profileId = null }
   const [removeRec] = useMutation(REMOVE_ITEM, { refetchQueries: [{ query: GET_ITEMS }] });
 
   const { data: channelsData } = useQuery(GET_SHAKER_CHANNELS);
-  useSubscription(SHAKER_CHANNEL_CHANGED);
+  useHubCacheSync(SHAKER_CHANNEL_CHANGED);
   const [addShakerChannel] = useMutation(ADD_SHAKER_CHANNEL, { refetchQueries: [{ query: GET_SHAKER_CHANNELS }] });
   const [updateShakerChannel] = useMutation(UPDATE_SHAKER_CHANNEL);
   const [removeShakerChannel] = useMutation(REMOVE_SHAKER_CHANNEL, { refetchQueries: [{ query: GET_SHAKER_CHANNELS }] });

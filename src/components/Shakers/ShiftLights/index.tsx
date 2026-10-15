@@ -1,5 +1,6 @@
 import React from 'react';
-import { useQuery, useMutation, useSubscription } from '@apollo/client/react';
+import { useQuery, useMutation } from '@apollo/client/react';
+import { useHubCacheSync } from '../../Telemetry/hubCacheSync';
 import { getTheme, Form } from '../../../lib/denim/lib';
 import { confirmAsync } from '../../../lib/denim/components/ConfirmDialog';
 import DetailsGrid from '../../../lib/typical-admin-fabric/lib/List';
@@ -72,12 +73,11 @@ const PickerFieldCell: React.FC<{
 const ShiftLights: React.FC<Props> = ({ profileId = null }) => {
   const theme = getTheme();
   const { data } = useQuery(GET_SHIFT_LIGHTS);
-  useSubscription(SHIFT_LIGHT_CHANGED);
+  useHubCacheSync(SHIFT_LIGHT_CHANGED);
   // Deliberately plain useQuery, no polling/subscription — a connected-
   // device snapshot is only useful at the moment you open this page or
   // click into the dropdown, not something that needs to stay live while
-  // editing other fields (and this page already holds one long-lived
-  // subscription — see feedback_subscription_connection_limit).
+  // editing other fields.
   const { data: usbData, refetch: refetchUsbDevices } = useQuery(GET_USB_DEVICES);
   const usbDevices: UsbDeviceInfo[] = (usbData as any)?.getUsbDevices ?? [];
   const usbSelectOptions = [

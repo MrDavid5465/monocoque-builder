@@ -1,5 +1,6 @@
 import React from 'react';
-import { useQuery, useMutation, useSubscription } from '@apollo/client/react';
+import { useQuery, useMutation } from '@apollo/client/react';
+import { useHubCacheSync } from '../../Telemetry/hubCacheSync';
 import { getTheme, Form } from '../../../lib/denim/lib';
 import { confirmAsync } from '../../../lib/denim/components/ConfirmDialog';
 import DetailsGrid from '../../../lib/typical-admin-fabric/lib/List';
@@ -39,7 +40,7 @@ const FieldCell: React.FC<{
 const SimWindDevices: React.FC<Props> = ({ profileId = null }) => {
   const theme = getTheme();
   const { data } = useQuery(GET_SIM_WINDS);
-  useSubscription(SIM_WIND_CHANGED);
+  useHubCacheSync(SIM_WIND_CHANGED);
   const [create] = useMutation(CREATE_SIM_WIND, { refetchQueries: [{ query: GET_SIM_WINDS }] });
   const [update] = useMutation(UPDATE_SIM_WIND, { refetchQueries: [{ query: GET_SIM_WINDS }] });
   const [remove] = useMutation(REMOVE_SIM_WIND, { refetchQueries: [{ query: GET_SIM_WINDS }] });

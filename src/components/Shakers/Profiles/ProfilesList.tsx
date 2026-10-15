@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
-import { useQuery, useMutation, useSubscription } from '@apollo/client/react';
+import { useQuery, useMutation } from '@apollo/client/react';
+import { useHubCacheSync } from '../../Telemetry/hubCacheSync';
 import { useNavigate, useLocation } from 'react-router';
 import { getTheme } from '../../../lib/denim/lib';
 import { confirmAsync } from '../../../lib/denim/components/ConfirmDialog';
@@ -26,16 +27,16 @@ const ProfilesList: React.FC<{ dispatcher?: any; name?: any; schemaDefinition?: 
   const base = pathname.replace(/\/$/, '');
 
   const { data: profilesData } = useQuery(GET_PROFILES);
-  useSubscription(PROFILE_CHANGED);
+  useHubCacheSync(PROFILE_CHANGED);
   const [removeProfile] = useMutation(REMOVE_PROFILE, { refetchQueries: [{ query: GET_PROFILES }] });
 
   const { data: devicesData } = useQuery(GET_ITEMS);
-  useSubscription(ITEM_CHANGED);
+  useHubCacheSync(ITEM_CHANGED);
   const [addDevice] = useMutation(CREATE_ITEM, { refetchQueries: [{ query: GET_ITEMS }] });
   const [removeDevice] = useMutation(REMOVE_ITEM, { refetchQueries: [{ query: GET_ITEMS }] });
 
   const { data: channelsData } = useQuery(GET_SHAKER_CHANNELS);
-  useSubscription(SHAKER_CHANNEL_CHANGED);
+  useHubCacheSync(SHAKER_CHANNEL_CHANGED);
   const [addChannel] = useMutation(ADD_SHAKER_CHANNEL, { refetchQueries: [{ query: GET_SHAKER_CHANNELS }] });
   const [removeChannel] = useMutation(REMOVE_SHAKER_CHANNEL, { refetchQueries: [{ query: GET_SHAKER_CHANNELS }] });
 

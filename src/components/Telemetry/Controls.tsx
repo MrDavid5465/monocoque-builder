@@ -2,7 +2,7 @@ import React, { useCallback, useContext, useEffect, useRef, useState } from 'rea
 import { useMatch } from 'react-router-dom';
 import { useMutation, useQuery } from '@apollo/client/react';
 import { mergeStyles, keyframes } from '@fluentui/react';
-import { useLiveTelemetry } from './useLiveTelemetry';
+import { useTelemetryStatus } from './useLiveTelemetry';
 import { REGISTER_CAR, REGISTER_TRACK } from './clientsQueries';
 import { GET_KNOWN_CARS } from './Groups/queries';
 import { GET_KNOWN_TRACKS } from './trackLocationQueries';
@@ -64,8 +64,6 @@ const StatusDot: React.FC<{ mode: DotMode }> = ({ mode }) => (
 
 const TelemetryControls: React.FC = () => {
   const onDashRoute = !!useMatch('/dashboards/:name/show');
-  const { car, track, simStatus } = useLiveTelemetry(onDashRoute);
-  const isActive = simStatus === 'Active';
 
   // Global (not per-recording) status — this control lives in the nav bar
   // on every page, so it just needs to know *whether* something is
@@ -90,6 +88,12 @@ const TelemetryControls: React.FC = () => {
   // context first in case that ever changes.
   const [ownHub, ownHubSubscriber] = useLiveUpdatesHub({ includeTelemetry: false, includeNightClock: false, skip: !!contextHub });
   const hub = contextHub ?? ownHub;
+
+  // The slim status event, not the telemetry stream: this is on every page,
+  // and the full stream is ~60 messages a second that only pages rendering
+  // telemetry should pay for.
+  const { car, track, simStatus } = useTelemetryStatus(onDashRoute, hub);
+  const isActive = simStatus === 'Active';
 
   const onRecordingChanged = useCallback((event: any) => {
     setLiveStatus({ isRecording: !!event.isRecording, isPlaying: !!event.isPlaying });

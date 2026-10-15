@@ -43,7 +43,7 @@ export function flattenFrameForChart(frame: any): Record<string, number> {
 const TYRE_CORNERS = ['fl', 'fr', 'rl', 'rr'] as const;
 const TYRE_FIELD_KEYS = ['temp', 'pressure', 'slipRatio', 'slipAngle', 'wear', 'brakeTemp', 'rps', 'diameter'] as const;
 
-// The live RECORDING_LIVE_TELEMETRY_SUB subscription returns TelemetryFrame
+// The live recording chart's frames (the hub's TelemetryEvent, all fields) are TelemetryFrame
 // shaped (nested `tyres: [TyreData]`, ordered [FL, FR, RL, RR] per
 // types.rs), not RecordingFrame shaped (already-flat flTemp/frTemp/...) —
 // this bridges the two so flattenFrameForChart can be reused unmodified on

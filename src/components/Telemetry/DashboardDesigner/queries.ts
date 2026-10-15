@@ -1,4 +1,5 @@
 import gql from 'graphql-tag';
+import { HUB_CACHE_SYNCED_DOCS, hubSelectionFor } from '../hubCacheSpecs';
 
 // Content lives on the dumb `Dashboard` type, reachable only via
 // `DashboardEntry.dashboard` — see typiql_types.rs. Entry-level fields
@@ -203,8 +204,8 @@ export const TEMPLATE_CHANGED_SUB = gql`
 // fragments) since this file doesn't otherwise import from those, and a
 // mismatch here would only mean an extra/missing field, not a real bug.
 export const DASHBOARD_UPDATES_SUB = gql`
-  subscription dashboardUpdates($includeTelemetry: Boolean, $includeNightClock: Boolean, $includeAmbientColor: Boolean, $includeAcTelemetry: Boolean) {
-    dashboardUpdates(includeTelemetry: $includeTelemetry, includeNightClock: $includeNightClock, includeAmbientColor: $includeAmbientColor, includeAcTelemetry: $includeAcTelemetry) {
+  subscription dashboardUpdates($includeTelemetry: Boolean, $includeNightClock: Boolean, $includeAmbientColor: Boolean, $includeAcTelemetry: Boolean, $includeFullTelemetryFrame: Boolean!, $telemetryHz: Int) {
+    dashboardUpdates(includeTelemetry: $includeTelemetry, includeNightClock: $includeNightClock, includeAmbientColor: $includeAmbientColor, includeAcTelemetry: $includeAcTelemetry, telemetryHz: $telemetryHz) {
       ... on DashboardEntryChanged {
         operationName
         value {
@@ -224,14 +225,19 @@ export const DASHBOARD_UPDATES_SUB = gql`
         operationName
         value { id favorite }
       }
-      # Admin pages' refetch triggers, routed here by hubSubscriptionRouter.
-      # They refetch on any event, so the id (for subscribe-to-one filtering)
-      # is all they need.
-      ... on MonocoqueSoundDeviceChanged { operationName value { id } }
-      ... on SoundDeviceProfileChanged { operationName value { id } }
-      ... on LedsDeviceProfileChanged { operationName value { id } }
-      ... on ShiftLightProfileChanged { operationName value { id } }
-      ... on SimWindDeviceProfileChanged { operationName value { id } }
+      # The device, channel and profile rows the Shakers/LEDs/Shift Lights/
+      # SimWind pages keep in Apollo's cache (useHubCacheSync), with the
+      # same value fields their own subscription documents select — see
+      # HUB_CACHE_SYNCED_DOCS. The admin pages' refetch triggers
+      # (hubSubscriptionRouter) ride the same events and need only the id.
+      ${hubSelectionFor(HUB_CACHE_SYNCED_DOCS)}
+      # The nav bar's sim/car/track status. Sent only when it changes, so
+      # every page can show it without the full telemetry stream.
+      ... on TelemetryStatus {
+        simStatus
+        car
+        track
+      }
       # Only the NeckFX fields. This member arrives at 60Hz and the type
       # carries a great deal more (sun angles, weather, world position) —
       # see useAcNeckFx for the consumer.
@@ -244,15 +250,40 @@ export const DASHBOARD_UPDATES_SUB = gql`
         neckRollDeg
         physicsAvailable
       }
+      # The fields marked @include are the rest of TelemetryFrame, which only
+      # the live recording chart plots (includeFullTelemetryFrame demand).
+      # They sit where RECORDING_LIVE_TELEMETRY_SUB had them, since that
+      # chart orders its series by field order.
       ... on TelemetryEvent {
         frame {
           simStatus simon car track driver
-          gLat gLon gVert pitch roll
-          speed rpm maxRpm gear throttle brake clutch steering abs brakeBias
+          tyreCompound @include(if: $includeFullTelemetryFrame)
+          gLat gLon gVert
+          heading @include(if: $includeFullTelemetryFrame)
+          pitch roll
+          speed rpm maxRpm
+          idleRpm @include(if: $includeFullTelemetryFrame)
+          gear
+          maxGears @include(if: $includeFullTelemetryFrame)
+          throttle brake clutch steering
+          handbrake @include(if: $includeFullTelemetryFrame)
+          abs brakeBias
           fuel fuelCapacity turboBoost
-          tyres { temp pressure slipRatio wear brakeTemp }
+          turboPct @include(if: $includeFullTelemetryFrame)
+          tyres {
+            temp pressure slipRatio
+            slipAngle @include(if: $includeFullTelemetryFrame)
+            wear brakeTemp
+            rps @include(if: $includeFullTelemetryFrame)
+            diameter @include(if: $includeFullTelemetryFrame)
+          }
           airTemp trackTemp
-          lap position numCars courseFlag lapIsValid inPit currentLapSeconds lastLapSeconds
+          airDensity @include(if: $includeFullTelemetryFrame)
+          lap position
+          numLaps @include(if: $includeFullTelemetryFrame)
+          numCars courseFlag lapIsValid inPit currentLapSeconds lastLapSeconds
+          sector1Time @include(if: $includeFullTelemetryFrame)
+          sector2Time @include(if: $includeFullTelemetryFrame)
         }
       }
       ... on NightModeChanged {
