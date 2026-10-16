@@ -7,7 +7,7 @@ import {
 } from '../Telemetry/Groups/queries';
 import { GET_DASHBOARDS } from '../Telemetry/DashboardDesigner/queries';
 import { dropdownMenuProps } from '../../lib/typical-admin-fabric/lib/templates/menuCallout';
-import { useShellLayout } from '../../lib/denim-fabric';
+import { useLayout } from '../../lib/denim-fabric';
 
 const groupSchema = {
   name: { label: 'Group name' },
@@ -48,7 +48,7 @@ const GroupEdit: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { pathname } = useLocation();
-  const narrow = useShellLayout()?.layout === 'narrow';
+  const narrow = useLayout() === 'narrow';
   const isNew = !id;
 
   const { data: groupsData } = useQuery(GET_DASH_GROUPS, { fetchPolicy: 'cache-and-network', skip: isNew });

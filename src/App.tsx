@@ -3,7 +3,7 @@ import "./App.css";
 
 import Logo from "./Logo";
 import { Link, Navigate, useLocation } from "react-router-dom";
-import { SidebarShell } from "./lib/denim-fabric";
+import Shell from "./lib/denim-fabric-sidebar";
 import type { IApplication, IAppStatus } from "./lib/denim-fabric";
 import { ConfirmDialogHost } from "./lib/denim-fabric/shared/ConfirmDialog";
 
@@ -47,7 +47,7 @@ const SetupGuard: React.FC = () => {
 //
 // The old top bar carried TelemetryControls on every non-kiosk page: a
 // recording/playback/live dot, plus car/track registration while the sim is
-// live. SidebarShell has no always-visible header slot (its footer only
+// live. The sidebar has no always-visible header slot (its footer only
 // shows in the full-width sidebar), so the controls run here, beside the
 // shell, and their dot becomes the Dashboards app's status dot in the
 // sidebar (visible in the full sidebar, the icon rail and the phone menu).
@@ -113,7 +113,7 @@ const App: React.FC = () => {
       <HubSubscriptionRouter>
       <TelemetryMonitor onMode={onMode} />
       <TelemetryModeContext.Provider value={telemetryMode}>
-      <SidebarShell
+      <Shell
         title="Monocoque Builder"
         Logo={Logo}
         Brand={Brand}

@@ -9,9 +9,9 @@
 import React from 'react';
 import { FontIcon, mergeStyleSets, useTheme } from '@fluentui/react';
 import { useNavigate } from 'react-router-dom';
-import { FullBleed } from '../SidebarShell/FullBleed';
-import { useBreakpoint, useShellLayout } from '../SidebarShell/layout';
-import type { IBackTarget } from '../SidebarShell/layout';
+import { FullBleed } from '../shared/FullBleed';
+import { useLayout, useShellLayout } from '../shared/layout';
+import type { IBackTarget } from '../shared/layout';
 import { DrillIn } from '../shared/motion';
 
 export interface MasterDetailProps {
@@ -104,16 +104,18 @@ export const MasterDetail: React.FC<MasterDetailProps> = ({
   const theme = useTheme();
   const s = React.useMemo(() => getStyles(theme), [theme]);
   const shell = useShellLayout();
-  const ownLayout = useBreakpoint();
-  const layout = shell?.layout ?? ownLayout;
+  const layout = useLayout();
+  // The sidebar draws a phone back bar of its own; under the top bar (or no
+  // bar) MasterDetail draws one above the detail.
+  const barBack = shell?.backBar ? shell : null;
   const navigate = useNavigate();
   const narrow = layout === 'narrow';
   const backLabel = back?.label ?? title ?? 'Back';
   const backTo = back?.to ?? listUrl;
 
-  // On a phone, inside SidebarShell, the shell's back bar leads to the list
+  // On a phone, under a bar with a back bar, that bar leads to the list
   // while a detail is open (instead of to the menu).
-  const setBack = shell?.setBack;
+  const setBack = barBack?.setBack;
   React.useLayoutEffect(() => {
     if (!setBack || !narrow || !selected) return;
     setBack({ label: backLabel, to: backTo });
@@ -161,8 +163,8 @@ export const MasterDetail: React.FC<MasterDetailProps> = ({
           {selected && (
             <DrillIn from="right" animateMount={mounted.current}>
               <div>
-                {!shell && (
-                  <button type="button" className={s.backBar} onClick={() => navigate(backTo)}>
+                {!barBack && (
+                  <button type="button" className={s.backBar} onClick={() => (shell ? shell.goUp(backTo) : navigate(backTo))}>
                     <FontIcon iconName="ChevronLeft" aria-hidden />
                     {backLabel}
                   </button>
@@ -173,9 +175,9 @@ export const MasterDetail: React.FC<MasterDetailProps> = ({
           )}
           <DrillIn from="left" animateMount={false} replayKey={returns}>
             <div hidden={selected}>
-              {/* Inside SidebarShell the bar above already shows the app's
-                  name; keep only the list's own actions. */}
-              {shell ? listActions && <div className={s.listHeader}>{listActions}</div> : header}
+              {/* A bar's back bar above already shows the app's name; keep
+                  only the list's own actions. */}
+              {barBack ? listActions && <div className={s.listHeader}>{listActions}</div> : header}
               {list}
             </div>
           </DrillIn>

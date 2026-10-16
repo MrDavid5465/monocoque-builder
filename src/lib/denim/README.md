@@ -26,7 +26,9 @@ a routes component; a skin draws the chrome with them.
 | Package | What it is |
 |---|---|
 | **denim** (this) | the core: `<DenimProvider>`, hooks, `<DenimRoutes>`, the server contract |
-| [denim-fabric](https://github.com/MrDavid5465/denim-fabric) | the Fluent UI skin ("Fabric" is Fluent's old name): `TopBarShell` (the original Denim look), `SidebarShell` (grouped sidebar, master-detail), the Settings dialog, splash, themes, Photo |
+| [denim-fabric](https://github.com/MrDavid5465/denim-fabric) | the Fluent UI skin ("Fabric" is Fluent's old name): what every bar shares (the Settings dialog, splash, themes, master-detail, the layout hook) |
+| [denim-fabric-topbar](https://github.com/MrDavid5465/denim-fabric-topbar) | its top bar, the original Denim look (header + waffle panel) |
+| [denim-fabric-sidebar](https://github.com/MrDavid5465/denim-fabric-sidebar) | its sidebar (grouped applications, icons, status dots, phone drill-in). The two bars export the same members; an app clones one |
 | your own | any UI kit: implement the contract in [Writing a skin](#writing-a-skin) |
 
 Pages inside an application are normally
@@ -42,9 +44,11 @@ Before writing any code with Denim, read its skill,
 [`.claude/skills/denim-app-shell/SKILL.md`](./.claude/skills/denim-app-shell/SKILL.md):
 the core contract, registering applications, routes, settings and the
 Settings extension point, status dots, the server contract, and plain-http
-LAN pitfalls. If you use denim-fabric, also read its skill,
-`denim-fabric/.claude/skills/denim-fabric-shells/SKILL.md` (the two shells,
-master-detail, theming, Photo, and writing your own skin).
+LAN pitfalls. If you use denim-fabric, also read its skills,
+`denim-fabric/.claude/skills/denim-fabric/SKILL.md` (choosing a bar,
+master-detail, the layout hook, theming) and `write-a-denim-skin`, and your
+bar's (`denim-fabric-topbar/.claude/skills/denim-fabric-topbar/SKILL.md` or
+`denim-fabric-sidebar/.claude/skills/denim-fabric-sidebar/SKILL.md`).
 
 Then the siblings' skills:
 
@@ -63,11 +67,13 @@ was started inside that repository, so open the `SKILL.md` files directly.
 
 The libraries import each other by relative path (`../denim`,
 `../typical-admin-fabric`, `../per-form`), so they must be sibling folders.
-The core alone needs no siblings; denim-fabric needs all of them:
+The core alone needs no siblings; denim-fabric needs all of them, plus
+one bar:
 
 ```
 your-app/src/lib/denim/
 your-app/src/lib/denim-fabric/
+your-app/src/lib/denim-fabric-sidebar/     (or denim-fabric-topbar/)
 your-app/src/lib/typical-admin/
 your-app/src/lib/typical-admin-fabric/
 your-app/src/lib/per-form/
@@ -80,6 +86,7 @@ Get them from:
 - https://github.com/MrDavid5465/typical-admin-fabric
 - https://github.com/MrDavid5465/per-form
 - https://github.com/MrDavid5465/denim-fabric
+- https://github.com/MrDavid5465/denim-fabric-sidebar (or https://github.com/MrDavid5465/denim-fabric-topbar)
 
 ```sh
 cd your-app/src/lib
@@ -88,6 +95,7 @@ git clone https://github.com/MrDavid5465/typical-admin
 git clone https://github.com/MrDavid5465/typical-admin-fabric
 git clone https://github.com/MrDavid5465/per-form
 git clone https://github.com/MrDavid5465/denim-fabric
+git clone https://github.com/MrDavid5465/denim-fabric-sidebar   # or denim-fabric-topbar
 ```
 
 (or add them as git submodules at those paths, or copy them in). They are
@@ -124,10 +132,10 @@ denim-fabric's README):
   </BrowserRouter>
 </ApolloProvider>
 
-// App.tsx
-import { SidebarShell } from './lib/denim-fabric';
+// App.tsx: the bar is the only import that differs between bars
+import Shell from './lib/denim-fabric-sidebar';   // or './lib/denim-fabric-topbar'
 export default function App() {
-  return <SidebarShell title="Rig Config" components={{ devices: DevicesAdmin, designer: LayoutDesigner }} />;
+  return <Shell title="Rig Config" components={{ devices: DevicesAdmin, designer: LayoutDesigner }} />;
 }
 ```
 
@@ -270,8 +278,11 @@ function PlainSettings({ onClose }: { onClose: () => void }) {
 }
 ```
 
-denim-fabric's `TopBarShell` and `SidebarShell` are the same shape with
-Fluent UI; start a new skin from a copy of one of them.
+denim-fabric's bars (denim-fabric-topbar's `TopBarShell`,
+denim-fabric-sidebar's `SidebarShell`) are the same shape with Fluent UI;
+start a new skin from a copy of one of them. Bars that can stand in for
+each other export the same members (denim-fabric's `write-a-denim-skin`
+skill).
 
 ## Server contract
 
@@ -543,20 +554,21 @@ denim-fabric's README. Variations:
 ## Migrating from the single-package Denim
 
 Before the split, `denim` rendered the Fluent shell itself. That shell is
-now `TopBarShell` in denim-fabric, with the same props and the same look
-(verified pixel-identical). Clone denim-fabric next to denim, then:
+now the top bar, `denim-fabric-topbar`, with the same props and the same
+look (verified pixel-identical). Clone denim-fabric and denim-fabric-topbar
+next to denim, then:
 
 | Before | After |
 |---|---|
-| `import Denim from './lib/denim'` | `import Denim from './lib/denim-fabric'` (default export = `TopBarShell`) |
-| `import { IApplication, ISettingsTab, THEMES, ... } from './lib/denim'` | same names from `'./lib/denim-fabric'` (it re-exports the core); or the core types from `'./lib/denim'` |
+| `import Denim from './lib/denim'` | `import Denim from './lib/denim-fabric-topbar'` (default export = the top bar's `Shell`) |
+| `import { IApplication, ISettingsTab, THEMES, ... } from './lib/denim'` | same names from `'./lib/denim-fabric'` or `'./lib/denim-fabric-topbar'` (both re-export the core); or the core types from `'./lib/denim'` |
 | `'./lib/denim/lib'` (Form, List, Fluent re-exports, `getStyle`) | `'./lib/denim-fabric/lib'` |
 | `'./lib/denim/lib/queries'` | unchanged (core) |
 | `'./lib/denim/components/ConfirmDialog'` | `'./lib/denim-fabric'` (`confirmAsync`, `ConfirmDialogHost`): one implementation, typical-admin-fabric's, re-exported. Mount one `<ConfirmDialogHost />` |
-| `'./lib/denim/components/Photo'` | `'./lib/denim-fabric/Photo'` |
+| `'./lib/denim/components/Photo'` | `'./lib/denim-fabric/Photo'` (a re-export of typical-admin-fabric's `lib/templates/Photo`) |
 | `'./lib/denim/components/Splashscreen'` | `Splash` from `'./lib/denim-fabric'` |
 | `'./lib/denim/themes'` (`THEMES`, `buildTheme`, palettes) | `'./lib/denim-fabric/themes'`; the key helpers (`themeKey`, `parseThemeKey`, `COLOR_KEYS`, `MODE_KEYS`) are also in the core's `themes` |
-| `HeaderLink` | from `'./lib/denim-fabric'` |
+| `HeaderLink` | from `'./lib/denim-fabric-topbar/TopBarShell/HeaderLink'` |
 | `getCurrentApp()` (read `document.location`) | `useNav().activeApp` (works under `HashRouter` too), or `useCurrentApp()` from denim-fabric |
 | `setTheme(theme, themes)` | `applyTheme(settings, themes)` from denim-fabric |
 | `components/Admin` (commented-out legacy) | removed |

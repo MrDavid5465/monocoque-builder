@@ -1,7 +1,8 @@
 // The headless core of Denim: one provider that owns the application
 // registry, the settings store and the backend's health, and hands them to a
 // skin through hooks (hooks.ts). It renders no markup of its own; a skin
-// (denim-fabric's TopBarShell or SidebarShell, or your own) draws everything.
+// (a denim-fabric bar such as denim-fabric-topbar or denim-fabric-sidebar,
+// or your own) draws everything.
 import React from 'react';
 import { useMutation, useQuery } from '@apollo/client/react';
 import { IApplication, IMy, UPDATE_SETTINGS, buildMyQuery } from './lib/queries';

@@ -9,7 +9,7 @@ import List from '../../typical-admin-fabric/List';
 import Links from '../../typical-admin-fabric/Links';
 import { label, resolveLabels } from '../../typical-admin';
 import type { IComponents, IDispatcher, ITACallBacks, ITALabels, ITASchema, Name } from '../../typical-admin';
-import { useBreakpoint, useShellLayout } from '../SidebarShell/layout';
+import { useLayout } from '../shared/layout';
 import { MasterDetail } from './MasterDetail';
 import { useDetailRoute } from './useDetailRoute';
 import { useReducedMotion } from '../../denim';
@@ -59,9 +59,7 @@ export const AdminMasterDetail: React.FC<AdminMasterDetailProps> = ({
 }) => {
   const route = useDetailRoute();
   const { pathname } = useLocation();
-  const shell = useShellLayout();
-  const ownLayout = useBreakpoint();
-  const narrow = (shell?.layout ?? ownLayout) === 'narrow';
+  const narrow = useLayout() === 'narrow';
   const labels = React.useMemo(() => labelsProp ?? {}, [labelsProp]);
   const l = resolveLabels(name, labels);
 

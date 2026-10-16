@@ -8,7 +8,7 @@ import { FontIcon, IconButton, mergeStyles, mergeStyleSets, useTheme } from '@fl
 import type { ITheme } from '@fluentui/react';
 import { useApplications, useAppStatus, useNav } from '../../denim';
 import type { IApplication, IAppStatus } from '../../denim';
-import { SlidingIndicator } from '../shared/motion';
+import { SlidingIndicator } from '../../denim-fabric/shared/motion';
 
 export type SidebarVariant = 'full' | 'rail' | 'screen';
 

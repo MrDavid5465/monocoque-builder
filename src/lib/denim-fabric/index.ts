@@ -1,38 +1,32 @@
-// denim-fabric: the Denim app shell rendered with Fluent UI v8 (formerly
-// Office UI Fabric). Two layouts over the headless core in ../denim:
-// TopBarShell (the original header + waffle look) and SidebarShell (grouped
-// sidebar, optional master-detail). See README and .claude/skills/.
-import { TopBarShell } from './TopBarShell';
+// denim-fabric: the shared Fluent UI v8 (formerly Office UI Fabric) pieces
+// of the Denim app shell, over the headless core in ../denim. It has no bar
+// of its own: an app adds one bar package beside it, denim-fabric-topbar
+// (header + waffle panel) or denim-fabric-sidebar (grouped sidebar), and
+// ships only that one. Both bars re-export everything here. See README and
+// .claude/skills/.
 
 // Everything from the core, so one import serves an app.
 export * from '../denim';
 
-// Shells
-export { TopBarShell };
-export type { TopBarShellProps } from './TopBarShell';
-export { SidebarShell } from './SidebarShell';
-export type { SidebarShellProps } from './SidebarShell';
-export default TopBarShell;
+// The bars' shared props and export surface
+export type { ShellProps, ShellComponent } from './shared/shell';
+export type { BarOwnExports, BarExports } from './shared/barContract';
 
-// TopBarShell's pieces, for a variation of it
-export { Header } from './TopBarShell/Header';
-export type { HeaderProps } from './TopBarShell/Header';
-export { HeaderLink } from './TopBarShell/HeaderLink';
-export { NavBar } from './TopBarShell/NavBar';
-export { AppNavBar } from './TopBarShell/AppNavBar';
-
-// SidebarShell's pieces and the master-detail pattern
-export { Sidebar, StatusDot } from './SidebarShell/Sidebar';
-export type { SidebarProps, SidebarVariant } from './SidebarShell/Sidebar';
-export { FullBleed } from './SidebarShell/FullBleed';
+// Layout, under any bar
 export {
   useShellLayout,
+  useLayout,
   useBreakpoint,
+  useGoUp,
+  useSimpleShellLayout,
   layoutFor,
   DEFAULT_BREAKPOINTS,
   ShellLayoutContext,
-} from './SidebarShell/layout';
-export type { ShellLayout, IBreakpoints, IBackTarget, IShellLayoutContext } from './SidebarShell/layout';
+} from './shared/layout';
+export type { ShellLayout, IBreakpoints, IBackTarget, IShellLayoutContext } from './shared/layout';
+export { FullBleed } from './shared/FullBleed';
+
+// The master-detail pattern
 export { MasterDetail } from './MasterDetail/MasterDetail';
 export type { MasterDetailProps } from './MasterDetail/MasterDetail';
 export { AdminMasterDetail } from './MasterDetail/AdminMasterDetail';
@@ -58,7 +52,8 @@ export { perfEnabled, perfStart, perfAnimStart, perfAnimEnd, perfMotionProps } f
 // Fluent themes for the core's theme keys
 export { THEMES, buildTheme, PALETTES } from './themes';
 export type { ThemeBuilder } from './themes';
-export { default as light } from './lib/light';
-export { default as dark } from './lib/dark';
+
+// getStyle() and its builder (shared + form + the bar's styles)
 export { getStyle, useCurrentApp } from './lib';
-export { default as styles } from './lib/getStyle';
+export { default as styles, sharedStyles, registerBarStyles } from './lib/getStyle';
+export type { Style, SharedStyle, BarStyle } from './lib/getStyle';

@@ -1,41 +1,63 @@
 # denim-fabric
 
-The [Denim](https://github.com/MrDavid5465/denim) app shell rendered with
-[Fluent UI v8](https://developer.microsoft.com/en-us/fluentui)
-(`@fluentui/react`). "Fabric" is Office UI Fabric, Fluent's old name: this
-package is the Fluent skin over Denim's headless core, just as
-typical-admin-fabric is the Fluent skin over typical-admin. Layouts are
-components inside it:
+The shared [Fluent UI v8](https://developer.microsoft.com/en-us/fluentui)
+(`@fluentui/react`) pieces of the [Denim](https://github.com/MrDavid5465/denim)
+app shell. "Fabric" is Office UI Fabric, Fluent's old name: this is the
+Fluent skin over Denim's headless core, just as typical-admin-fabric is the
+Fluent skin over typical-admin.
 
-- **`TopBarShell`**: the original Denim look. A fixed header with the
-  current application's name and links, a waffle panel listing every
-  application, Settings in the panel's footer.
-- **`SidebarShell`**: a configuration-app layout. Applications grouped under
-  headings with icons and status dots, Settings in the sidebar footer, and
-  an optional list | detail pattern (`MasterDetail`) for the content. Wide,
-  medium and phone layouts; touch-friendly.
+It has **no bar of its own**. The bars are separate packages, so an app
+ships only the one it uses:
 
-Shared Fluent pieces: the Settings dialog (with the core's extension tabs),
-the splash screen, theme application (12 colours x light / dark / high
-contrast, favicon in the theme colour), the confirm dialog (typical-admin-
-fabric's, re-exported), and `Photo` (an image picker and cropper).
+| Package | The bar |
+|---|---|
+| [denim-fabric-topbar](https://github.com/MrDavid5465/denim-fabric-topbar) | the original Denim look: a fixed header with the active application's name and links, a waffle panel listing every application, Settings in the panel's footer |
+| [denim-fabric-sidebar](https://github.com/MrDavid5465/denim-fabric-sidebar) | a configuration-app layout: applications grouped under headings with icons and status dots, Settings in the sidebar footer; wide, medium and phone layouts; touch-friendly |
 
-It is meant to be cloned and changed: copy a shell's folder to vary it, or
-use it as the model for a skin in another UI kit (see
-[Write your own skin](#write-your-own-skin)).
+Both bars export **exactly the same members** (the same names, the same
+types), so switching is an import-path change. Each re-exports everything
+here, so an app can import from its bar package alone.
+
+What lives here, shared by every bar:
+
+- the **Settings dialog** (the core's General tab and extension tabs),
+  the **splash**, **theming** (12 colours x light / dark / high contrast,
+  favicon in the theme colour), the **confirm dialog** (typical-admin-
+  fabric's, re-exported) and the **logo**;
+- **master-detail** (`MasterDetail`, `AdminMasterDetail` for a ReactiveAdmin
+  screen, `useDetailRoute`) and **`FullBleed`**: they work under any bar;
+- the **layout hook** (`useLayout`, `useShellLayout`, the breakpoints) that
+  every bar provides;
+- **motion** (`SlidingIndicator`, `DrillIn`, `ShellMotionProvider`) and the
+  `debugPerf` timings;
+- `lib/`: the convenience barrel (Fluent, react-router, Apollo hooks,
+  date-fns, typical-admin-fabric's `Form`/`List`/cards, `getStyle()`), kept
+  so existing imports keep working;
+- the bars' shared props (`ShellProps`) and export contract
+  (`shared/barContract.ts`).
+
+It is meant to be cloned and changed: copy a bar's folder to vary it, or
+use the bars as the model for a skin in another UI kit (see
+[Write your own bar or skin](#write-your-own-bar-or-skin)).
 
 Consumed as source (no build step, no npm package).
 
 ## Using with an AI coding agent
 
-Before writing any code with denim-fabric, read its skill,
-[`.claude/skills/denim-fabric-shells/SKILL.md`](./.claude/skills/denim-fabric-shells/SKILL.md)
-(the two shells, master-detail with ReactiveAdmin, responsive behaviour,
-theming, Photo, quick entry),
-[`.claude/skills/write-a-denim-skin/SKILL.md`](./.claude/skills/write-a-denim-skin/SKILL.md)
-before changing a shell or writing a skin for another UI kit, and the core's,
-`denim/.claude/skills/denim-app-shell/SKILL.md` (applications, routes,
-settings and their extension point, status dots, the server contract).
+Before writing any code with denim-fabric, read:
+
+- this package's skill,
+  [`.claude/skills/denim-fabric/SKILL.md`](./.claude/skills/denim-fabric/SKILL.md):
+  choosing a bar, master-detail with ReactiveAdmin, the layout hook,
+  `FullBleed`, theming, the Settings dialog, `getStyle()`, quick entry;
+- your bar's skill: `denim-fabric-topbar/.claude/skills/denim-fabric-topbar/SKILL.md`
+  or `denim-fabric-sidebar/.claude/skills/denim-fabric-sidebar/SKILL.md`;
+- [`.claude/skills/write-a-denim-skin/SKILL.md`](./.claude/skills/write-a-denim-skin/SKILL.md)
+  before changing a bar, writing a new one, or writing a skin for another
+  UI kit (the export surface and the parity check are there);
+- the core's, `denim/.claude/skills/denim-app-shell/SKILL.md` (applications,
+  routes, settings and their extension point, status dots, the server
+  contract).
 
 Then the siblings' skills:
 
@@ -48,13 +70,14 @@ was started inside that repository, so open the `SKILL.md` files directly.
 
 ## Layout: clone the libraries side by side
 
-denim-fabric imports its siblings by relative path (`../denim`,
-`../typical-admin`, `../typical-admin-fabric`, `../per-form`), so all five
-must be sibling folders:
+The packages import each other by relative path (`../denim`,
+`../denim-fabric`, `../typical-admin`, `../typical-admin-fabric`,
+`../per-form`), so they must be sibling folders. Clone **one** bar:
 
 ```
 your-app/src/lib/denim/
 your-app/src/lib/denim-fabric/
+your-app/src/lib/denim-fabric-sidebar/     (or denim-fabric-topbar/)
 your-app/src/lib/typical-admin/
 your-app/src/lib/typical-admin-fabric/
 your-app/src/lib/per-form/
@@ -64,6 +87,7 @@ your-app/src/lib/per-form/
 cd your-app/src/lib
 git clone https://github.com/MrDavid5465/denim
 git clone https://github.com/MrDavid5465/denim-fabric
+git clone https://github.com/MrDavid5465/denim-fabric-sidebar   # or denim-fabric-topbar
 git clone https://github.com/MrDavid5465/typical-admin
 git clone https://github.com/MrDavid5465/typical-admin-fabric
 git clone https://github.com/MrDavid5465/per-form
@@ -73,10 +97,11 @@ git clone https://github.com/MrDavid5465/per-form
 backend, [typiql-rs](https://github.com/MrDavid5465/typiql-rs), is a Rust
 dependency; denim's README has the backend these setups run against.
 
-`SidebarShell`'s master-detail needs a typical-admin-fabric whose `List`
-has the `basePath`, `selectOnClick`, `selectedKey` and `labels` props and
-whose `Links` has `hideBack`, and the typical-admin with `labels.ts` (all
-added alongside this package).
+Master-detail needs a typical-admin-fabric whose `List` has the
+`basePath`, `selectOnClick`, `selectedKey` and `labels` props and whose
+`Links` has `hideBack`, and the typical-admin with `labels.ts`.
+`Photo` needs the typical-admin-fabric with `lib/templates/Photo/` and
+`lib/formStyles.ts`.
 
 ## Peer npm packages
 
@@ -93,23 +118,23 @@ npm i -D typescript@~5.6.2 vite@^6 @vitejs/plugin-react@^4.3.4 \
   @types/react@^18.3.1 @types/react-dom@^18.3.1
 ```
 
-- typical-admin-fabric's list plus three packages for `Photo`
-  (`react-image-crop`, `react-dropzone`, `exif-js`), needed to type-check the
-  folder even if you never render `Photo`.
+- `react-image-crop`, `react-dropzone` and `exif-js` are for `Photo`
+  (typical-admin-fabric's, re-exported here); they are needed to type-check
+  the folders even if you never render it.
 - `@fluentui/react-hooks` and `graphql-tag` come in with `@fluentui/react`
   and `@apollo/client`; don't install them.
 - `@fluentui/react-motion` is Fluent v9's motion library (stable). It has
-  no v9 component dependencies and runs beside Fluent v8; the shells use it
-  for their own motion (see "Motion").
+  no v9 component dependencies and runs beside Fluent v8; the bars use it
+  for their motion (see "Motion").
 - TypeScript needs Vite's client types: `"types": ["vite/client"]` in
   `tsconfig.json`. Everything type-checks under Vite's default strict
   `tsconfig` (`strict`, `noUnusedLocals`, `noUnusedParameters`).
 
-## Common setup
+## Minimal setup
 
-Both setups below share these files and run against the typiql-rs backend in
-denim's README (types `Project`, `Device`, `Profile`; the app list seeded
-with groups and icons).
+These files are the same whichever bar you use; the bar READMEs have the
+complete setups (more applications, master-detail, a status dot, a canvas
+app).
 
 **`vite.config.ts`**: proxy the GraphQL endpoint so it is same-origin in dev.
 
@@ -165,7 +190,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
 );
 ```
 
-- No `ThemeProvider`, `loadTheme` or `initializeIcons()`: the shell applies
+- No `ThemeProvider`, `loadTheme` or `initializeIcons()`: the bar applies
   the theme to `<body>`, and importing it registers Fluent's icons.
 - `<ConfirmDialogHost />` serves `confirmAsync()` (the list delete
   buttons). It is typical-admin-fabric's, re-exported: there is one.
@@ -211,7 +236,7 @@ const schemaDefinition: ITASchema = {
   edit: form,
 };
 
-// Mounted by the shell at /projects/*; ReactiveAdmin nests its own routes there.
+// Mounted by the bar at /projects/*; ReactiveAdmin nests its own routes there.
 export default function ProjectsAdmin() {
   return (
     <ReactiveAdmin
@@ -223,115 +248,94 @@ export default function ProjectsAdmin() {
 }
 ```
 
-## Setup 1: TopBarShell
-
-**`src/App.tsx`**
+**`src/App.tsx`**: the bar. This is the only file that names it.
 
 ```tsx
-import { TopBarShell } from './lib/denim-fabric';
+import Shell from './lib/denim-fabric-sidebar';   // or './lib/denim-fabric-topbar'
 import ProjectsAdmin from './admin/ProjectsAdmin';
-import { settingsTabs } from './settings/DeviceTab';
 
-// The header, waffle panel, Settings, theming and one route per application
-// at /<path>/*. `components` maps each application's `frontEnd` (from the
-// backend's my.applications) to its component.
+// The bar, Settings, theming and one route per application at /<path>/*.
+// `components` maps each application's `frontEnd` (from the backend's
+// my.applications) to its component.
 export default function App() {
-  return (
-    <TopBarShell
-      settingsSource="server"
-      settingsFields="deviceName"
-      settingsTabs={settingsTabs}
-      components={{ projects: ProjectsAdmin }}
-    />
-  );
+  return <Shell title="Projects" settingsSource="server" components={{ projects: ProjectsAdmin }} />;
 }
 ```
 
 Applications with no entry in `components` render an empty page; map the
 others as you build them.
 
-**`src/settings/DeviceTab.tsx`**: an extra Settings tab (the extension point
-is the core's; see its skill, section 5).
+## Same exports as every bar
 
-```tsx
-import { useEffect, useState } from 'react';
-import { Form } from '../lib/denim-fabric/lib';
-import type { ISettingsTab, ISettingsTabProps } from '../lib/denim-fabric';
+Every bar package's `index.ts` is exactly:
 
-// A Settings tab: this device's name, saved with the rest of the settings.
-function DeviceTab({ settings, onChange }: ISettingsTabProps) {
-  const [name, setName] = useState<string>(settings.deviceName ?? '');
-  useEffect(() => {
-    // Merged into the one save; isValid=false blocks Save and shows the message.
-    onChange({ deviceName: name }, name.length <= 40, 'Device name: 40 characters at most.');
-  }, [name, onChange]);
-  return (
-    <Form
-      name="device"
-      form={{ deviceName: { type: 'text', label: 'Device name' } }}
-      initialValues={{ deviceName: settings.deviceName ?? '' }}
-      onChange={(_n: string, { clean }: any) => setName(clean.deviceName ?? '')}
-    />
-  );
-}
-
-export const settingsTabs: ISettingsTab[] = [
-  { key: 'device', headerText: 'Device', Component: DeviceTab },
-];
+```ts
+export * from '../denim-fabric';                 // this package, and the core
+export const Shell: ShellComponent = ...;        // the bar's shell
+export default Shell;
 ```
 
-### `TopBarShell` props
-
-Every `<DenimProvider>` prop (`components`, `applications`,
-`settingsSource`, `settingsTabs`, ... see denim's README), plus:
-
-| Prop | What it does |
+| Member | What it is |
 |---|---|
-| `themes` | theme builders keyed `<mode>-<color>` plus `default`; default `THEMES` |
-| `Logo` | splash-screen logo |
-| `Brand` | icon next to the waffle button |
-| `Controls` | right side of the header; on narrow screens it also opens the link menu |
-| `ExternalApps` | extra content at the top of the waffle panel |
-| `welcome` | the `/` page when there is no `RootComponent` and no launch page |
+| `default`, `Shell` | the bar's shell: `React.FC<ShellProps>` |
+| `ShellProps` | every `<DenimProvider>` prop plus `themes`, `Logo`, `Brand`, `title`, `Controls`, `ExternalApps`, `SidebarFooter`, `breakpoints`, `welcome`. A bar ignores the ones it has no place for (each prop's comment says which bars use it). |
+| everything else | from denim-fabric (below) and the core |
 
-## Setup 2: SidebarShell
+So an app moves between bars by changing one import:
 
-**`src/App.tsx`**
-
-```tsx
-import { SidebarShell } from './lib/denim-fabric';
-import DevicesAdmin from './admin/DevicesAdmin';
-import ProfilesAdmin from './admin/ProfilesAdmin';
-import ProjectsAdmin from './admin/ProjectsAdmin';
-import LayoutDesigner from './designer/LayoutDesigner';
-import About from './About';
-import { useRigStatus } from './rigStatus';
-
-// The sidebar lists my.applications under their `group` headings with their
-// `icon`s; applications without a group go under `defaultGroup`.
-export default function App() {
-  return (
-    <SidebarShell
-      title="Rig Config"
-      settingsSource="server"
-      defaultGroup="System"
-      useAppStatus={useRigStatus}
-      components={{
-        devices: DevicesAdmin,      // ReactiveAdmin in list | detail panes
-        profiles: ProfilesAdmin,
-        designer: LayoutDesigner,   // not a list: takes the whole content area
-        projects: ProjectsAdmin,    // a plain ReactiveAdmin page
-        about: About,
-      }}
-    />
-  );
-}
+```diff
+-import Shell from './lib/denim-fabric-topbar';
++import Shell from './lib/denim-fabric-sidebar';
 ```
 
-**`src/admin/DevicesAdmin.tsx`**: a ReactiveAdmin screen inside
-master-detail. `AdminMasterDetail` takes ReactiveAdmin's props; the list
-pane is typical-admin-fabric's `List` (compact: `listColumns`, no page
-heading), the detail pane its show / new / edit slots.
+(and cloning the other bar). A bar's building blocks (`Header`, `NavBar`,
+`Sidebar`, `StatusDot`, ...) are not on the surface; import them from the
+bar's folder, e.g. `./lib/denim-fabric-sidebar/SidebarShell/Sidebar`, when
+you copy or vary that bar.
+
+**The parity check.** The surface is defined once, in
+`shared/barContract.ts` (`BarExports` = this package's exports + `Shell` +
+`default`). Each bar has a `parity.check.ts`:
+
+```ts
+import type * as Bar from './index';
+import type { Assert, MatchesBarExports } from '../denim-fabric/shared/barContract';
+export type SidebarExportParity = Assert<MatchesBarExports<typeof Bar>>;
+```
+
+It fails to type-check (`Type 'false' does not satisfy the constraint
+'true'`) if the bar exports a member the contract doesn't have, lacks one,
+or gives one a different type. Your app's `tsc` checks it (it is under
+`src/`), so it runs in every app's type-check without any setup.
+
+Type-only exports aren't visible to that check, so
+`scripts/check-bar-parity.mjs` compares the bars' complete export lists,
+types included, with the TypeScript compiler. Run it from an app with the
+bars side by side (one bar is enough to check it against the contract):
+
+```sh
+node src/lib/denim-fabric/scripts/check-bar-parity.mjs \
+  src/lib/denim-fabric-topbar src/lib/denim-fabric-sidebar
+```
+
+**Adding a bar, or a member.** A new bar copies one bar's `index.ts` and
+`parity.check.ts` and keeps `index.ts` to those three lines. A member every
+bar should have goes into denim-fabric (it reaches every bar through
+`export *`) or, if each bar implements it differently, into `BarOwnExports`
+in `shared/barContract.ts` and into every bar's `index.ts`, with a sensible
+default or no-op where it doesn't apply. See the `write-a-denim-skin` skill.
+
+## Master-detail
+
+An optional list | detail pattern for an application's content. It works
+under any bar: wide and medium screens show both panes, a phone one at a
+time with a back bar. Under the sidebar that back bar is the sidebar's own
+(it leads to the list while a detail is open); under the top bar, or no
+bar, MasterDetail draws one above the detail.
+
+### A ReactiveAdmin screen
+
+Replace `ReactiveAdmin` with `AdminMasterDetail`; same props:
 
 ```tsx
 import { gql } from '@apollo/client';
@@ -373,7 +377,7 @@ const schemaDefinition: ITASchema = {
   edit: form,
 };
 
-// The list pane shows only the name column; selecting a row opens its
+// The list pane shows the name and kind columns; selecting a row opens its
 // show/edit pages in the detail pane (or full screen on a phone).
 export default function DevicesAdmin() {
   return (
@@ -387,160 +391,33 @@ export default function DevicesAdmin() {
 }
 ```
 
-Compared with a plain screen, the only change is `ReactiveAdmin` ->
-`AdminMasterDetail` (plus the optional `listColumns`). `ProfilesAdmin` is
-the same over the `Profile` type. Set `list.buttons.add` for an Add button
-in the list pane.
-
-The headings read "Devices", "Device", "Edit device", "New device":
-`AdminMasterDetail` uses typical-admin's display `labels`, kept apart from
-the GraphQL names in `name`. Override any of them, e.g.
-`labels={{ singular: 'Rig device', plural: 'Rig devices', showHeading: '{singular} details' }}`
-(the `reactive-admin` skill lists the keys).
-
-**`src/rigStatus.ts`**: the status-dot hook (called once per application).
-
-```ts
-import { gql } from '@apollo/client';
-import { useQuery } from '@apollo/client/react';
-import type { IApplication, IAppStatus } from './lib/denim-fabric';
-
-const GET_DEVICES = gql`query getDevices { getDevices { id name kind port enabled } }`;
-
-// Devices turns amber while any device is disabled.
-export function useRigStatus(app: IApplication): IAppStatus | undefined {
-  const isDevices = app.path === 'devices';
-  const { data } = useQuery<any>(GET_DEVICES, { skip: !isDevices });
-  if (!isDevices || !data) return undefined;
-  return data.getDevices.some((d: any) => !d.enabled)
-    ? { tone: 'warning', label: 'A device is disabled' }
-    : { tone: 'ok', label: 'All devices enabled' };
-}
-```
-
-**`src/designer/LayoutDesigner.tsx`**: an application that isn't a list.
-`FullBleed` cancels the content padding so it fills the area; it owns its
-own toolbar (there are no global Save/Revert buttons), and reports its own
-status dot.
-
-```tsx
-import { useState } from 'react';
-import { DefaultButton, Stack, useTheme } from '@fluentui/react';
-import { FullBleed, useReportAppStatus } from '../lib/denim-fabric';
-import type { IApplication } from '../lib/denim-fabric';
-
-export default function LayoutDesigner({ app }: { app: IApplication }) {
-  const theme = useTheme();
-  const [boxes, setBoxes] = useState([{ x: 40, y: 40 }, { x: 220, y: 120 }]);
-  const [dirty, setDirty] = useState(false);
-  useReportAppStatus(app.path, dirty ? { tone: 'warning', label: 'Unsaved layout' } : undefined);
-
-  return (
-    <FullBleed style={{ display: 'flex', flexDirection: 'column' }}>
-      <Stack horizontal tokens={{ childrenGap: 8, padding: 8 }} style={{ borderBottom: `1px solid ${theme.palette.neutralLight}` }}>
-        <DefaultButton
-          text="Add gauge"
-          onClick={() => {
-            setBoxes(b => [...b, { x: 40 + b.length * 30, y: 200 }]);
-            setDirty(true);
-          }}
-        />
-        <DefaultButton text="Save layout" disabled={!dirty} onClick={() => setDirty(false)} />
-      </Stack>
-      <div
-        style={{
-          flex: 1,
-          position: 'relative',
-          backgroundColor: theme.palette.neutralLighterAlt,
-          backgroundImage: `radial-gradient(${theme.palette.neutralQuaternary} 1px, transparent 1px)`,
-          backgroundSize: '20px 20px',
-        }}
-      >
-        {boxes.map((b, i) => (
-          <div
-            key={i}
-            style={{
-              position: 'absolute', left: b.x, top: b.y, width: 140, height: 90,
-              border: `2px solid ${theme.palette.themePrimary}`, borderRadius: 8,
-              background: theme.palette.white, display: 'grid', placeItems: 'center',
-            }}
-          >
-            Gauge {i + 1}
-          </div>
-        ))}
-      </div>
-    </FullBleed>
-  );
-}
-```
-
-`About` is any plain component: it scrolls inside the content area with the
-shell's padding.
-
-### Without a backend app list
-
-Pass `applications` instead; `group` and `icon` are plain fields:
-
-```tsx
-const applications: IApplication[] = [
-  { name: 'Devices', path: 'devices', defaultRoute: '', frontEnd: 'devices', links: [], group: 'RIG', icon: 'Devices3' },
-  { name: 'Designer', path: 'designer', defaultRoute: '', frontEnd: 'designer', links: [], group: 'DASHBOARDS', icon: 'Design' },
-  { name: 'About', path: 'about', defaultRoute: '', frontEnd: 'about', links: [], icon: 'Info' },
-];
-<SidebarShell title="Rig Config" applications={applications} components={...} />
-```
-
-With the app list from the backend, SidebarShell selects `group icon`;
-pass `applicationFields=""` if your backend doesn't have them.
-
-### How it behaves
-
-| Width | Layout |
-|---|---|
-| wide (>= 1200px: a desktop, a wide rig touchscreen) | sidebar \| content; inside `MasterDetail`, sidebar \| list \| detail. The sidebar collapses to an icon rail (remembered per browser). |
-| medium (>= 700px) | icon rail \| content (list \| detail). The rail's menu button opens the full sidebar over the content. |
-| narrow (a phone) | one screen at a time: the menu (at `/`), then the application (list), then the detail, each with a back bar |
-
-- Selection lives in the URL (`/devices/<id>/show`), so deep links, reloads
-  and the browser's Back and Forward buttons work at every width. The back
-  bar is the browser's Back when that leads to the same place, so it never
-  piles up history.
-- In `AdminMasterDetail` the list stays mounted while a detail opens and
-  closes (on a phone too, hidden), so its page, sort, filters and scroll
-  survive, and the row just closed can be opened again. The row in the URL
-  is highlighted; a deep link, Back/Forward or a new record turns the list
-  to that row's page and scrolls it into view.
+- List pane: typical-admin-fabric's `List`, without its page heading, with
+  `basePath` set to where the app is mounted (so a click while a detail is
+  open goes to `/devices/<id>/show`, not nested under the open one). Set
+  `list.buttons.add` for an Add button in it.
+- Detail pane: a ReactiveAdmin whose list slot is empty, so its own `/new`,
+  `/:id/show`, `/:id/edit` routes render there. Slot overrides
+  (`components={{ show: ..., edit: ... }}`) and `callBacks` work as usual.
+- Headings come from typical-admin's display `labels`, kept apart from the
+  GraphQL names in `name`: "Devices", "Device", "Edit device", "New device"
+  by default. Override any key, e.g. `labels={{ singular: 'Rig device',
+  showHeading: '{singular} details' }}` (the `reactive-admin` skill lists
+  them).
+- `listProps` passes extra props to the `List` (`queryResultKey`,
+  `idField`, `columnSelectable`, `storageKey`); also `components`,
+  `callBacks`, `pageSize`, `labels`, `title` (default the list heading),
+  `empty`, `listWidth`.
+- Selection is the URL (`/devices/<id>/show`): deep links, reloads and the
+  browser's Back and Forward work. The list highlights the row in the URL
+  and turns to its page on a deep link, Back/Forward or a new record.
+- The list stays mounted while details open and close (hidden under the
+  detail on a phone): page, sort, filters and scroll survive, and rows open
+  on click, so the row just closed opens again.
 - On a phone the back bar is the only back control: the detail's own back
-  arrow is dropped (its Edit and Delete stay), and from an edit page the
-  bar goes up to the record, then to the list.
-- On a phone, `/` is the menu rather than the launch page (wide and medium
-  layouts still redirect `/` to the launch page). An application's `links`
-  show as touch pills under the back bar.
-- Touch targets are at least 44px, nothing depends on hover, and keyboard
-  focus is visible. The Settings dialog is in the sidebar footer; each
-  application keeps its own configuration in its own pages.
-- `/kiosk/<path>` shows the application without the sidebar.
-- It moves, briefly (see "Motion"): the sidebar slides, the selection
-  slides between items, a phone's panes slide in. The "Reduce motion"
-  setting, or the OS preference, turns all of it off.
+  arrow is dropped (`Links`' `hideBack`; Edit and Delete stay). From an
+  edit page it goes up to the record, then to the list.
 
-### `SidebarShell` props
-
-Every `<DenimProvider>` prop, plus:
-
-| Prop | What it does |
-|---|---|
-| `title` | your product's name, at the top of the sidebar |
-| `Brand` | icon next to the title |
-| `Logo` | splash-screen logo |
-| `themes` | theme builders; default `THEMES` |
-| `SidebarFooter` | extra content in the sidebar footer, above Settings |
-| `breakpoints` | `{ medium, wide }` in px; default `{ medium: 700, wide: 1200 }` |
-| `welcome` | the `/` page on wide/medium screens with no `RootComponent` and no launch page |
-| `defaultGroup` (core) | heading for applications without `group` |
-| `useAppStatus` (core) | status-dot hook |
-
-### `MasterDetail` for anything
+### Anything else
 
 `AdminMasterDetail` is `MasterDetail` + ReactiveAdmin. For other content,
 use `MasterDetail` with any list and detail, and `useDetailRoute` for the
@@ -548,7 +425,7 @@ selection in the URL:
 
 ```tsx
 import { Link } from 'react-router-dom';
-import { MasterDetail, useDetailRoute } from './lib/denim-fabric';
+import { MasterDetail, useDetailRoute } from '../lib/denim-fabric';
 
 const zones = [{ id: 'cockpit', name: 'Cockpit' }, { id: 'desk', name: 'Desk' }];
 
@@ -582,40 +459,108 @@ export default function ZonesApp() {
 | `back` | where a phone's back bar goes while a detail is open, `{ label, to }`; default the list (`title`, `listUrl`) |
 
 `useDetailRoute(patterns)` defaults to ReactiveAdmin's `['new', ':id/show',
-':id/edit']`. `AdminMasterDetail` also takes `components` (detail-pane slot
-overrides), `callBacks`, `pageSize`, `labels`, `title` (default the list
-heading, `labels.plural`), `listProps` (passed to the `List`:
-`queryResultKey`, `idField`, ...) and `empty`.
+':id/edit']`; call it in a component mounted under a `<route>/*` (every
+application is). Apps that aren't lists don't use MasterDetail.
 
-## Write your own skin
+## Layout under any bar
 
-denim (the core) holds everything that isn't look: the registry, routes, nav
-model, settings and their extension tabs, health, status dots. A skin draws
-it with the core's hooks. Two ways to make your own:
+Every bar provides a `ShellLayoutContext`: the layout for the window's
+width (`'wide'`, `'medium'` or `'narrow'`, from the bar's `breakpoints`,
+default `{ medium: 700, wide: 1200 }`), whether the bar draws a phone back
+bar of its own, and a `goUp(to)` that is the browser's Back when Back leads
+there (so "up" never piles up history).
 
-- **Vary a Fluent shell**: copy `TopBarShell/` or `SidebarShell/` into your
-  app (or your fork) and change it; it keeps working on the same core and
-  the same `shared/` pieces.
-- **Another UI kit**: implement the core's contract (splash, theme, chrome,
-  `<DenimRoutes>`, a Settings dialog from `useSettingsForm`); denim's README
-  has a complete plain-HTML skin. Name it after the kit, the way this one is
-  named after Fabric.
+```tsx
+import { useLayout } from '../lib/denim-fabric';
 
-## Migrating from the single-package Denim
-
-`TopBarShell` is the old `<Denim>`: same props, same look (verified
-pixel-identical in Chromium at 1400px and 800px). The quickest switch is to
-change the import:
-
-```diff
--import Denim from './lib/denim';
-+import Denim from './lib/denim-fabric';
+const narrow = useLayout() === 'narrow';   // the bar's layout; the window's outside a bar
 ```
 
-denim's README has the full table of moved imports (`denim/lib` ->
-`denim-fabric/lib`, `components/Photo` -> `denim-fabric/Photo`,
-`components/ConfirmDialog` -> `confirmAsync`/`ConfirmDialogHost` from
-denim-fabric, themes, `getCurrentApp` -> `useNav().activeApp`).
+`useShellLayout()` returns the whole context (null outside a bar);
+`useBreakpoint(bp)`, `layoutFor(width, bp)` and `DEFAULT_BREAKPOINTS` are
+there for a bar of your own (`useSimpleShellLayout(bp)` builds the context
+for a bar without a back bar).
+
+**`FullBleed`** cancels the bar's content padding, so its children fill
+the whole content area (edge to edge, full height): a canvas, a map, a
+designer. `MasterDetail` uses it. A bar describes its content area with CSS
+custom properties on the page box, which `FullBleed` reads:
+
+| Property | Set by |
+|---|---|
+| `--denim-content-padding` | padding on all four sides (sidebar: 20px, 12px on a phone) |
+| `--denim-content-padding-inline`, `--denim-content-padding-block` | when the sides differ (top bar: `1em`, `0px`) |
+| `--denim-content-height` | the content area's height, when the page box has none (top bar: the viewport below the header) |
+
+```tsx
+import { FullBleed } from '../lib/denim-fabric';
+
+export default function LayoutDesigner() {
+  return <FullBleed style={{ display: 'flex', flexDirection: 'column' }}>{/* toolbar + canvas */}</FullBleed>;
+}
+```
+
+## Theming
+
+- Settings hold a theme key `"<mode>-<color>"` (12 colours x `light` /
+  `dark` / `hc`) and a font scale. The bar builds the Fluent theme from
+  `themes` (default `THEMES`), calls `loadTheme`, applies a `ThemeProvider`
+  to `<body>`, and colours the favicon. A theme change remounts the tree.
+- In your components read colours from the theme, never hard-code them:
+  `useTheme()` inside the bar (preferred), or `getTheme()`;
+  `palette.themePrimary`, `.neutralLight`, `.white` (the page background,
+  dark in dark mode), `semanticColors.*`. See `hand-rolled-components`.
+- A custom `themes` map must keep the `<mode>-<color>` keys plus `default`;
+  each value is `(fontSize) => IPartialTheme` (`buildTheme(mode, color)`
+  shows the shape).
+- `applyTheme(settings, themes)`, `useFluentTheme(themes)` and
+  `FluentThemeRoot` are exported for a bar of your own.
+
+## Settings dialog
+
+`SettingsDialog` renders the core's `useSettingsForm`: a General tab
+(colour, mode, font size, default page, "Reduce motion (this device)", plus
+`settingsGeneralFields`) and one Pivot tab per `settingsTabs` entry, saved
+together. Tabs that don't fit go into an overflow menu. Writing tabs is
+the core skill's section 5. Keep it for global preferences; a feature's own
+configuration is its own application.
+
+## `getStyle()`
+
+`getStyle()` (from `./lib/denim-fabric/lib` or `./lib/denim-fabric`)
+returns class names for the current theme under the names it has always
+had. Each style lives with what uses it, and `getStyle()` puts them
+together:
+
+| Members | Where they live |
+|---|---|
+| `splashScreen`, `appLogo`, `appHeader`, `modalHeader`, `modalBody`, `link`, `dropdownLink`, `alert`, `alertDismissed` | here, `lib/getStyle.ts` (`sharedStyles`) |
+| `error`, `errors`, `hint`, `labelHorizontal`, `fieldHorizontal`, `dangerButton` | typical-admin-fabric, `lib/formStyles.ts` (`getFormStyle()`) |
+| `content`, `navBar`, `headerLink`, `headerLinkActive`, `headerLinkContainer`, `waffle`, `appNavLink`, `appNavLinkActive`, `headerIconButton`, `iconButtonStyle`, `hiddenLgDown`, `hiddenXlUp` | denim-fabric-topbar, `TopBarShell/styles.ts`; present (and typed) only in an app with the top bar |
+
+A bar adds its members with `registerBarStyles(builder)` and a `BarStyle`
+interface augmentation (see the top bar's `styles.ts`). The sidebar's
+styles are its components' own and aren't getStyle() members. The old
+responsive helpers (`sm`, `md`, `lg`, `xLg`, `xxLg`, `xxxLg`, `hiddenSm`,
+`hiddenMd`, ...) are gone; nothing used them. (typical-admin-fabric's own
+`getStyle()` in its `lib/` still has its own.)
+
+## Photo
+
+`Photo` (an image picker with EXIF rotation, cropper, download and remove)
+lives in typical-admin-fabric, `lib/templates/Photo/`, with the other form
+components; see its README. denim-fabric re-exports it under the same name,
+so `import { Photo } from './lib/denim-fabric'` and
+`import Photo from './lib/denim-fabric/Photo'` keep working.
+
+## Quick entry in data-entry apps
+
+When users enter many records in a row, don't bounce each one through the
+full-page `/new` route: offer an add over the current page (a Fluent
+`Panel`/`Modal`, or an inline row above the list), focus the first field,
+pre-fill defaults, save on Enter, then clear and refocus. In a
+MasterDetail, the detail pane's `/new` already keeps the list visible. The
+`denim-fabric` skill has an example.
 
 ## Motion
 
@@ -623,118 +568,113 @@ Every motion moves `transform` or `opacity` of one element and never
 animates layout, so nothing is re-laid out per frame. Without GPU
 compositing (WebKitGTK on some Linux drivers) each frame still repaints what
 moves, so each one moves as little as it can. Where a Fluent v8 component
-has motion of its own, the shell keeps it; `@fluentui/react-motion` and its
+has motion of its own, the bars keep it; `@fluentui/react-motion` and its
 tokens (`durationNormal`/`durationFast`, the decelerate curves) cover the
-rest.
+rest. The shared pieces:
 
 | What | How |
 |---|---|
-| Medium layout's overlay sidebar | Fluent's own `Panel` slide (and its scrim's fade), in and out |
-| Settings dialog | Fluent's own `Modal` fade-out on close (dim layer included). On open, only the dialog surface fades and scales from 0.96 (a CSS animation on the Modal's surface element, with motion tokens); the dim layer appears at once. The content doesn't re-render during the fade-out. |
-| Wide sidebar collapse/expand | the full panel slides by `264 - 60`px and the content moves with it (`translateX`, same clock and curve), while the icon rail fades over the panel's left end. The layout keeps its starting width during the slide and changes once at the end, in the same frame that drops the transforms. Toggling mid-slide reverses from where it is. (`SidebarShell/slide.ts`: the Web Animations API with the motion tokens, because a motion component computes its keyframes once, at mount.) |
-| Selected sidebar item, selected list row (`AdminMasterDetail`) | one indicator (background and accent bar) behind the items slides to the new one (FLIP: `translate` and `scale` from the old rect). It is the only thing drawing the selection's background; the item's bold text changes at once. A quick second click retargets from where it is. It snaps, without sliding, on first render, after a theme change or collapse, and when the item only moved (`shared/motion.tsx`, `SlidingIndicator`). |
-| Phone drill-in | the incoming pane slides 32px and fades in: from the right going in (menu to application, list to detail), from the left coming back. The pane going away just goes. Not on the page the app opened on. |
+| Settings dialog | Fluent's own `Modal` fade-out on close (dim layer included). On open, only the dialog surface fades and scales from 0.96 (a CSS animation on the Modal's surface, with motion tokens); the dim layer appears at once. |
+| A selection that slides (`SlidingIndicator`): `AdminMasterDetail`'s list, the sidebar's items | one indicator behind the items slides to the new one (FLIP: `translate` and `scale` from the old rect). It is the only thing drawing the selection's background. A quick second click retargets from where it is; it snaps on first render, after a theme change, and when the item only moved. |
+| Phone drill-in (`DrillIn`): MasterDetail's detail, the sidebar's panes | the incoming pane slides 32px and fades in: from the right going in, from the left coming back. Not on the page the app opened on. |
+
+The bar's own motion (the sidebar's collapse slide, its overlay) is in the
+bar's README.
 
 **Reduce motion.** The core's `reduceMotion` setting ("Reduce motion (this
 device)" on the General tab) and the OS's `prefers-reduced-motion` both turn
-all of the above off, Fluent's own Panel and Modal motion included (the
-panel and dialog then also hide at once on close). The setting is a
-*device* setting (`DEVICE_SETTINGS` in the core): it stays in this browser
-even with `settingsSource="server"`, and is never sent to `updateSettings`,
-so the backend needs no field. A desktop webview without GPU compositing may
-want it while a phone on the same server doesn't. Default an app to reduced
-motion with `defaultSettings={{ reduceMotion: true }}`. In your own
-components, `useReducedMotion()` (core) says whether to animate, and
-`<ShellMotionProvider>` (SidebarShell renders one around everything) puts
-`@fluentui/react-motion` components below it into "skip" while it's true.
+all of it off. It is a *device* setting: it stays in this browser even with
+`settingsSource="server"`, and is never sent to `updateSettings`. Default
+an app to reduced motion with `defaultSettings={{ reduceMotion: true }}`.
+In your own components, `useReducedMotion()` (core) says whether to
+animate, and `<ShellMotionProvider>` (every bar renders one around
+everything) puts `@fluentui/react-motion` components below it into "skip"
+while it's true.
 
-## Measuring the shell's interactions
+**Measuring.** `localStorage.debugPerf = '1'` and a reload make the bars
+log their interactions and animations (`[perf] ...` lines; the sidebar's
+README lists them); `perfMotionProps(name)` from `shared/perf` makes your
+own motion components log the same way.
 
-SidebarShell can time its own interactions in any browser or webview,
-including one without devtools. In the console run
-`localStorage.debugPerf = '1'` and reload; `localStorage.removeItem('debugPerf')`
-and a reload turn it off. (In the Tauri window, open the inspector with
-right-click > Inspect Element, or Ctrl+Shift+I, in a debug build.) Each
-interaction then logs lines like:
+## Write your own bar or skin
 
+denim (the core) holds everything that isn't look: the registry, routes, nav
+model, settings and their extension tabs, health, status dots. A skin draws
+it with the core's hooks. Three ways to make your own:
+
+- **Vary a bar**: copy `denim-fabric-topbar/TopBarShell/` or
+  `denim-fabric-sidebar/SidebarShell/` into your app (or fork the package)
+  and change it; it keeps working on the same core and the same shared
+  pieces here.
+- **A new Fluent bar**: a package `denim-fabric-<layout>` next to the
+  others, whose `index.ts` and `parity.check.ts` follow
+  [Same exports as every bar](#same-exports-as-every-bar).
+- **Another UI kit**: implement the core's contract (splash, theme, chrome,
+  `<DenimRoutes>`, a Settings dialog from `useSettingsForm`); denim's README
+  has a complete plain-HTML skin. Name it after the kit, the way this one is
+  named after Fabric.
+
+## Migrating
+
+**From the single-package Denim.** The top bar is the old `<Denim>`: same
+props, same look (verified pixel-identical in Chromium). Clone
+denim-fabric and denim-fabric-topbar next to denim, then:
+
+```diff
+-import Denim from './lib/denim';
++import Denim from './lib/denim-fabric-topbar';
 ```
-[perf] sidebar-toggle: 4.1ms to commit, 18.0ms to next frame
-[perf] commit shell-sidebar update 2.3ms (base 1.9ms)
-[perf] anim sidebar-expand: 205ms, 13 frames, 0 long (max 17ms)
-```
 
-- The interactions are `sidebar-toggle`, `overlay-open`/`overlay-close`
-  (the medium layout's menu) and `settings-open`/`settings-close`.
-- "to commit" is the time from the click until React has changed the DOM.
-  "to next frame" adds style, layout and paint, as far as
-  `requestAnimationFrame` can see them.
-- `commit <part>` comes from React Profilers around `shell-sidebar`,
-  `shell-content` (the page) and `settings-dialog`. It shows how long that
-  part took to render, and its un-memoized cost ("base"). A part that
-  doesn't log didn't re-render.
-- `anim <name>` is one animation, logged when it ends: its length, the
-  frames drawn meanwhile (`requestAnimationFrame` callbacks), how many took
-  over 32ms (two missed 60Hz frames: visible stutter) and the worst one.
-  `(interrupted)` means it was reversed or cut short. The names are
-  `sidebar-expand`/`sidebar-collapse`, `sidebar-selection`,
-  `list-selection`, `drill-in-right`/`drill-in-left`,
-  `overlay-open`/`overlay-close` and `settings-enter`/`settings-exit`. The
-  last four, and the drill-in, are timed until no animation is running on
-  the page, so they include anything else animating meanwhile (Fluent fades
-  rows in when a list shows them, for instance). Fluent motion components
-  can log the same way with `perfMotionProps(name)` from `shared/perf`.
-- Each timing is also a `performance.measure`, so it appears in a devtools
-  performance recording.
+denim's README has the full table of moved imports.
 
-The shell keeps the work around its motion small. Toggling the sidebar or
-opening Settings doesn't re-render the page. Variant and state classes are
-merged with `mergeStyles` rather than listed side by side, because which of
-two Fluent classes wins depends on rule order, and a theme change reorders
-the rules.
+**From denim-fabric before the bar packages.**
+
+| Before | Now |
+|---|---|
+| `import Denim from './lib/denim-fabric'`, `{ TopBarShell }` | `import Shell from './lib/denim-fabric-topbar'` (or `{ Shell }`) |
+| `{ SidebarShell } from './lib/denim-fabric'` | `import Shell from './lib/denim-fabric-sidebar'` (or `{ Shell }`) |
+| `TopBarShellProps`, `SidebarShellProps` | `ShellProps` |
+| `useShellLayout`, `useBreakpoint`, `layoutFor`, `DEFAULT_BREAKPOINTS`, `ShellLayoutContext`, `FullBleed`, `MasterDetail`, `AdminMasterDetail`, `useDetailRoute` | unchanged, from `'./lib/denim-fabric'` (or your bar); new: `useLayout()`. `IShellLayoutContext` gained `backBar`. |
+| `Header`, `NavBar`, `AppNavBar`, `HeaderLink`, `HeaderProps` | `'./lib/denim-fabric-topbar/TopBarShell/<name>'` |
+| `Sidebar`, `StatusDot`, `SidebarProps`, `SidebarVariant` | `'./lib/denim-fabric-sidebar/SidebarShell/Sidebar'` |
+| `'./lib/denim-fabric/SidebarShell/layout'`, `.../SidebarShell/FullBleed` | `'./lib/denim-fabric/shared/layout'`, `'./lib/denim-fabric/shared/FullBleed'` |
+| `'./lib/denim-fabric/Photo'` | unchanged (a re-export); the code is in typical-admin-fabric's `lib/templates/Photo/` |
+| `light`, `dark` (and `lib/light.ts`, `lib/dark.ts`) | removed: use `THEMES` / `buildTheme('light', 'blue')` |
+| `getStyle().sm`, `.md`, `.hiddenSm`, ... | removed (unused) |
+| `'./lib/denim-fabric/lib'`, `getStyle()`, `getStyle().error`, ... | unchanged |
 
 ## Verification
 
-Both setups above type-check under Vite's strict `tsconfig` with the peer
-packages above and the five libraries side by side, and were driven in
-headless Chromium (over the LAN, against the typiql-rs backend in denim's
-README):
+Checked in a Vite + React + TS app with the packages side by side, against
+a read-only GraphQL mock shaped like the typiql-rs backend in denim's README:
 
-- TopBarShell: pixel-identical to the pre-split Denim; active link by whole
-  segments; waffle panel; a Settings extension tab saving to the server; a
-  theme change; kiosk route.
-- SidebarShell: groups in order, icons, status dots from the hook and from
-  the app; a ReactiveAdmin list/show/edit/new in master-detail at 1400px,
-  900px and 390px with touch emulation (drill-in, back bar, browser Back and
-  Forward, deep links); a non-list app filling the area; re-visiting apps;
-  Settings from the footer; 44px targets; visible focus. No console errors.
-- Motion (Chromium with 6x CPU throttling, at 1400px, 900px and 390px
-  with touch): every animation above, frame by frame; the panel's edge and
-  the content's edge together on every frame of a collapse/expand, no
-  layout during the slide, one layout change at its end and no jump; a
-  quick second toggle reversing; only one selection highlight on screen at
-  any frame, also with three quick clicks and from the keyboard; the
-  indicator exact after a theme change and in the rail; the OS preference
-  and the setting each turning everything off; the setting kept per device
-  and never sent to the server.
-- Master-detail: one back control on a phone (Edit and Delete kept); display
-  labels; page, sort and filter kept across opening and closing a detail
-  (and a save in it) at 1400px, 900px and 390px, with the closed row
-  reopening; the URL's row highlighted on a deep link, a row switch, Back
-  and a new record; icon buttons 44px with a coarse pointer and 32px with
-  a mouse. TopBarShell stayed pixel-identical.
+- Strict `tsc` (Vite's `tsconfig`) over the Minimal setup with each bar,
+  the bar READMEs' setups, and MasterDetail / AdminMasterDetail / FullBleed
+  under both bars. Both parity checks pass; each fails on an added value
+  export or a changed `Shell` type, and the script on an added type export.
+- The top bar is pixel-identical to the pre-split one (Chromium, 1400px,
+  900px, 800px and 390px with touch): home, a list, show, new, a plain
+  page, the waffle panel, the Settings dialog, the link menu.
+- MasterDetail under the top bar now fills the area below the header
+  (before the split its panes stopped at their content), with its own back
+  bar on a phone; under the sidebar it is unchanged.
+- No console errors or warnings.
 
 ## What's in here
 
 | Path | What it is |
 |---|---|
-| `index.ts` | public API; also re-exports the whole core. Default export: `TopBarShell` |
-| `TopBarShell/` | the shell, `Header`, `NavBar` (current app's links), `AppNavBar` (waffle panel), `HeaderLink` |
-| `SidebarShell/` | the shell, `Sidebar` (full / rail / screen variants, `StatusDot`), `layout.ts` (breakpoints, back-bar context), `slide.ts` (the wide collapse/expand slide), `FullBleed` |
+| `index.ts` | the shared surface; also re-exports the whole core. No default export (that's the bar's) |
+| `shared/shell.ts` | `ShellProps`, `ShellComponent` |
+| `shared/barContract.ts` | `BarExports`, `MatchesBarExports`: the bars' export surface, for each bar's `parity.check.ts` |
+| `shared/layout.ts` | `ShellLayoutContext`, `useLayout`, `useShellLayout`, `useBreakpoint`, `useGoUp`, `useSimpleShellLayout`, breakpoints |
+| `shared/FullBleed.tsx` | `FullBleed` |
 | `MasterDetail/` | `MasterDetail`, `AdminMasterDetail` (ReactiveAdmin), `useDetailRoute` |
-| `shared/` | `SettingsDialog`, `Splash`, `theme.tsx` (`applyTheme`, `useFluentTheme`, `FluentThemeRoot`, favicon), `ConfirmDialog` (re-export), `Logo`, icon registration, `motion.tsx` (`ShellMotionProvider`, `SlidingIndicator`, `DrillIn`), `perf.tsx` (the `debugPerf` timings) |
+| `shared/` (the rest) | `SettingsDialog`, `Splash`, `theme.tsx` (`applyTheme`, `useFluentTheme`, `FluentThemeRoot`, favicon), `ConfirmDialog` (re-export), `Logo`, icon registration, `motion.tsx` (`ShellMotionProvider`, `SlidingIndicator`, `DrillIn`), `perf.tsx` (the `debugPerf` timings) |
 | `themes/` | `THEMES`, `buildTheme`, `PALETTES` (Fluent palettes for the core's theme keys) |
-| `Photo/` | image picker with EXIF rotation, cropper, download and remove |
-| `lib/` | convenience re-exports (Fluent, react-router, Apollo hooks, typical-admin-fabric `Form`/`List`/cards), `getStyle()`, two older single themes |
+| `Photo/` | re-export of typical-admin-fabric's `Photo` |
+| `lib/` | the convenience barrel (Fluent, react-router, Apollo hooks, date-fns, typical-admin-fabric `Form`/`List`/cards, `ButtonDropdown`, `withConditionalRender`), `getStyle()` and its builder |
+| `scripts/check-bar-parity.mjs` | compares the bars' full export lists |
 
 ## License
 

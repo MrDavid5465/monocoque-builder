@@ -1,6 +1,6 @@
 // The cross-feature Settings dialog, in Fluent: the core's useSettingsForm()
 // does the work (General schema, extension tabs, one merged save); this file
-// only draws it. Both shells use it.
+// only draws it. Every bar uses it.
 import React from 'react';
 import { Modal, Pivot, PivotItem, PrimaryButton, DefaultButton, Stack, getTheme, keyframes } from '@fluentui/react';
 import { motionTokens } from '@fluentui/react-motion';

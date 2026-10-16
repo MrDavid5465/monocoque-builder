@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router';
 import { useLazyQuery } from '@apollo/client/react';
 import { Stack, IconButton, PrimaryButton, DefaultButton, TextField, Separator, Form, useQuery, useMutation } from '../../lib/denim-fabric/lib';
-import { useShellLayout } from '../../lib/denim-fabric';
+import { useLayout } from '../../lib/denim-fabric';
 import {
   GET_TRACK_LOCATIONS, ADD_TRACK_LOCATION, UPDATE_TRACK_LOCATION, SEARCH_TRACK_LOCATIONS, GET_KNOWN_TRACKS,
   GeocodeResult,
@@ -35,7 +35,7 @@ const TrackEdit: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { pathname } = useLocation();
-  const narrow = useShellLayout()?.layout === 'narrow';
+  const narrow = useLayout() === 'narrow';
   const isNew = !id;
 
   // Unconditional (not skip: isNew like before) — this now also feeds

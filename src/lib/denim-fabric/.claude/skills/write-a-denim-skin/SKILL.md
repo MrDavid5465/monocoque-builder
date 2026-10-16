@@ -1,36 +1,67 @@
 ---
 name: write-a-denim-skin
-description: How to write your own skin (UI-kit package or layout) for Denim's headless core - the five-part contract (splash, theme, chrome from useApplications/useNav, DenimRoutes, Settings from useSettingsForm), splitShellProps, how denim-fabric's TopBarShell and SidebarShell implement it, and where a variation belongs (props, a copied shell, or a new package named after its UI kit). Use before building an app frame in a UI kit other than Fluent, a new layout, or a heavily changed copy of TopBarShell/SidebarShell.
+description: How to write your own skin or bar for Denim's headless core - the five-part contract (splash, theme, chrome from useApplications/useNav, DenimRoutes, Settings from useSettingsForm), splitShellProps, how denim-fabric's bar packages (denim-fabric-topbar, denim-fabric-sidebar) implement it, the export surface every bar shares and its parity check, where shared pieces live (denim-fabric) versus a bar's own, and where a variation belongs (props, a copied bar, a new bar package, or a new UI-kit package). Use before building an app frame in a UI kit other than Fluent, a new layout, a heavily changed copy of a bar, or adding an export to a bar.
 license: MIT
 ---
 
-# Writing a Denim skin
+# Writing a Denim skin or bar
 
 Denim follows the pattern of typical-admin / typical-admin-fabric: a
 headless core (`denim`) and a package per UI kit (`denim-fabric` = Fluent
-UI, formerly Office UI Fabric). Layouts live inside the UI-kit package.
+UI, formerly Office UI Fabric). The bars (layouts) are separate packages
+named core -> UI kit -> layout, so an app ships only the bar it uses:
+
+```
+denim                  headless core: provider, hooks, routes, contract
+denim-fabric           shared Fluent pieces; no bar
+denim-fabric-topbar    the top bar        (index.ts = shared surface + Shell)
+denim-fabric-sidebar   the sidebar        (index.ts = shared surface + Shell)
+```
+
 These libraries are cloned or copied side by side so you can overlay them,
 or write a skin of your own over the same core.
 
 ## Decide where the change goes
 
-1. **A prop** of an existing shell (`Brand`, `Controls`, `SidebarFooter`,
+1. **A prop** of a bar (`Brand`, `Controls`, `SidebarFooter`,
    `breakpoints`, `themes`, `welcome`, the core's `defaultGroup`,
    `useAppStatus`). Cheapest; try first.
-2. **A copied shell**: copy `denim-fabric/TopBarShell/` or `SidebarShell/`
-   into your app (e.g. `src/shell/`), fix its relative imports, and change
-   it. You keep `shared/` (Settings dialog, splash, theme, ConfirmDialog)
+2. **A copied bar**: copy `denim-fabric-topbar/TopBarShell/` or
+   `denim-fabric-sidebar/SidebarShell/` into your app (e.g. `src/shell/`),
+   fix its relative imports, and change it. You keep denim-fabric (Settings
+   dialog, splash, theme, ConfirmDialog, master-detail, the layout hook)
    and the core.
-3. **A new skin package** for another UI kit, named after the kit
-   (`denim-<kit>`), cloned next to `denim`. Layouts go inside it as
-   components, never as separate packages.
+3. **A new Fluent bar**: a package `denim-fabric-<layout>` cloned next to
+   denim-fabric, following "The export surface" below.
+4. **A new skin package** for another UI kit, named after the kit
+   (`denim-<kit>`, with its bars as `denim-<kit>-<layout>` if it has more
+   than one), cloned next to `denim`.
 
 Never add markup or a UI-kit import to `denim`; it must stay headless.
+Never put a bar into denim-fabric; it holds only what every bar shares.
+
+## Where the pieces live
+
+| Piece | Lives in | Why |
+|---|---|---|
+| Settings dialog, splash, logo, theme application, palettes, ConfirmDialog | denim-fabric `shared/`, `themes/` | every bar draws them the same |
+| `MasterDetail`, `AdminMasterDetail`, `useDetailRoute`, `FullBleed` | denim-fabric `MasterDetail/`, `shared/FullBleed.tsx` | content, not chrome: must work under any bar |
+| the layout hook (`ShellLayoutContext`, `useLayout`, `useShellLayout`, breakpoints, `useGoUp`) | denim-fabric `shared/layout.ts` | every bar provides it; content reads it |
+| motion (`SlidingIndicator`, `DrillIn`, `ShellMotionProvider`), `debugPerf` | denim-fabric `shared/motion.tsx`, `shared/perf.tsx` | any bar can use them |
+| `ShellProps`, the export contract | denim-fabric `shared/shell.ts`, `shared/barContract.ts` | defined once for every bar |
+| `getStyle()` and the convenience barrel | denim-fabric `lib/` | compatibility; bars register their own styles into it |
+| form styles, `Photo` | typical-admin-fabric `lib/formStyles.ts`, `lib/templates/Photo/` | form pieces, next to the other form components |
+| a bar's chrome and its styles | the bar's package | only that bar uses them |
+
+When a bar grows something another bar could use (a hook, a motion, a
+component that isn't chrome), move it to denim-fabric rather than copying
+it.
 
 ## The contract
 
-A shell component takes `DenimShellProps` plus its own props, splits them
-with `splitShellProps`, and renders `<DenimProvider>` around a layout that:
+A shell component takes `ShellProps` (which extends the core's
+`DenimShellProps`), splits them with `splitShellProps`, and renders
+`<DenimProvider>` around a layout that:
 
 | # | Does | With |
 |---|---|---|
@@ -40,17 +71,84 @@ with `splitShellProps`, and renders `<DenimProvider>` around a layout that:
 | 4 | renders the content | `<DenimRoutes wrap={(content, { app, kiosk }) => ...} home? welcome? />` |
 | 5 | offers a Settings dialog | `useSettingsForm(isOpen)`: render `general.schema` (a per-form schema) with `general.initialValues` / `general.onChange`, each `tabs[i].Component` with `tabs[i].props`, then `await save()` (true on success), `saving`, `error` |
 
+A Fluent bar also:
+
+- provides `ShellLayoutContext` (`layout` from its `breakpoints`,
+  `backBar`, `setBack`, `goUp`). Without a phone back bar of its own, use
+  `useSimpleShellLayout(breakpoints)` (`backBar: false`; MasterDetail then
+  draws its own). With one, set `backBar: true` and honour `setBack`.
+- sets the content CSS variables `FullBleed` reads on the box its pages
+  render in: `--denim-content-padding`, or `-inline`/`-block` when the
+  sides differ, and `--denim-content-height` when that box has no definite
+  height.
+- wraps everything in `<ShellMotionProvider>` (reduced motion).
+
 ```tsx
-export function MyShell(props: DenimShellProps & { title?: string }) {
+export const MyShell: React.FC<ShellProps> = props => {
   const [core, own] = splitShellProps(props);
   return <DenimProvider {...core}><MyLayout {...own} /></DenimProvider>;
-}
+};
 ```
 
 denim's README has a complete plain-HTML skin that type-checks and runs;
-start from it, or from a copy of a Fluent shell.
+start from it, or from a copy of a Fluent bar.
 
-## Things the Fluent shells learned (keep them)
+## The export surface (every bar the same)
+
+Interchangeable packages export the same members with the same types, even
+though the components differ, so switching is an import-path change. A
+Fluent bar's `index.ts` is exactly:
+
+```ts
+import { MyShell } from './MyShell';
+import type { ShellComponent } from '../denim-fabric/shared/shell';
+
+export * from '../denim-fabric';               // the shared surface, and the core
+export const Shell: ShellComponent = MyShell;  // ShellProps; say which props it ignores
+export default Shell;
+```
+
+and its `parity.check.ts` is:
+
+```ts
+import type * as Bar from './index';
+import type { Assert, MatchesBarExports } from '../denim-fabric/shared/barContract';
+export type MyBarExportParity = Assert<MatchesBarExports<typeof Bar>>;
+```
+
+`MatchesBarExports` compares the bar's value exports with `BarExports`
+(denim-fabric's exports + `BarOwnExports`: `Shell`, `default`), names and
+types. The app's `tsc` checks it, because the bar sits under `src/`. Type-
+only exports are invisible to it; `denim-fabric/scripts/check-bar-parity.mjs
+<bar dir>...` compares the full lists (types included) with the
+TypeScript compiler. Run both after any change to a bar's `index.ts`.
+
+Rules:
+
+- Prop differences go into `ShellProps` (one type for all bars): add an
+  optional prop, document which bars use it, and let the others ignore it.
+- A new member every bar should have: put it in denim-fabric if it can be
+  shared (it reaches every bar through `export *`); otherwise add it to
+  `BarOwnExports` and to every bar's `index.ts`, with a sensible default or
+  no-op where it doesn't apply.
+- A bar's building blocks (`Header`, `Sidebar`, ...) stay off the surface;
+  people import them from the bar's folder when they copy or vary it.
+- Another UI kit's skin defines its own surface the same way (a shared type
+  in its shared package), and keeps the same member names as the Fluent
+  one where they mean the same thing.
+
+## Styles
+
+Keep a bar's styles in its own package. If old code reads them through
+`getStyle()` (the top bar's `navBar`, `headerLink`, ...), register them:
+`registerBarStyles(builder)` from `denim-fabric/lib/getStyle`, plus a
+`declare module '../../denim-fabric/lib/getStyle' { interface BarStyle
+extends MyBarStyle {} }` so they are typed there. A new bar needn't add any.
+Merge a component's variant and state classes with `mergeStyles` into one
+class; never rely on the order of two Fluent classes (a theme change
+reshuffles rules).
+
+## Things the Fluent bars learned (keep them)
 
 - **Theme timing** (Fluent): `loadTheme` mutates a global without
   re-rendering; apply it in a layout effect and force one more render
@@ -63,8 +161,7 @@ start from it, or from a copy of a Fluent shell.
   deep links and Back work; read it with a `useDetailRoute`-style helper
   (`useParams()['*']` under the app's `/*` route).
 - **Phone back bar**: make "up" the browser's Back when Back leads to the
-  same place (SidebarShell's `useGoUp`), else a push, so history doesn't
-  pile up.
+  same place (`useGoUp`), else a push, so history doesn't pile up.
 - **Touch**: 44px targets, no hover-only controls, a visible
   `:focus-visible` outline.
 - **No global action buttons**: apps own their toolbars.
@@ -75,13 +172,16 @@ start from it, or from a copy of a Fluent shell.
   frame repaints what moves. A sliding selection is one indicator element
   and the items paint no selected background (not even hovered), or two
   highlights show mid-slide. Turn everything off while
-  `useReducedMotion()` is true. (SidebarShell's `slide.ts` and
-  `shared/motion.tsx`.)
+  `useReducedMotion()` is true. (The sidebar's `SidebarShell/slide.ts` and
+  denim-fabric's `shared/motion.tsx`.)
 
 ## Verify
 
-Type-check under Vite's strict `tsconfig` with the libraries side by side,
-then drive it in headless Chromium (typical-admin-fabric's
-`playwright-verify` skill) at desktop, tablet and phone widths: nav, a deep
-link, Back, the Settings dialog with an extension tab, and no console
-errors.
+Type-check under Vite's strict `tsconfig` with the libraries side by side
+(this runs every bar's `parity.check.ts`), run
+`check-bar-parity.mjs` over the bars you have, then drive it in headless
+Chromium (typical-admin-fabric's `playwright-verify` skill) at desktop,
+tablet and phone widths: nav, a deep link, Back, the Settings dialog with an
+extension tab, a MasterDetail screen and a FullBleed app under your bar, and
+no console errors. Switching an app between two bars must need only the
+import change.

@@ -1,7 +1,9 @@
 // Convenience re-exports for code inside a denim-fabric app: Fluent,
-// react-router, Apollo hooks and typical-admin-fabric's Form/List/cards, plus
-// getStyle(). (This was `denim/lib` before the core/skin split.) Import from
-// the original packages when in doubt.
+// react-router, Apollo hooks, date-fns and typical-admin-fabric's
+// Form/List/cards, plus getStyle(). (This was `denim/lib` before the
+// core/skin split; the names are kept so existing imports keep working,
+// whichever bar the app uses.) Import from the original packages when in
+// doubt.
 import { mergeStyleSets, getTheme } from '@fluentui/react';
 import { useLocation } from 'react-router-dom';
 import stylesJson from './getStyle';
@@ -49,7 +51,12 @@ export { default as ThumbnailCard } from '../../typical-admin-fabric/lib/templat
 export { default as FormCard } from '../../typical-admin-fabric/lib/templates/FormCard';
 export { default as WideCard } from '../../typical-admin-fabric/lib/templates/WideCard';
 
-/** Shared class names (header, modal, content, breakpoint helpers) for the current theme. */
+/**
+ * Class names for the current theme: the shared shell styles (splash,
+ * modal, link), typical-admin-fabric's form styles (error, hint,
+ * labelHorizontal, dangerButton, ...) and the styles of the bar the app
+ * imports (the top bar's navBar, headerLink, ...). See ./getStyle.ts.
+ */
 export const getStyle = () => mergeStyleSets(stylesJson(getTheme()));
 
 /**

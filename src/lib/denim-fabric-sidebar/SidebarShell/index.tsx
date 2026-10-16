@@ -9,7 +9,7 @@
 //
 // There are no global action buttons: each application owns its own UI.
 import React from 'react';
-import { Link, useLocation, useNavigate, useNavigationType } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { FontIcon, Panel, PanelType, mergeStyles, mergeStyleSets, useTheme } from '@fluentui/react';
 import type { IPanelStyleProps, IPanelStyles, ITheme } from '@fluentui/react';
 import {
@@ -22,41 +22,27 @@ import {
   useNav,
   useReducedMotion,
 } from '../../denim';
-import { Splash } from '../shared/Splash';
-import { SettingsDialog } from '../shared/SettingsDialog';
-import { FluentThemeRoot, useFluentTheme } from '../shared/theme';
-import type { ThemeBuilder } from '../themes';
-import DenimLogo, { IconProps } from '../shared/Logo';
-import { PerfProfiler, perfAnimStart, perfCommitted, perfStart } from '../shared/perf';
-import { DrillIn, ShellMotionProvider } from '../shared/motion';
-import { useSidebarSlide } from './slide';
-import { Sidebar, TOUCH } from './Sidebar';
+import { Splash } from '../../denim-fabric/shared/Splash';
+import { SettingsDialog } from '../../denim-fabric/shared/SettingsDialog';
+import { FluentThemeRoot, useFluentTheme } from '../../denim-fabric/shared/theme';
+import DenimLogo from '../../denim-fabric/shared/Logo';
+import { PerfProfiler, perfAnimStart, perfCommitted, perfStart } from '../../denim-fabric/shared/perf';
+import { DrillIn, ShellMotionProvider } from '../../denim-fabric/shared/motion';
 import {
   DEFAULT_BREAKPOINTS,
   IBackTarget,
-  IBreakpoints,
   ShellLayoutContext,
   useBreakpoint,
-} from './layout';
+  useGoUp,
+} from '../../denim-fabric/shared/layout';
+import type { ShellProps } from '../../denim-fabric/shared/shell';
+import { useSidebarSlide } from './slide';
+import { Sidebar, TOUCH } from './Sidebar';
 
-export interface SidebarShellProps extends DenimShellProps {
-  /** Your product's name, at the top of the sidebar. */
-  title?: string;
-  /** Icon next to the title. */
-  Brand?: React.FC<any>;
-  /** Splash-screen logo. */
-  Logo?: React.FC<IconProps>;
-  /** Theme builders keyed `<mode>-<color>` plus `default`. Defaults to THEMES. */
-  themes?: Record<string, ThemeBuilder>;
-  /** Extra content in the sidebar footer, above Settings. */
-  SidebarFooter?: React.FC<any>;
-  /** Layout breakpoints in px. Default { medium: 700, wide: 1200 }. */
-  breakpoints?: IBreakpoints;
-  /** Shown at `/` on wide/medium screens when there is no RootComponent and no launch page. */
-  welcome?: React.ReactNode;
-}
+/** The sidebar's props: the shared ShellProps (it ignores `Controls` and `ExternalApps`). */
+export type SidebarShellProps = ShellProps;
 
-type OwnProps = Omit<SidebarShellProps, keyof DenimShellProps>;
+type OwnProps = Omit<ShellProps, keyof DenimShellProps>;
 
 const COLLAPSED_KEY = 'denim-sidebar-collapsed';
 const readCollapsed = () => {
@@ -189,35 +175,6 @@ const getShellStyles = (theme: ITheme, narrow: boolean) =>
     },
   });
 
-/**
- * Tracks this tab's history so "up" can be the browser's Back when Back
- * leads to the same place (no duplicate entries), and a push otherwise
- * (a deep link has nothing to go back to).
- */
-function useGoUp() {
-  const location = useLocation();
-  const navType = useNavigationType();
-  const navigate = useNavigate();
-  const stack = React.useRef<{ key: string; path: string }[]>([]);
-  React.useEffect(() => {
-    const s = stack.current;
-    const entry = { key: location.key, path: location.pathname.replace(/\/+$/, '') || '/' };
-    const at = s.findIndex(e => e.key === location.key);
-    if (at >= 0) s.length = at + 1; // Back (or Forward) to a known entry
-    else if (navType === 'REPLACE' && s.length) s[s.length - 1] = entry;
-    else s.push(entry);
-  }, [location.key, location.pathname, navType]);
-  return React.useCallback(
-    (to: string) => {
-      const s = stack.current;
-      const target = to.replace(/\/+$/, '') || '/';
-      if (s.length >= 2 && s[s.length - 2].path === target) navigate(-1);
-      else navigate(to);
-    },
-    [navigate],
-  );
-}
-
 const SidebarLayout: React.FC<OwnProps> = ({
   title,
   Brand,
@@ -236,7 +193,7 @@ const SidebarLayout: React.FC<OwnProps> = ({
   const [overlayOpen, setOverlayOpen] = React.useState(false);
   const [settingsOpen, setSettingsOpen] = React.useState(false);
   const [back, setBack] = React.useState<IBackTarget | null>(null);
-  const layoutContext = React.useMemo(() => ({ layout, setBack, goUp }), [layout, goUp]);
+  const layoutContext = React.useMemo(() => ({ layout, backBar: true, setBack, goUp }), [layout, goUp]);
 
   // The overlay only exists on medium screens.
   React.useEffect(() => {
@@ -535,7 +492,7 @@ const ShellBody: React.FC<BodyProps> = React.memo(function ShellBody({
  * app list comes from the backend it also selects `group` and `icon`
  * (pass `applicationFields=""` if your backend lacks them).
  */
-export const SidebarShell: React.FC<SidebarShellProps> = props => {
+export const SidebarShell: React.FC<ShellProps> = props => {
   const [core, own] = splitShellProps(props);
   return (
     <DenimProvider applicationFields={OPTIONAL_APPLICATION_FIELDS} {...core}>

@@ -21,7 +21,7 @@
 // and a presence component restarts rather than reverses when interrupted.
 import React from 'react';
 import { motionTokens } from '@fluentui/react-motion';
-import { perfAnimEnd, perfAnimStart } from '../shared/perf';
+import { perfAnimEnd, perfAnimStart } from '../../denim-fabric/shared/perf';
 
 export interface SidebarSlideOptions {
   /** The wanted state; flips at once on a toggle. */

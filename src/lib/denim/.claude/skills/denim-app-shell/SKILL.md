@@ -1,6 +1,6 @@
 ---
 name: denim-app-shell
-description: How to build a React app's shell on Denim's headless core (denim) - the provider and hooks (DenimProvider, useDenim, useApplications, useNav, useSettings, useSettingsForm), registering applications with groups, icons and nav links, routes, kiosk routes and deep links, local vs server settings and the Settings extension point (settingsTabs, settingsGeneralFields, settingsFields), status dots, the optional `my`/`updateSettings` server contract, the contract a skin implements, and plain-http LAN pitfalls. Use before creating a new app on this stack, adding an app/page to the nav, adding a setting, writing or changing a skin, or touching routing, settings or the server contract. For the Fluent shells themselves (TopBarShell, SidebarShell, MasterDetail, theming, Photo) read denim-fabric's denim-fabric-shells skill too.
+description: How to build a React app's shell on Denim's headless core (denim) - the provider and hooks (DenimProvider, useDenim, useApplications, useNav, useSettings, useSettingsForm), registering applications with groups, icons and nav links, routes, kiosk routes and deep links, local vs server settings and the Settings extension point (settingsTabs, settingsGeneralFields, settingsFields), status dots, the optional `my`/`updateSettings` server contract, the contract a skin implements, and plain-http LAN pitfalls. Use before creating a new app on this stack, adding an app/page to the nav, adding a setting, writing or changing a skin, or touching routing, settings or the server contract. For the Fluent skin itself read denim-fabric's denim-fabric skill (choosing a bar, MasterDetail, the layout hook, theming) and the bar's own skill (denim-fabric-topbar or denim-fabric-sidebar) too.
 license: MIT
 ---
 
@@ -12,17 +12,20 @@ Denim is split in two, the way typical-admin / typical-admin-fabric are:
   registry, routing, the nav model, the settings store, health polling and
   status dots, and hands them out through a provider and hooks. No UI kit.
 - **a skin** renders it. **denim-fabric** is the Fluent UI one ("Fabric" is
-  Fluent's old name) with two layouts: `TopBarShell` (header + waffle panel,
-  the original look) and `SidebarShell` (grouped sidebar, master-detail).
-  You can write your own (section 7).
+  Fluent's old name): shared pieces, plus one bar package per layout,
+  `denim-fabric-topbar` (header + waffle panel, the original look) and
+  `denim-fabric-sidebar` (grouped sidebar). The bars export the same
+  members, so switching is an import-path change. You can write your own
+  (section 7).
 
-Apps normally import everything from the skin (`./lib/denim-fabric`
-re-exports the core). Use the core directly for hooks in your own
+Apps normally import everything from the skin (`./lib/denim-fabric`, or
+the bar, re-exports the core). Use the core directly for hooks in your own
 components and when writing a skin.
 
 Folder layout is fixed: the libraries import each other by relative path,
-so clone `denim`, `denim-fabric`, `typical-admin`, `typical-admin-fabric`
-and `per-form` side by side (e.g. `src/lib/denim`, `src/lib/denim-fabric`,
+so clone `denim`, `denim-fabric`, one bar (`denim-fabric-sidebar` or
+`denim-fabric-topbar`), `typical-admin`, `typical-admin-fabric` and
+`per-form` side by side (e.g. `src/lib/denim`, `src/lib/denim-fabric`,
 ...). See the READMEs for peer packages and full setups.
 
 ## 1. Mount it
@@ -41,9 +44,9 @@ and `per-form` side by side (e.g. `src/lib/denim`, `src/lib/denim-fabric`,
 
 // App.tsx: a shell is the whole frame. Every shell takes all
 // <DenimProvider> props plus its own.
-import { SidebarShell } from './lib/denim-fabric';
+import Shell from './lib/denim-fabric-sidebar';   // or './lib/denim-fabric-topbar'
 export default function App() {
-  return <SidebarShell title="Rig Config" components={{ devices: DevicesAdmin, designer: LayoutDesigner }} />;
+  return <Shell title="Rig Config" components={{ devices: DevicesAdmin, designer: LayoutDesigner }} />;
 }
 ```
 
@@ -186,8 +189,8 @@ const settingsTabs: ISettingsTab[] = [{ key: 'device', headerText: 'Device', Com
 
 // (c) settingsFields: with settingsSource="server", the extra AppSettings
 // fields to select in my.settings so tabs can read them.
-<TopBarShell settingsSource="server" settingsFields="units deviceName"
-             settingsGeneralFields={generalFields} settingsTabs={settingsTabs} ... />
+<Shell settingsSource="server" settingsFields="units deviceName"
+       settingsGeneralFields={generalFields} settingsTabs={settingsTabs} ... />
 ```
 
 How saving works (`useSettingsForm`, the same in every skin):
@@ -221,7 +224,7 @@ export function useRigStatus(app: IApplication): IAppStatus | undefined {
   return data.getDevices.some((d: any) => !d.enabled)
     ? { tone: 'warning', label: 'A device is disabled' } : 'ok';
 }
-<SidebarShell useAppStatus={useRigStatus} ... />
+<Shell useAppStatus={useRigStatus} ... />   // the bar's Shell
 
 // (b) The app reports its own, from its component. The last report stays
 // after it unmounts; report undefined to clear.
@@ -248,8 +251,10 @@ renders `<DenimProvider>` and, inside it:
 
 `splitShellProps(props)` separates the provider's props from the skin's.
 The README has a complete plain-HTML skin (about 60 lines) that type-checks
-and runs. To vary a Fluent shell, copy `TopBarShell/` or `SidebarShell/` in
-denim-fabric rather than forking the core.
+and runs. To vary a Fluent bar, copy `denim-fabric-topbar/TopBarShell/` or
+`denim-fabric-sidebar/SidebarShell/` rather than forking the core; a new
+bar follows denim-fabric's `write-a-denim-skin` skill (the bars' shared
+export surface and its parity check).
 
 ## 8. Plain http on the LAN is not a secure context
 

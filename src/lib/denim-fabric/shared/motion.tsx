@@ -2,8 +2,8 @@
 // library; it has no v9 component dependencies and runs beside Fluent v8).
 // Only where a Fluent v8 component has no motion of its own: the overlay
 // Panel and the Settings Modal keep their built-in slide and fade. The wide
-// sidebar's slide is in SidebarShell/slide.ts (Web Animations with the
-// same motion tokens; see there why).
+// sidebar's slide is in denim-fabric-sidebar's SidebarShell/slide.ts (Web
+// Animations with the same motion tokens; see there why).
 //
 // Every motion animates `transform` and/or `opacity` of one element, never
 // layout. Without GPU compositing (WebKitGTK on some Linux drivers) each
