@@ -5,12 +5,17 @@
 //   wide   (>= 1200px): sidebar | content. Collapsible to an icon rail.
 //   medium (>= 700px):  icon rail | content; the full sidebar opens over it.
 //   narrow (phone):     one screen at a time with a back bar:
-//                       menu (at "/") -> application -> detail.
+//                       menu -> application -> detail. The menu is a
+//                       full screen listing the active app's pages under
+//                       it, so it is also how you move between them.
 //
-// There are no global action buttons: each application owns its own UI.
+// There are no global action buttons: each application owns its own UI. The
+// app's `Controls` (a status light, say) are always visible: in the
+// sidebar's footer (full, rail and the phone menu) and at the right end of
+// the phone's top bar.
 import React from 'react';
-import { Link } from 'react-router-dom';
-import { FontIcon, Panel, PanelType, mergeStyles, mergeStyleSets, useTheme } from '@fluentui/react';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { FontIcon, Panel, PanelType, mergeStyleSets, useTheme } from '@fluentui/react';
 import type { IPanelStyleProps, IPanelStyles, ITheme } from '@fluentui/react';
 import {
   DenimProvider,
@@ -39,7 +44,7 @@ import type { ShellProps } from '../../denim-fabric/shared/shell';
 import { useSidebarSlide } from './slide';
 import { Sidebar, TOUCH } from './Sidebar';
 
-/** The sidebar's props: the shared ShellProps (it ignores `Controls` and `ExternalApps`). */
+/** The sidebar's props: the shared ShellProps (it ignores `ExternalApps`). */
 export type SidebarShellProps = ShellProps;
 
 type OwnProps = Omit<ShellProps, keyof DenimShellProps>;
@@ -146,32 +151,12 @@ const getShellStyles = (theme: ITheme, narrow: boolean) =>
       textOverflow: 'ellipsis',
       paddingRight: 8,
     },
-    pills: {
-      flex: 'none',
-      display: 'flex',
-      gap: 8,
-      overflowX: 'auto',
-      padding: '8px 12px',
-      borderBottom: `1px solid ${theme.palette.neutralLight}`,
-    },
-    pill: {
+    barControls: {
       flex: 'none',
       display: 'flex',
       alignItems: 'center',
+      gap: 8,
       minHeight: TOUCH,
-      padding: '0 16px',
-      borderRadius: TOUCH / 2,
-      border: `1px solid ${theme.palette.neutralQuaternary}`,
-      color: theme.palette.neutralPrimary,
-      textDecoration: 'none',
-      selectors: {
-        ':focus-visible': { outline: `2px solid ${theme.palette.themePrimary}`, outlineOffset: 2 },
-      },
-    },
-    pillActive: {
-      background: theme.palette.themePrimary,
-      borderColor: theme.palette.themePrimary,
-      color: theme.palette.white,
     },
   });
 
@@ -181,6 +166,7 @@ const SidebarLayout: React.FC<OwnProps> = ({
   Logo = DenimLogo,
   themes,
   SidebarFooter,
+  Controls,
   breakpoints = DEFAULT_BREAKPOINTS,
   welcome,
 }) => {
@@ -250,6 +236,7 @@ const SidebarLayout: React.FC<OwnProps> = ({
           title={title}
           Brand={Brand}
           SidebarFooter={SidebarFooter}
+          Controls={Controls}
           welcome={welcome}
         />
         <PerfProfiler id="settings-dialog">
@@ -273,6 +260,7 @@ interface BodyProps {
   title?: string;
   Brand?: React.FC<any>;
   SidebarFooter?: React.FC<any>;
+  Controls?: React.FC<any>;
   welcome?: React.ReactNode;
 }
 
@@ -290,6 +278,7 @@ const ShellBody: React.FC<BodyProps> = React.memo(function ShellBody({
   title,
   Brand,
   SidebarFooter,
+  Controls,
   welcome,
 }) {
   const theme = useTheme();
@@ -324,6 +313,20 @@ const ShellBody: React.FC<BodyProps> = React.memo(function ShellBody({
     setOverlayOpen(false);
   }, [setOverlayOpen, reduced]);
   React.useEffect(() => perfCommitted(overlayOpen ? 'overlay-open' : 'overlay-close'), [overlayOpen]);
+
+  // The phone menu over an application's page is a history entry for the
+  // same URL, marked in its state: the device's Back closes it, and any
+  // navigation from it (a new entry, or the current page's own link, which
+  // replaces this one) leaves it.
+  const location = useLocation();
+  const navigate = useNavigate();
+  const menuOpen = narrow && !!(location.state as { denimMenu?: boolean } | null)?.denimMenu;
+  const openMenu = React.useCallback(() => {
+    navigate(
+      { pathname: location.pathname, search: location.search, hash: location.hash },
+      { state: { ...((location.state as object | null) ?? {}), denimMenu: true } },
+    );
+  }, [navigate, location]);
 
   // Phone drill-in animates panes that mount after the shell's first render
   // (not the page the app opened on, nor after a theme change's remount).
@@ -365,13 +368,17 @@ const ShellBody: React.FC<BodyProps> = React.memo(function ShellBody({
     return <div className={s.root}><main className={s.main}>{routes}</main></div>;
   }
 
-  const sidebarProps = { title, Brand, onOpenSettings: openSettings, Footer: SidebarFooter };
+  const sidebarProps = { title, Brand, Controls, onOpenSettings: openSettings, Footer: SidebarFooter };
 
   if (narrow) {
     const app = nav.activeApp;
-    // The menu is its own screen on a phone: "/" (and any non-application
-    // URL) shows it, unless the app has a RootComponent for "/".
-    if (!app && !RootComponent) {
+    // The menu is its own screen on a phone. "/" (and any non-application
+    // URL) shows it, unless the app has a RootComponent for "/"; on an
+    // application's page, "‹ Menu" opens it over that page's URL, so the
+    // menu still knows the active app and lists its pages under it (as
+    // the wide sidebar does). Choosing an app or a page navigates, which
+    // closes it.
+    if ((!app && !RootComponent) || menuOpen) {
       return (
         <div className={s.root}>
           <DrillIn from="left" animateMount={shellMounted.current}>
@@ -382,36 +389,20 @@ const ShellBody: React.FC<BodyProps> = React.memo(function ShellBody({
         </div>
       );
     }
-    const target = back ?? { label: 'Menu', to: '/' };
-    const links = app?.links ?? [];
     return (
       <div className={s.root}>
         <div className={s.bar}>
-          <button type="button" className={s.back} onClick={() => goUp(target.to)}>
+          <button type="button" className={s.back} onClick={back ? () => goUp(back.to) : openMenu}>
             <FontIcon iconName="ChevronLeft" aria-hidden style={{ width: 24, textAlign: 'center', fontSize: 14 }} />
-            <span>{target.label}</span>
+            <span>{back?.label ?? 'Menu'}</span>
           </button>
           <span className={s.barTitle}>{app?.name}</span>
+          {Controls && (
+            <div className={s.barControls} data-denim-controls="">
+              <Controls />
+            </div>
+          )}
         </div>
-        {app && !back && links.length > 1 && (
-          <div className={s.pills} role="navigation" aria-label={`${app.name} pages`}>
-            {links.map(l => {
-              const active = nav.isLinkActive(app, l.path);
-              return (
-                <Link
-                  key={l.path}
-                  to={nav.linkUrl(app, l)}
-                  // One merged class: with two, which wins depends on the order
-                  // Fluent inserted the rules, which a theme change reshuffles.
-                  className={mergeStyles(s.pill, active && s.pillActive)}
-                  aria-current={active ? 'page' : undefined}
-                >
-                  {l.text}
-                </Link>
-              );
-            })}
-          </div>
-        )}
         <DrillIn from="right" animateMount={shellMounted.current}>
           <main className={s.main}>{routes}</main>
         </DrillIn>

@@ -47,27 +47,37 @@ const recordingSchema = {
 };
 const schemaDefinition = { list: { columns: recordingSchema, buttons: { add: true } }, show: {}, new: {} };
 
+// Readable headings ("Recordings", "Recording"), not "Listing Recordings".
+const labels = {};
+
+// Module level, not an inline arrow in `components`: an inline one is a new
+// component type on every render, which remounts the list (losing its page,
+// sort and scroll) whenever RecordingsAdmin re-renders, e.g. on a refetch.
+const RecordingsList: React.FC<any> = props => (
+  <>
+    <RecordingStatusBar />
+    <SwitchableList
+      {...props}
+      titleField="name"
+      idField="id"
+      defaultView="list"
+      components={{ ...props.components, links: RecordingsLinks }}
+    />
+  </>
+);
+const components = {
+  list: RecordingsList,
+  show: RecordingChart,
+  new: RecordingNew,
+};
+
 const RecordingsAdmin: React.FC = () => (
   <ReactiveAdmin
     dispatcher={dispatcher}
     name={name}
+    labels={labels}
     schemaDefinition={schemaDefinition}
-    components={{
-      list: (props: any) => (
-        <>
-          <RecordingStatusBar />
-          <SwitchableList
-            {...props}
-            titleField="name"
-            idField="id"
-            defaultView="list"
-            components={{ ...props.components, links: RecordingsLinks }}
-          />
-        </>
-      ),
-      show: RecordingChart,
-      new: RecordingNew,
-    }}
+    components={components}
   />
 );
 

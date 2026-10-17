@@ -34,8 +34,14 @@ export { computeNav, groupApplications, isLinkActive, appUrl, linkUrl } from './
 export type { INavState, IApplicationGroup } from './nav';
 
 // Settings
-export { useSettingsForm, generalSettingsSchema, generalSettingsValues } from './settingsForm';
-export type { ISettingsForm, ISettingsFormTab } from './settingsForm';
+export {
+  useSettingsForm,
+  generalSettingsSchema,
+  generalSettingsValues,
+  changedSettings,
+  sameSettingValue,
+} from './settingsForm';
+export type { ISettingsForm, ISettingsFormTab, ISettingsFieldMapping } from './settingsForm';
 export type { IDenimSettings, ILocalSettings } from './lib/localSettings';
 export {
   DEFAULT_SETTINGS,

@@ -3,19 +3,21 @@
 // Header/Settings/index.tsx onto the denim core's extension point: each tab
 // reports its slice of AppSettings through `onChange` (merged into the one
 // updateSettings save), and tabs with their own records (Dashboards' device
-// defaults) save them through `registerSave`.
+// defaults) save them through `registerSave`. The core sends only the
+// values that differ from the saved settings, so a tab reports its whole
+// form and a Save with no edits sends nothing.
 //
-// Denim's own General tab keeps Default page / Colour / Theme / Font size.
-// The device name and config directory moved to a "Device" tab: the device
-// name is edited as one string but stored inside the `deviceMap` object, and
-// the core's General tab seeds its form straight from the settings object,
-// with no hook to map a stored value to a field's starting value.
+// Denim's own General tab keeps Default page / Colour / Theme / Font size,
+// plus this app's device name and config directory (generalFields.ts; the
+// device name lives inside `deviceMap` and is mapped with the core's
+// read/write).
 //
 // Keep this dialog for global, cross-feature preferences only; a feature's
 // own configuration belongs in its own application.
 import React, { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client/react';
 import { Stack, getTheme, Form } from '../../lib/denim-fabric/lib';
+import { useLayout } from '../../lib/denim-fabric';
 import type { ISettingsTab, ISettingsTabProps } from '../../lib/denim-fabric';
 import { GAMEPAD_UDEV_STATUS, SETUP_GAMEPAD_UDEV, GamepadMapping } from '../../graphql/appSettings';
 import { getAppId } from '../../graphql/client';
@@ -36,64 +38,6 @@ const AXIS_LABELS = ['X', 'Y', 'Z', 'RX', 'RY', 'RZ'];
 
 const pad = { paddingTop: '0.77em' };
 
-// ── Device ──────────────────────────────────────────────────────────────────
-
-const DeviceTab: React.FC<ISettingsTabProps> = ({ settings, onChange }) => {
-  const appId = getAppId();
-  const deviceMap: Record<string, string> = settings.deviceMap ?? {};
-  const [name, setName] = useState<string>(deviceMap[appId] ?? '');
-  const [dataDir, setDataDir] = useState<string>(settings.typiqlDataDir ?? '');
-
-  // Only what actually changed: opening the tab must not rewrite the config
-  // directory (the backend's data location) or the shared device map.
-  useEffect(() => {
-    const patch: Record<string, any> = {};
-    if (name !== (deviceMap[appId] ?? '')) patch.deviceMap = { ...deviceMap, [appId]: name };
-    if (dataDir !== (settings.typiqlDataDir ?? '')) patch.typiqlDataDir = dataDir;
-    onChange(patch);
-    // deviceMap is the saved map; re-reported only when an edit changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [name, dataDir, onChange]);
-
-  const schema = useMemo(() => {
-    const existingNames = Object.values(deviceMap)
-      .filter((n, i, arr) => !!n && arr.indexOf(n) === i)
-      .map(n => ({ text: n, value: n }));
-    return {
-      deviceName: {
-        type: 'combobox',
-        label: 'Device Name',
-        placeholder: 'Enter or select a name for this device',
-        options: existingNames,
-      },
-      typiqlDataDir: {
-        type: 'text',
-        label: 'Config directory',
-        placeholder: '~/.config/dashboard-designer',
-        required: false,
-      },
-    };
-  }, [deviceMap]);
-  // Memoized: per-form re-seeds a form whose initialValues object changes.
-  const initialValues = useMemo(
-    () => ({ deviceName: deviceMap[appId] ?? '', typiqlDataDir: settings.typiqlDataDir ?? '' }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [settings.deviceMap, settings.typiqlDataDir, appId],
-  );
-
-  return (
-    <Form
-      form={schema}
-      name="deviceSettings"
-      initialValues={initialValues}
-      onChange={(_n: string, { clean }: any) => {
-        setName(clean.deviceName ?? '');
-        setDataDir(clean.typiqlDataDir ?? '');
-      }}
-    />
-  );
-};
-
 // ── Dashboards (per-device default dashboard / group) ───────────────────────
 
 /** One row of the per-device override list. `deviceId` is the row identity
@@ -106,7 +50,11 @@ interface DeviceRow {
   group: string;
 }
 
-const DashboardsTab: React.FC<ISettingsTabProps> = ({ settings, isOpen, registerSave }) => {
+// `loads: true` (see settingsTabs below): the core holds Save while this tab
+// is open and its queries haven't answered, and skips its registerSave
+// until it is ready. Its forms seeded before the saved defaults arrived
+// would show "(none)", and saving that deleted the default dashboard.
+const DashboardsTab: React.FC<ISettingsTabProps> = ({ settings, isOpen, registerSave, setReady }) => {
   const appId = getAppId();
   const [addDefault] = useMutation(ADD_DEVICE_DEFAULT);
   const [updateDefault] = useMutation(UPDATE_DEVICE_DEFAULT);
@@ -121,6 +69,8 @@ const DashboardsTab: React.FC<ISettingsTabProps> = ({ settings, isOpen, register
   const deviceDefaults: DeviceDefault[] = (deviceDefaultsData as any)?.getDeviceDefaults ?? [];
   const deviceMap: Record<string, string> = settings.deviceMap ?? {};
   const ready = !!(dashData && groupsData && deviceDefaultsData);
+  // First, before anything this tab reports.
+  useEffect(() => setReady(ready), [ready, setReady]);
 
   // What's saved, by device name, plus the user's edits on top. Derived
   // rather than copied into state in an effect: this tab mounts when it is
@@ -207,9 +157,9 @@ const DashboardsTab: React.FC<ISettingsTabProps> = ({ settings, isOpen, register
 
   // Writes this tab's own DeviceDefault records after the settings save.
   // Registered only once the tab has been opened, so a Save from another tab
-  // no longer rewrites every device default.
+  // no longer rewrites every device default; the core runs it only once the
+  // tab is ready.
   useEffect(() => {
-    if (!ready) return;
     registerSave(async () => {
       const allNames = new Set(['default', ...Object.values(deviceMap)]);
       for (const deviceName of allNames) {
@@ -231,13 +181,12 @@ const DashboardsTab: React.FC<ISettingsTabProps> = ({ settings, isOpen, register
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, savedDefaults, localDefaults, defaultsByName, settings.deviceMap, registerSave]);
+  }, [savedDefaults, localDefaults, defaultsByName, settings.deviceMap, registerSave]);
 
   const currentName = deviceMap[appId] ?? '';
 
-  // The forms report their values as soon as they mount; mounted before the
-  // saved defaults (or the dashboard options) arrive, they would report
-  // "(none)" and a Save would delete the saved default.
+  // No forms before the saved defaults and the options are in (they would
+  // be seeded with "(none)").
   if (!ready) {
     return <Stack style={pad}><span style={{ fontSize: '0.85em', opacity: 0.6 }}>Loading…</span></Stack>;
   }
@@ -257,7 +206,7 @@ const DashboardsTab: React.FC<ISettingsTabProps> = ({ settings, isOpen, register
       <Stack tokens={{ childrenGap: '0.5em' }}>
         <span style={{ fontSize: '0.9em', fontWeight: 600 }}>Devices</span>
         {!currentName && (
-          <span style={{ fontSize: '0.78em', opacity: 0.5 }}>Set a device name in the Device tab to configure defaults for this device.</span>
+          <span style={{ fontSize: '0.78em', opacity: 0.5 }}>Set a device name on the General tab to configure defaults for this device.</span>
         )}
         <Form
           key={`devdefaults-${deviceDefaults.map(d => d.id).join(',')}`}
@@ -482,7 +431,10 @@ const GameTab: React.FC<ISettingsTabProps> = () => (
 const stripTypename = (m: GamepadMapping): GamepadMapping =>
   ({ id: m.id, name: m.name, mappingType: m.mappingType, index: m.index });
 
-const gamepadSchema = {
+// One row per mapping: Name | Type | index slider side by side, or stacked
+// on a phone, where three columns leave the slider (and its number box) no
+// room and the row ran off the screen.
+const gamepadSchema = (horizontal: boolean) => ({
   mappings: {
     type: 'list' as const,
     label: '',
@@ -490,7 +442,7 @@ const gamepadSchema = {
     addLabel: '+ Add mapping',
     removeLabel: 'Remove mapping',
     emptyText: 'No mappings yet.',
-    horizontal: true,
+    horizontal,
     rowKey: (m: GamepadMapping) => m.id,
     // Fresh id per add — evaluated at click time.
     newRow: () => ({ id: `gp-${Date.now()}`, name: '', mappingType: 'button', index: 0 }),
@@ -518,12 +470,14 @@ const gamepadSchema = {
     deriveRow: ({ field }: { field: string }) =>
       field === 'mappingType' ? { index: 0 } : undefined,
   },
-};
+});
 
 const GamepadTab: React.FC<ISettingsTabProps> = ({ settings, onChange }) => {
   const saved: GamepadMapping[] = settings.gamepadMappings ?? [];
   const [mappings, setMappings] = useState<GamepadMapping[]>(() => saved.map(stripTypename));
   const [valid, setValid] = useState(true);
+  const narrow = useLayout() === 'narrow';
+  const schema = useMemo(() => gamepadSchema(!narrow), [narrow]);
 
   useEffect(() => {
     onChange(
@@ -544,7 +498,7 @@ const GamepadTab: React.FC<ISettingsTabProps> = ({ settings, onChange }) => {
         Define named actions here, then assign them to button/slider/encoder controls on the canvas.
       </span>
       <Form
-        form={gamepadSchema}
+        form={schema}
         name="gamepadMappings"
         initialValues={initialValues}
         onChange={(_n: string, { raw, isValid }: any) => {
@@ -610,8 +564,7 @@ const ClientsTab: React.FC<ISettingsTabProps> = ({ settings, isOpen }) => {
 };
 
 export const settingsTabs: ISettingsTab[] = [
-  { key: 'device', headerText: 'Device', Component: DeviceTab },
-  { key: 'dashboards', headerText: 'Dashboards', Component: DashboardsTab },
+  { key: 'dashboards', headerText: 'Dashboards', Component: DashboardsTab, loads: true },
   { key: 'controller', headerText: 'Controller', Component: ControllerTab },
   { key: 'services', headerText: 'Services', Component: ServicesTab },
   { key: 'daynight', headerText: 'Day/Night', Component: DayNightTab },

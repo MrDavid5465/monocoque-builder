@@ -36,21 +36,14 @@ impl Default for AppConfig {
     }
 }
 
-/// The app's own page plus its Profiles page. The root link ("") is listed
-/// explicitly: on a phone the sidebar shell shows an app's links as pills only
-/// when there is more than one, and it has no pill of its own for the app's
-/// root, so without it Profiles was unreachable there.
-fn with_profiles(root_text: &str) -> Vec<AppLink> {
-    vec![
-        AppLink {
-            path: "".into(),
-            text: root_text.into(),
-        },
-        AppLink {
-            path: "profiles".into(),
-            text: "Profiles".into(),
-        },
-    ]
+/// The app's Profiles page. The app's own page (its root) needs no link: the
+/// sidebar item is that page, and on a phone the sidebar shell leads an app's
+/// link pills with a pill for its root (labelled with the app's name).
+fn profiles() -> Vec<AppLink> {
+    vec![AppLink {
+        path: "profiles".into(),
+        text: "Profiles".into(),
+    }]
 }
 
 // Sidebar groups. The sidebar lists groups in the order their first app
@@ -89,21 +82,14 @@ fn entry(
 pub fn applications() -> Vec<AppEntry> {
     vec![
         // ── RIG: hardware the driver feels ──────────────────────────────
-        entry(
-            "Shakers",
-            "shakers",
-            "Shakers",
-            RIG,
-            "Speakers",
-            with_profiles("Channels"),
-        ),
+        entry("Shakers", "shakers", "Shakers", RIG, "Speakers", profiles()),
         entry(
             "SimWind",
             "sim-wind",
             "SimWindDevices",
             RIG,
             "WindDirection",
-            with_profiles("Devices"),
+            profiles(),
         ),
         // ── LIGHTING ────────────────────────────────────────────────────
         entry(
@@ -112,7 +98,7 @@ pub fn applications() -> Vec<AppEntry> {
             "LedsDevices",
             LIGHTING,
             "Lightbulb",
-            with_profiles("Devices"),
+            profiles(),
         ),
         entry(
             "Shift Lights",
@@ -120,7 +106,7 @@ pub fn applications() -> Vec<AppEntry> {
             "ShiftLights",
             LIGHTING,
             "SpeedHigh",
-            with_profiles("Devices"),
+            profiles(),
         ),
         // No "Profiles" link — there's no list of records to manage here,
         // Huenicorn's own web UI owns the channel/screen-region list (see
@@ -140,13 +126,8 @@ pub fn applications() -> Vec<AppEntry> {
             "Dashboards",
             DASHBOARDS,
             "ViewDashboard",
+            // The dashboards list itself is the app's root (see profiles()).
             vec![
-                // The dashboards list itself (see with_profiles for why the
-                // root is an explicit link).
-                AppLink {
-                    path: "".into(),
-                    text: "Dashboards".into(),
-                },
                 AppLink {
                     path: "cars".into(),
                     text: "Cars".into(),
@@ -282,7 +263,10 @@ mod tests {
         let dash = gql.iter().find(|a| a.path == "dashboards").unwrap();
         assert_eq!(dash.group.as_deref(), Some(DASHBOARDS));
         assert_eq!(dash.icon.as_deref(), Some("ViewDashboard"));
-        assert_eq!(dash.links.len(), 6);
-        assert_eq!(dash.links[0].path, "", "the list itself comes first");
+        assert_eq!(dash.links.len(), 5);
+        assert!(
+            dash.links.iter().all(|l| !l.path.is_empty()),
+            "the app's root needs no link: the shell gives it a pill of its own"
+        );
     }
 }

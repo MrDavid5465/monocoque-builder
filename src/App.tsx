@@ -20,6 +20,7 @@ import { getAppId } from "./graphql/client";
 import dispatcher, { IMy, SETTINGS_FIELDS, APPLICATION_FIELDS } from "./graphql/appSettings";
 import SetupWizard from "./components/Onboarding/SetupWizard";
 import { settingsTabs } from "./components/Settings/settingsTabs";
+import { useGeneralSettingsFields } from "./components/Settings/generalFields";
 import { LiveUpdatesProvider } from "./components/Telemetry/liveUpdatesHub";
 import { HubSubscriptionRouter } from "./components/Telemetry/hubSubscriptionRouter";
 
@@ -47,10 +48,11 @@ const SetupGuard: React.FC = () => {
 //
 // The old top bar carried TelemetryControls on every non-kiosk page: a
 // recording/playback/live dot, plus car/track registration while the sim is
-// live. The sidebar has no always-visible header slot (its footer only
-// shows in the full-width sidebar), so the controls run here, beside the
-// shell, and their dot becomes the Dashboards app's status dot in the
-// sidebar (visible in the full sidebar, the icon rail and the phone menu).
+// live. Their side effects run here, beside the shell, exactly once
+// (TelemetryMonitor); the mode they report is shown as the Dashboards app's
+// status dot. Status is per app (useMonocoqueAppStatus), so any other app
+// with a status of its own (e.g. Ambient Lights for huenicorn) can get a dot
+// the same way.
 const TelemetryModeContext = React.createContext<DotMode | undefined>(undefined);
 
 const MODE_TONE: Record<DotMode, IAppStatus['tone']> = {
@@ -91,6 +93,7 @@ const Brand: React.FC<{ className?: string }> = ({ className }) => (
 const App: React.FC = () => {
   const [telemetryMode, setTelemetryMode] = useState<DotMode | undefined>(undefined);
   const onMode = useCallback((mode: DotMode) => setTelemetryMode(mode), []);
+  const generalFields = useGeneralSettingsFields();
   return (
     <>
       <ClientHeartbeat />
@@ -126,6 +129,7 @@ const App: React.FC = () => {
         settingsFields={SETTINGS_FIELDS}
         applicationFields={APPLICATION_FIELDS}
         settingsTabs={settingsTabs}
+        settingsGeneralFields={generalFields}
         useAppStatus={useMonocoqueAppStatus}
         welcome={defaultLanding}
       />

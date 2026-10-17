@@ -73,25 +73,37 @@ const FavoriteStar: React.FC<{ car: CarRecord }> = ({ car }) => {
   );
 };
 
+// Readable headings ("Cars", "Car"), not the type-name "Listing Cars".
+const labels = {};
+
+const renderCardActions = (car: CarRecord) => <FavoriteStar car={car} />;
+
+// Module level, not an inline arrow in `components`: an inline one is a new
+// component type on every render, which remounts the whole card grid (and
+// its thumbnails) whenever CarsAdmin re-renders, e.g. on a refetch.
+const CarsList: React.FC<any> = props => (
+  <SwitchableList
+    {...props}
+    titleField="name"
+    thumbnailField="thumbnail"
+    defaultView="card"
+    cardActions={renderCardActions}
+  />
+);
+const components = {
+  list: CarsList,
+  show: CarShow,
+  edit: CarShow,
+  new: CarNew,
+};
+
 const CarsAdmin: React.FC = () => (
   <ReactiveAdmin
     dispatcher={dispatcher}
     name={name}
+    labels={labels}
     schemaDefinition={schemaDefinition}
-    components={{
-      list: (props: any) => (
-        <SwitchableList
-          {...props}
-          titleField="name"
-          thumbnailField="thumbnail"
-          defaultView="card"
-          cardActions={(car: CarRecord) => <FavoriteStar car={car} />}
-        />
-      ),
-      show: CarShow,
-      edit: CarShow,
-      new: CarNew,
-    }}
+    components={components}
   />
 );
 

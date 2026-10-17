@@ -18,7 +18,16 @@ export interface ShellProps extends DenimShellProps {
   Brand?: React.FC<any>;
   /** Your product's name, at the top of the sidebar. (sidebar; the top bar shows the active app's name instead) */
   title?: string;
-  /** Right side of the header; on narrow screens it also opens the link menu. (top bar) */
+  /**
+   * Always-visible app controls (a status light, a connect button). (all bars)
+   * Top bar: the right side of the header; on narrow screens clicking it
+   * also opens the link menu. Sidebar: the sidebar's footer (full sidebar,
+   * icon rail and the phone's menu screen) and the right end of the phone's
+   * top bar. Keep it small and presentational: a bar may mount it more than
+   * once at a time (the sidebar's rail and panel during a slide), so put
+   * side effects (subscriptions, mutations) elsewhere and share state
+   * through context.
+   */
   Controls?: React.FC<any>;
   /** Extra content at the top of the waffle panel. (top bar) */
   ExternalApps?: React.FC<any>;

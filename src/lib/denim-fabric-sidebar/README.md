@@ -6,14 +6,17 @@ the [Denim](https://github.com/MrDavid5465/denim) app shell. A
 configuration-app layout:
 
 - applications listed under group headings, with icons and status dots;
-- the active application's links under it (touch pills on a phone);
-- Settings in the sidebar footer;
+- the active application's links under it (on a phone, in the full-screen
+  menu, which is also how you move between an app's pages);
+- your always-visible `Controls` and Settings in the sidebar footer (and
+  `Controls` in the phone's top bar);
 - wide, medium and phone layouts, touch-friendly, with brief motion.
 
 It is one of denim-fabric's interchangeable bars. It exports **exactly the
 same members as
 [denim-fabric-topbar](https://github.com/MrDavid5465/denim-fabric-topbar)**
-(`Shell`, the default export, and everything from denim-fabric and the
+(`Shell`, the default export, the role exports `Bar`, `BarNav`, `BarLink`,
+`AppSwitcher` and `StatusDot`, and everything from denim-fabric and the
 core), so switching bars is an import-path change. An app clones one bar
 and ships only that one.
 
@@ -82,6 +85,7 @@ import DevicesAdmin from './admin/DevicesAdmin';
 import ProjectsAdmin from './admin/ProjectsAdmin';
 import LayoutDesigner from './designer/LayoutDesigner';
 import About from './About';
+import RigControls from './RigControls';
 import { useRigStatus } from './rigStatus';
 
 // The sidebar lists my.applications under their `group` headings with their
@@ -93,6 +97,7 @@ export default function App() {
       settingsSource="server"
       defaultGroup="System"
       useAppStatus={useRigStatus}
+      Controls={RigControls}
       components={{
         devices: DevicesAdmin,      // ReactiveAdmin in list | detail panes
         designer: LayoutDesigner,   // not a list: takes the whole content area
@@ -121,6 +126,27 @@ export function useRigStatus(app: IApplication): IAppStatus | undefined {
   return data.getDevices.some((d: any) => !d.enabled)
     ? { tone: 'warning', label: 'A device is disabled' }
     : { tone: 'ok', label: 'All devices enabled' };
+}
+```
+
+**`src/RigControls.tsx`**: always-visible controls: the sidebar's footer
+(full, rail and the phone's menu) and the phone's top bar.
+
+```tsx
+import { FontIcon, useTheme } from '@fluentui/react';
+
+// Keep it presentational: the bar may mount it twice at once (the rail and
+// the panel during the collapse slide). Side effects belong elsewhere.
+export default function RigControls() {
+  const theme = useTheme();
+  return (
+    <FontIcon
+      iconName="PlugConnected"
+      title="Rig connected"
+      aria-label="Rig connected"
+      style={{ fontSize: 18, color: theme.palette.green }}
+    />
+  );
 }
 ```
 
@@ -208,12 +234,13 @@ plus:
 | `Brand` | icon next to the title |
 | `Logo` | splash-screen logo |
 | `themes` | theme builders; default `THEMES` |
-| `SidebarFooter` | extra content in the sidebar footer, above Settings |
+| `SidebarFooter` | extra content in the sidebar footer, above Settings (full sidebar and phone menu) |
+| `Controls` | always-visible controls: a row at the top of the sidebar footer (full sidebar, icon rail, phone menu) and the right end of the phone's top bar. The bar may mount it twice at once, so keep it presentational |
 | `breakpoints` | `{ medium, wide }` in px; default `{ medium: 700, wide: 1200 }` |
 | `welcome` | the `/` page on wide/medium screens with no `RootComponent` and no launch page |
 | `defaultGroup` (core) | heading for applications without `group` |
 | `useAppStatus` (core) | status-dot hook |
-| `Controls`, `ExternalApps` | accepted, ignored (the top bar's) |
+| `ExternalApps` | accepted, ignored (the top bar's) |
 
 ## How it behaves
 
@@ -221,7 +248,7 @@ plus:
 |---|---|
 | wide (>= 1200px: a desktop, a wide rig touchscreen) | sidebar \| content; inside `MasterDetail`, sidebar \| list \| detail. The sidebar collapses to an icon rail (remembered per browser). |
 | medium (>= 700px) | icon rail \| content (list \| detail). The rail's menu button opens the full sidebar over the content. |
-| narrow (a phone) | one screen at a time: the menu (at `/`), then the application (list), then the detail, each with a back bar |
+| narrow (a phone) | one screen at a time: the menu, then the application (list), then the detail, each with a back bar |
 
 - Groups keep configured order. An `icon` is a Fluent icon name
   (`Devices3`, `ContactCard`, `Design`, `Info`, ...); without one the item
@@ -233,8 +260,15 @@ plus:
   `MasterDetail` detail is open the back bar leads to the list
   (`useShellLayout().backBar` is true here).
 - On a phone, `/` is the menu rather than the launch page (wide and medium
-  layouts still redirect `/` to the launch page). An application's `links`
-  show as touch pills under the back bar.
+  layouts still redirect `/` to the launch page). On an application's page
+  the back bar's "‹ Menu" opens the same full-screen menu over that page's
+  URL (a history entry, so the device's Back closes it), with the active
+  application's `links` nested under it as in the wide sidebar. The app's
+  own entry is its main page; choosing a page or another app navigates and
+  closes the menu. The sliding selection marks the current page: the
+  current link, or the app on its main page. There is no strip of links
+  under the back bar, so the page keeps the screen; and no root link is
+  needed in `links`, since the app's entry is its root.
 - There are no global action buttons: each application draws its own
   toolbar inside its content (or its panes).
 - Content gets 20px padding (12px on a phone) and scrolls; `FullBleed`
@@ -299,21 +333,34 @@ Clone denim-fabric-topbar next to it and change the import:
 +import Shell from './lib/denim-fabric-topbar';
 ```
 
-The props stay valid: the top bar uses `Controls` and `ExternalApps` and
-ignores `title` and `SidebarFooter` (and `group`, `icon`, status dots).
+The props stay valid: the top bar uses `Controls` (in its header) and
+`ExternalApps`, ignores `title` and `SidebarFooter` (and `group` and
+`icon`), and shows status dots in its waffle panel.
 Master-detail and full-bleed apps keep working (MasterDetail then draws its
 own phone back bar). Then remove this folder.
 
 ## Same exports as every bar
 
-`index.ts` is `export * from '../denim-fabric'` plus `Shell` and the
-default export, the surface defined in denim-fabric's
+`index.ts` is `export * from '../denim-fabric'` plus `Shell`, the default
+export and the role exports, the surface defined in denim-fabric's
 `shared/barContract.ts`. `parity.check.ts` fails your app's `tsc` if this
 bar's exports drift from it; denim-fabric's `scripts/check-bar-parity.mjs`
-also compares type-only exports. The sidebar's building blocks are not on
-the surface: import `Sidebar`, `StatusDot`, `SidebarProps`,
-`SidebarVariant` from `./lib/denim-fabric-sidebar/SidebarShell/Sidebar`
-when you vary the bar.
+also compares type-only exports and names a missing role.
+
+The sidebar's building blocks are exported under the role names every bar
+uses, each typed with its role's props:
+
+| Role | Here | Its own extra props |
+|---|---|---|
+| `Bar` | `Sidebar`: the full sidebar; on its own it has its own Settings dialog | `variant` (`full`, `rail`, `screen`), `title`, `onToggle`, `toggleLabel`, `onNavigate`, `onOpenSettings`, `Footer` |
+| `BarNav` | `SidebarLinks`: the links listed under an app | none |
+| `BarLink` | `SidebarLink` | none |
+| `AppSwitcher` | `AppList`: the grouped, scrolling application list with the sliding selection | `rail` |
+| `StatusDot` | denim-fabric's shared `StatusDot` | `overlay`, `className` |
+
+For the extra props, import them by name (and `SidebarProps`,
+`SidebarVariant`, `AppListProps`) from
+`./lib/denim-fabric-sidebar/SidebarShell/Sidebar` when you vary the bar.
 
 ## Verification
 
@@ -324,7 +371,13 @@ ReactiveAdmin list/show/edit in master-detail and `MasterDetail` at 1400px,
 900px and 390px with touch (drill-in, the back bar); the wide collapse
 slide and the phone drill-in; a full-bleed canvas; Settings; no console
 errors. Unchanged pixel for pixel from the sidebar before the bars were
-split. Earlier, before the split: browser Back/Forward, deep links, 44px
+split. After the role exports and `Controls` (2026-10-16): Controls
+visible at 1400px (full and collapsed), 900px (rail and overlay) and 390px
+(menu and the top bar). After the phone pills were removed (2026-10-17),
+at 390px with touch: no strip under the back bar; "‹ Menu" opens the menu
+with the active app's pages nested, the selection on the current page;
+choosing a page or another app lands there and closes the menu; 44px
+targets; 1400px and 900px unchanged. Earlier, before the split: browser Back/Forward, deep links, 44px
 targets, visible focus, and the motion frame by frame under 6x CPU
 throttling.
 
@@ -332,10 +385,10 @@ throttling.
 
 | Path | What it is |
 |---|---|
-| `index.ts` | the bar's exports (the shared surface + `Shell` + default) |
+| `index.ts` | the bar's exports (the shared surface + `Shell` + default + the role exports) |
 | `parity.check.ts` | the export-parity check |
-| `SidebarShell/index.tsx` | `SidebarShell` (the `Shell`): the three layouts, the phone back bar and pills, the layout context |
-| `SidebarShell/Sidebar.tsx` | `Sidebar` (full / rail / screen variants), `StatusDot`, the sidebar's styles |
+| `SidebarShell/index.tsx` | `SidebarShell` (the `Shell`): the three layouts, the phone back bar (with `Controls`) and menu screen, the layout context |
+| `SidebarShell/Sidebar.tsx` | `Sidebar` (full / rail / screen variants), `AppList`, `SidebarLinks`, `SidebarLink`, the sidebar's styles (and a re-export of the shared `StatusDot`) |
 | `SidebarShell/slide.ts` | the wide collapse/expand slide |
 
 ## License

@@ -38,9 +38,26 @@ export const MODE_TITLE: Record<DotMode, string> = {
   idle: 'No telemetry',
 };
 
+/** The telemetry mode as a dot (blinking while recording), with its title. */
+export const TelemetryModeDot: React.FC<{ mode: DotMode }> = ({ mode }) => (
+  <div
+    role="img"
+    aria-label={MODE_TITLE[mode]}
+    title={MODE_TITLE[mode]}
+    className={mode === 'recording' ? blinkClass : undefined}
+    style={{
+      width: 10,
+      height: 10,
+      borderRadius: '50%',
+      flexShrink: 0,
+      background: MODE_COLOR[mode],
+    }}
+  />
+);
+
+// The top bar's header slot: the dot, padded to the header's height.
 const StatusDot: React.FC<{ mode: DotMode }> = ({ mode }) => (
   <div
-    title={MODE_TITLE[mode]}
     style={{
       display: 'flex',
       alignItems: 'center',
@@ -50,15 +67,7 @@ const StatusDot: React.FC<{ mode: DotMode }> = ({ mode }) => (
       flexShrink: 0,
     }}
   >
-    <div
-      className={mode === 'recording' ? blinkClass : undefined}
-      style={{
-        width: 10,
-        height: 10,
-        borderRadius: '50%',
-        background: MODE_COLOR[mode],
-      }}
-    />
+    <TelemetryModeDot mode={mode} />
   </div>
 );
 

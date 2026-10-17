@@ -14,8 +14,8 @@ named core -> UI kit -> layout, so an app ships only the bar it uses:
 ```
 denim                  headless core: provider, hooks, routes, contract
 denim-fabric           shared Fluent pieces; no bar
-denim-fabric-topbar    the top bar        (index.ts = shared surface + Shell)
-denim-fabric-sidebar   the sidebar        (index.ts = shared surface + Shell)
+denim-fabric-topbar    the top bar        (index.ts = shared surface + Shell + roles)
+denim-fabric-sidebar   the sidebar        (index.ts = shared surface + Shell + roles)
 ```
 
 These libraries are cloned or copied side by side so you can overlay them,
@@ -48,7 +48,8 @@ Never put a bar into denim-fabric; it holds only what every bar shares.
 | `MasterDetail`, `AdminMasterDetail`, `useDetailRoute`, `FullBleed` | denim-fabric `MasterDetail/`, `shared/FullBleed.tsx` | content, not chrome: must work under any bar |
 | the layout hook (`ShellLayoutContext`, `useLayout`, `useShellLayout`, breakpoints, `useGoUp`) | denim-fabric `shared/layout.ts` | every bar provides it; content reads it |
 | motion (`SlidingIndicator`, `DrillIn`, `ShellMotionProvider`), `debugPerf` | denim-fabric `shared/motion.tsx`, `shared/perf.tsx` | any bar can use them |
-| `ShellProps`, the export contract | denim-fabric `shared/shell.ts`, `shared/barContract.ts` | defined once for every bar |
+| `ShellProps`, the export contract, the role props | denim-fabric `shared/shell.ts`, `shared/barContract.ts` | defined once for every bar |
+| the application status dot | denim-fabric `shared/StatusDot.tsx` | both bars draw it (their `StatusDot` role) |
 | `getStyle()` and the convenience barrel | denim-fabric `lib/` | compatibility; bars register their own styles into it |
 | form styles, `Photo` | typical-admin-fabric `lib/formStyles.ts`, `lib/templates/Photo/` | form pieces, next to the other form components |
 | a bar's chrome and its styles | the bar's package | only that bar uses them |
@@ -69,7 +70,7 @@ A shell component takes `ShellProps` (which extends the core's
 | 2 | applies the theme in its kit | `useSettings().settings.theme` (`"<mode>-<color>"`, `parseThemeKey`), `.fontSize` |
 | 3 | draws chrome, hidden on kiosk routes and landing pages | `useApplications()` (`groups`), `useNav()` (`activeApp`, `activeLink`, `isAppActive`, `isLinkActive`, `appUrl`, `linkUrl`, `showChrome`), `useAppStatus(app)` per nav item |
 | 4 | renders the content | `<DenimRoutes wrap={(content, { app, kiosk }) => ...} home? welcome? />` |
-| 5 | offers a Settings dialog | `useSettingsForm(isOpen)`: render `general.schema` (a per-form schema) with `general.initialValues` / `general.onChange`, each `tabs[i].Component` with `tabs[i].props`, then `await save()` (true on success), `saving`, `error` |
+| 5 | offers a Settings dialog | `useSettingsForm(isOpen)`: render `general.schema` (a per-form schema) with `general.initialValues` / `general.onChange`, each `tabs[i].Component` (the form's, which tracks mounting, not the app's) with `tabs[i].props`, then `await save()` (true on success; sends only what changed), `saving`, `error`; hold Save while `loading` (open tabs still loading their data) isn't empty |
 
 A Fluent bar also:
 
@@ -97,16 +98,55 @@ start from it, or from a copy of a Fluent bar.
 
 Interchangeable packages export the same members with the same types, even
 though the components differ, so switching is an import-path change. A
-Fluent bar's `index.ts` is exactly:
+Fluent bar's `index.ts` is:
 
 ```ts
 import { MyShell } from './MyShell';
+import { MyBar, MyLinks, MyLink, MyAppPicker } from './MyShell/parts';
+import { StatusDot as SharedStatusDot } from '../denim-fabric/shared/StatusDot';
 import type { ShellComponent } from '../denim-fabric/shared/shell';
+import type {
+  AppSwitcherComponent, BarComponent, BarLinkComponent, BarNavComponent, StatusDotComponent,
+} from '../denim-fabric/shared/barContract';
 
 export * from '../denim-fabric';               // the shared surface, and the core
 export const Shell: ShellComponent = MyShell;  // ShellProps; say which props it ignores
 export default Shell;
+// The building blocks, under the role names every bar uses:
+export const Bar: BarComponent = MyBar;                  // the whole bar
+export const BarNav: BarNavComponent = MyLinks;          // an app's links (default the active app's)
+export const BarLink: BarLinkComponent = MyLink;         // one link
+export const AppSwitcher: AppSwitcherComponent = MyAppPicker;  // choosing an app
+export const StatusDot: StatusDotComponent = SharedStatusDot;  // an app's status dot
 ```
+
+### Role names
+
+Only one bar is used at a time, so its building blocks are exported under
+shared ROLE names, not their component names:
+
+| Role | Props (barContract.ts) | Top bar | Sidebar |
+|---|---|---|---|
+| `Bar` | `BarProps` (`Brand?`, `Controls?`) | `Header` | `Sidebar` |
+| `BarNav` | `BarNavProps` (`app?`, `onNavigate?`, `className?`) | `NavBar` | `SidebarLinks` |
+| `BarLink` | `BarLinkProps` (`to`, `children`, `active?`, `className?`, `onClick?`) | `HeaderLink` | `SidebarLink` |
+| `AppSwitcher` | `AppSwitcherProps` (`onNavigate?`) | `AppNavBar` (waffle panel) | `AppList` (grouped list) |
+| `StatusDot` | `StatusDotProps` (`app`) | shared `StatusDot`, in the waffle panel | shared `StatusDot`, beside each app |
+
+- Type each role export with its role's component type (`BarComponent`,
+  ...), not the component's own: the parity check compares the types
+  exactly, so code using a role works under every bar.
+- The component itself may take more props, all optional (the sidebar's
+  `variant`, the waffle panel's `isOpen`); a required extra prop makes the
+  role assignment fail to compile. The component keeps its own name in the
+  bar's folder for those extras.
+- A role must work rendered on its own, with only its role's props: give
+  extras defaults (the sidebar's `Sidebar` opens a Settings dialog of its
+  own without `onOpenSettings`; the top bar's `AppNavBar` draws its own
+  waffle button without `isOpen`).
+- A new bar provides all five. A role with no natural counterpart still
+  gets a sensible component (a plain list of links, the shared dot), never
+  an omission.
 
 and its `parity.check.ts` is:
 
@@ -117,11 +157,13 @@ export type MyBarExportParity = Assert<MatchesBarExports<typeof Bar>>;
 ```
 
 `MatchesBarExports` compares the bar's value exports with `BarExports`
-(denim-fabric's exports + `BarOwnExports`: `Shell`, `default`), names and
-types. The app's `tsc` checks it, because the bar sits under `src/`. Type-
+(denim-fabric's exports + `BarOwnExports`: `Shell`, `default` and the five
+roles), names and types. The app's `tsc` checks it, because the bar sits under `src/`. Type-
 only exports are invisible to it; `denim-fabric/scripts/check-bar-parity.mjs
 <bar dir>...` compares the full lists (types included) with the
-TypeScript compiler. Run both after any change to a bar's `index.ts`.
+TypeScript compiler, reading the bar-own members from `BarOwnExports`
+(it names a missing role export). Run both after any change to a bar's
+`index.ts`.
 
 Rules:
 
@@ -131,8 +173,12 @@ Rules:
   shared (it reaches every bar through `export *`); otherwise add it to
   `BarOwnExports` and to every bar's `index.ts`, with a sensible default or
   no-op where it doesn't apply.
-- A bar's building blocks (`Header`, `Sidebar`, ...) stay off the surface;
-  people import them from the bar's folder when they copy or vary it.
+- A bar's building blocks are on the surface only under their role names
+  (above); their component names stay in the bar's folder.
+- `ShellProps.Controls` is honoured by every bar, always visible (the top
+  bar's header; the sidebar's footer in every variant and the phone's top
+  bar). A bar may mount it more than once (the sidebar's rail and panel
+  during a slide), so apps keep it presentational.
 - Another UI kit's skin defines its own surface the same way (a shared type
   in its shared package), and keeps the same member names as the Fluent
   one where they mean the same thing.

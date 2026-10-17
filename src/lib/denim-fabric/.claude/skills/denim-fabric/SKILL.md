@@ -16,8 +16,10 @@ denim-fabric renders Denim's headless core (`../denim`) with Fluent UI v8.
 | `denim-fabric-sidebar` | configuration-style apps with many applications: grouped sidebar, icons, status dots, phone drill-in. |
 
 Both export **exactly the same members**: `Shell` (also the default
-export), plus everything from denim-fabric and the core. Switching is an
-import-path change. Both take the same `ShellProps` (every `<DenimProvider>`
+export), the building blocks under shared role names (`Bar`, `BarNav`,
+`BarLink`, `AppSwitcher`, `StatusDot`, each typed with its role's props
+from `shared/barContract.ts`), plus everything from denim-fabric and the
+core. Switching is an import-path change. Both take the same `ShellProps` (every `<DenimProvider>`
 prop, see denim's `denim-app-shell` skill, plus `themes`, `Logo`, `Brand`,
 `title`, `Controls`, `ExternalApps`, `SidebarFooter`, `breakpoints`,
 `welcome`); a bar ignores the props it has no place for.
@@ -138,8 +140,9 @@ application is). Apps that aren't lists don't use MasterDetail.
 `SettingsDialog` renders the core's `useSettingsForm`: a General tab
 (colour, mode, font size, default page, "Reduce motion (this device)", plus
 `settingsGeneralFields`) and one Pivot tab per `settingsTabs` entry, saved
-together (extra tabs overflow into a menu). Writing tabs is the core
-skill's section 5. Keep it for global preferences; a feature's own
+together (extra tabs overflow into a menu). Only changed values are sent;
+Save is held ("Loading <tab>…") while an open `loads: true` tab hasn't
+called `setReady(true)`. Writing tabs is the core skill's section 5. Keep it for global preferences; a feature's own
 configuration is its own application.
 
 ## 5. getStyle() and Photo
@@ -231,10 +234,15 @@ function QuickAddProfile() {
   Nothing else changes (the parity check guarantees the same exports).
 - Prefer props first (`Brand`, `Controls`, `SidebarFooter`, `breakpoints`,
   `themes`, `welcome`).
+- Use a building block on its own through its role export (`Bar`,
+  `BarNav`, `BarLink`, `AppSwitcher`, `StatusDot` from the bar): the same
+  code then works under either bar. For a component's extra props (the
+  sidebar's `variant`, the waffle panel's `isOpen`), import it under its
+  own name from the bar's folder (`Header`, `NavBar`, `HeaderLink`,
+  `AppNavBar`; `Sidebar`, `SidebarLinks`, `SidebarLink`, `AppList`;
+  `StatusDot` is denim-fabric's `shared/StatusDot`).
 - Then copy the bar's folder (`TopBarShell/` or `SidebarShell/`) and edit
-  the copy; denim-fabric and the core stay as they are. Its building
-  blocks (`Header`, `Sidebar`, `StatusDot`, ...) are imported from the
-  bar's folder, not its index.
+  the copy; denim-fabric and the core stay as they are.
 - A new bar, or a skin for another UI kit: read the `write-a-denim-skin`
   skill (the export contract and the parity check are there).
 - Never put markup or a UI-kit import in denim (the core), and never put a

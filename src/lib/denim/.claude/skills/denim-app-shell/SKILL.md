@@ -165,9 +165,18 @@ import type { ISettingsTab, ISettingsTabProps } from './lib/denim-fabric';
 import { Form } from './lib/denim-fabric/lib';   // typical-admin-fabric's per-form Form
 
 // (a) Extra fields on the General tab: a per-form schema (see form-schema).
+// A field whose value isn't stored under its own key maps it with
+// `read(key, settings)` -> starting value and `write(key, values, settings)`
+// -> the settings patch to save (per-form's `converter`, if any, runs first).
 const generalFields = {
   units: { type: 'select', label: 'Units', defaultValue: 'metric',
            options: [{ text: 'Metric', value: 'metric' }, { text: 'Imperial', value: 'imperial' }] },
+  deviceName: {
+    type: 'text', label: 'Device name',
+    read: (_key: string, settings: IDenimSettings) => settings.deviceMap?.[myId] ?? '',
+    write: (key: string, values: Record<string, any>, settings: IDenimSettings) =>
+      ({ deviceMap: { ...settings.deviceMap, [myId]: values[key] } }),
+  },
 };
 
 // (b) A whole tab.
@@ -185,7 +194,24 @@ function DeviceTab({ settings, onChange, registerSave }: ISettingsTabProps) {
           onChange={(_n: string, { clean }: any) => setName(clean.deviceName ?? '')} />
   );
 }
-const settingsTabs: ISettingsTab[] = [{ key: 'device', headerText: 'Device', Component: DeviceTab }];
+
+// (b2) A tab that loads its own data: declare `loads: true` and say when the
+// data is in, BEFORE reporting anything. Until then Save is held while the
+// tab is open, its patches are dropped and its registerSave doesn't run, so
+// a form seeded before its data arrived can't save empty values over it.
+function DefaultsTab({ isOpen, setReady, registerSave }: ISettingsTabProps) {
+  const { data } = useQuery(GET_DEFAULTS, { skip: !isOpen });
+  useEffect(() => setReady(!!data), [data, setReady]);   // first
+  useEffect(() => {
+    if (data) registerSave(async () => { /* write only what changed */ });
+  }, [data, registerSave]);
+  if (!data) return <span>Loading…</span>;               // no form before the data
+  return <Form ... />;
+}
+const settingsTabs: ISettingsTab[] = [
+  { key: 'device', headerText: 'Device', Component: DeviceTab },
+  { key: 'defaults', headerText: 'Defaults', Component: DefaultsTab, loads: true },
+];
 
 // (c) settingsFields: with settingsSource="server", the extra AppSettings
 // fields to select in my.settings so tabs can read them.
@@ -195,13 +221,26 @@ const settingsTabs: ISettingsTab[] = [{ key: 'device', headerText: 'Device', Com
 
 How saving works (`useSettingsForm`, the same in every skin):
 
-- Save merges General's values and every tab's latest `onChange` patch into
-  one object. Local: written to `localStorage` (extra keys included).
-  Server: sent as `updateSettings(settings: {...})`, then `my` is refetched;
-  every key must therefore exist on the backend's `AppSettingsInput`.
-- Then each `registerSave` callback runs in tab order. A thrown error shows
-  next to Save and keeps the dialog open.
-- `onChange`/`registerSave` are stable per tab: list them as effect deps.
+- Save merges General's values and every ready tab's latest `onChange`
+  patch into one object and keeps only the keys whose value differs from
+  the saved settings (deep, ignoring `__typename`; `null`, `undefined`
+  and `''` count as equal). Nothing changed: nothing is sent. Local:
+  written to `localStorage` (extra keys included). Server: sent as
+  `updateSettings(settings: {...})`, then `my` is refetched; every key must
+  therefore exist on the backend's `AppSettingsInput`. So a tab can report
+  its whole form; it needn't diff.
+- Then each ready tab's `registerSave` callback runs in tab order. A thrown
+  error shows next to Save and keeps the dialog open. These write the
+  tab's own records, so diff those yourself (`changedSettings` and
+  `sameSettingValue` are exported for it).
+- Loading: a tab with `loads: true` (or any tab after `setReady(false)`)
+  is not ready. While an open tab isn't ready, `useSettingsForm().loading`
+  lists it and `save()` refuses (the Fluent dialog disables Save and says
+  "Loading <tab>…"); its `onChange` patches are dropped, so call
+  `setReady(true)` before reporting. A closed (unmounted) loading tab
+  doesn't hold Save; it just contributes nothing.
+- `onChange`/`registerSave`/`setReady` are stable per tab: list them as
+  effect deps.
 - Tab controls may unmount inactive tabs (Fluent's Pivot does). Patches and
   save callbacks survive that, so keep a tab's state in what you report.
 - Server mode: `settings` includes Apollo's `__typename`, also on nested

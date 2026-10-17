@@ -8,8 +8,10 @@ license: MIT
 
 One of denim-fabric's interchangeable bars: a configuration-app layout. It
 exports exactly what denim-fabric-topbar exports (`Shell`, the default
-export, and everything from denim-fabric and the core), so an app that
-switches bars changes one import. Shared pieces (master-detail, the layout
+export, the role exports `Bar` = `Sidebar`, `BarNav` = `SidebarLinks`,
+`BarLink` = `SidebarLink`, `AppSwitcher` = `AppList`, `StatusDot`, and
+everything from denim-fabric and the core), so an app that switches bars
+changes one import. Shared pieces (master-detail, the layout
 hook, `FullBleed`, theming, Settings, getStyle, Photo) are in denim-fabric's
 `denim-fabric` skill.
 
@@ -21,6 +23,7 @@ import Shell from './lib/denim-fabric-sidebar';
   settingsSource="server"
   defaultGroup="System"              // heading for apps without `group`
   useAppStatus={useRigStatus}        // optional status-dot hook
+  Controls={RigControls}             // optional, always visible (footer, phone top bar)
   components={{ devices: DevicesAdmin, designer: LayoutDesigner, about: About }}
 />
 ```
@@ -32,19 +35,30 @@ import Shell from './lib/denim-fabric-sidebar';
   `icon` is a Fluent icon name (`Devices3`, `ContactCard`, `Design`,
   `Info`, ...); without one the item shows the name's first letter.
 - Groups keep configured order. The active app's `links` show under it in
-  the sidebar, and as touch pills on a phone.
+  the sidebar, and on a phone in the full-screen menu ("‹ Menu" opens it
+  over the current page), which is how a phone moves between an app's
+  pages; there is no link strip on the page itself. The app's own entry
+  is its main page, so don't add a root link to `links`.
 - Status dots: `useAppStatus(app)` (the core's hook prop) or an app's own
   `useReportAppStatus(app.path, status)`.
 - There are **no global action buttons**. Each application draws its own
   toolbar inside its content (or its panes). Settings (cross-feature
   preferences only) is in the sidebar footer, under `SidebarFooter`.
+- `Controls` (ShellProps, shared with the top bar) are the app's
+  always-visible controls: a row at the top of the footer in the full
+  sidebar, the icon rail and the phone menu, and at the right end of the
+  phone's top bar. The bar can mount it twice at once (rail and panel
+  during the slide, rail and overlay on medium screens), so keep it
+  presentational and put its state in context.
 
 ## Layouts
 
 - Wide >= 1200px: sidebar, collapsible to an icon rail (remembered per
   browser). Medium >= 700px: icon rail; its menu button opens the full
-  sidebar over the content (a Fluent `Panel`). Narrow: drill-in, menu at
-  `/` -> app -> detail, each with a back bar. Override with
+  sidebar over the content (a Fluent `Panel`). Narrow: drill-in, menu
+  (at `/`, or "‹ Menu" over an app's page, with that app's pages nested
+  and the selection on the current one) -> app -> detail, each with a
+  back bar. Override with
   `breakpoints={{ medium, wide }}`.
 - Content gets 20px padding (12px on a phone, `--denim-content-padding`)
   and scrolls. A component that must fill the area wraps itself in
@@ -53,7 +67,7 @@ import Shell from './lib/denim-fabric-sidebar';
   points the phone back bar at its list while a detail is open
   (`setBack`), and the bar goes up with `goUp` (Back when Back leads
   there).
-- `Controls` and `ExternalApps` are the top bar's: accepted and ignored.
+- `ExternalApps` is the top bar's: accepted and ignored.
 - Kiosk routes (`/kiosk/<path>`) render without the sidebar.
 
 ## Motion
@@ -81,11 +95,16 @@ and keep a visible `:focus-visible` outline. Use `Link`s for navigation.
 
 - Props first (`title`, `Brand`, `SidebarFooter`, `breakpoints`, `themes`,
   `welcome`).
+- A part on its own: the role exports (`Bar`, `BarNav`, `BarLink`,
+  `AppSwitcher`, `StatusDot`), which take exactly the role's props and so
+  work under either bar. For a part's extra props (`Sidebar`'s `variant`,
+  `AppList`'s `rail`), import it by name from
+  `./lib/denim-fabric-sidebar/SidebarShell/Sidebar`.
 - Then copy `SidebarShell/` into your app and edit the copy; its parts are
-  `index.tsx` (layouts, back bar, pills, the layout context), `Sidebar.tsx`
-  (`Sidebar` full / rail / screen, `StatusDot`, styles) and `slide.ts`.
-  Import them from the folder (`./lib/denim-fabric-sidebar/SidebarShell/Sidebar`);
-  they are not on the package's export surface.
+  `index.tsx` (layouts, back bar, the phone menu screen, the layout context), `Sidebar.tsx`
+  (`Sidebar` full / rail / screen, `AppList`, `SidebarLinks`,
+  `SidebarLink`, styles) and `slide.ts`; the status dot is denim-fabric's
+  `shared/StatusDot.tsx`.
 - Merge variant and state classes with `mergeStyles` into ONE class, never
   list two Fluent classes side by side: which wins depends on rule order,
   which a theme change reshuffles.
@@ -96,7 +115,8 @@ and keep a visible `:focus-visible` outline. Use `Link`s for navigation.
 
 Clone `denim-fabric-topbar` next to it, change `import Shell from
 './lib/denim-fabric-sidebar'` to `'./lib/denim-fabric-topbar'`, and delete
-this folder. Groups, icons and status dots aren't shown there; master-detail
+this folder. Groups and icons aren't shown there (status dots are, in the
+waffle panel); master-detail
 screens and FullBleed apps keep working (MasterDetail draws its own phone
 back bar).
 

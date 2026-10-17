@@ -8,9 +8,22 @@
 // Everything from the core, so one import serves an app.
 export * from '../denim';
 
-// The bars' shared props and export surface
+// The bars' shared props and export surface (the role exports' props too)
 export type { ShellProps, ShellComponent } from './shared/shell';
-export type { BarOwnExports, BarExports } from './shared/barContract';
+export type {
+  BarOwnExports,
+  BarExports,
+  BarProps,
+  BarNavProps,
+  BarLinkProps,
+  AppSwitcherProps,
+  StatusDotProps,
+  BarComponent,
+  BarNavComponent,
+  BarLinkComponent,
+  AppSwitcherComponent,
+  StatusDotComponent,
+} from './shared/barContract';
 
 // Layout, under any bar
 export {

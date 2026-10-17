@@ -94,6 +94,8 @@ const SettingsContent: React.FC<{ onDismiss: () => void }> = React.memo(function
     </Stack>
   );
 
+  const loading = form.loading.length > 0;
+
   async function handleSave() {
     if (await form.save()) onDismiss();
   }
@@ -127,8 +129,15 @@ const SettingsContent: React.FC<{ onDismiss: () => void }> = React.memo(function
         </div>
 
         <Stack horizontal verticalAlign="center" wrap tokens={{ childrenGap: '0.77em' }} style={{ paddingTop: '1em' }}>
-          <PrimaryButton onClick={handleSave} disabled={form.saving}>Save</PrimaryButton>
+          {/* Held while an open tab is still loading its data: saving then
+              would save the empty values it was seeded with. */}
+          <PrimaryButton onClick={handleSave} disabled={form.saving || loading}>Save</PrimaryButton>
           <DefaultButton onClick={onDismiss}>Cancel</DefaultButton>
+          {loading && (
+            <span role="status" style={{ fontSize: '0.82em', color: getTheme().palette.neutralSecondary }}>
+              Loading {form.loading.map(t => t.headerText).join(', ')}…
+            </span>
+          )}
           {form.error && (
             <span role="alert" style={{ fontSize: '0.82em', color: getTheme().palette.redDark }}>{form.error}</span>
           )}

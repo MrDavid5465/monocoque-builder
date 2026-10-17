@@ -151,8 +151,8 @@ Every shell takes all of `<DenimProvider>`'s props (below) plus its own.
 | `settingsSource` | `"local"` | `"local"`: localStorage. `"server"`: `my.settings` + `updateSettings` |
 | `defaultSettings` | `{ theme: 'default', fontSize: 1, launchPage: '', reduceMotion: false }` | values before anything is saved (e.g. `{ reduceMotion: true }` for an app that should default to no motion) |
 | `settingsFields` | `""` | extra `AppSettings` fields to select (server mode), for your settings tabs |
-| `settingsTabs` | `[]` | extra Settings tabs, `{ key, headerText, Component }` |
-| `settingsGeneralFields` | none | extra per-form fields on the General tab |
+| `settingsTabs` | `[]` | extra Settings tabs, `{ key, headerText, Component, loads? }` (`loads`: the tab loads its own data and calls `setReady(true)` when it has it) |
+| `settingsGeneralFields` | none | extra per-form fields on the General tab; a field may add `read(key, settings)` / `write(key, values, settings)` to map a stored value to its starting value and back |
 | `RootComponent` | none | the `/` page (also shown while `my` loads); chrome is hidden off application routes |
 | `defaultGroup` | `"Applications"` | group heading for applications without `group` |
 | `useAppStatus` | none | hook `(app) => IAppStatus \| tone \| undefined`, called once per app in the nav, for its status dot |
@@ -173,7 +173,7 @@ import {
 | `useApplications()` | `{ applications, groups, ready }`; `groups` is `[{ name, applications }]` in configured order |
 | `useNav()` | `{ pathname, activeApp, activeLink, isKiosk, showChrome, appUrl(app), linkUrl(app, link), isAppActive(app), isLinkActive(app, linkPath) }` |
 | `useSettings()` | `{ settings, saveSettings, settingsSource, settingsTabs, settingsGeneralFields }` |
-| `useSettingsForm(isOpen)` | a Settings dialog's logic: `{ general: { schema, initialValues, onChange }, tabs: [{ key, headerText, Component, props }], save(), saving, error }` |
+| `useSettingsForm(isOpen)` | a Settings dialog's logic: `{ general: { schema, initialValues, onChange }, tabs: [{ key, headerText, Component, props }], save(), saving, loading, error }`. `save()` sends only what changed and refuses while `loading` (open tabs still loading their data) isn't empty |
 | `useAppStatus(app)` | the app's status dot: reported by the app, else from the `useAppStatus` prop |
 | `useReportAppStatus(appPath, status)` | an app publishes its own dot, e.g. `'ok'`, `{ tone: 'warning', label: 'Unsaved layout' }`; `undefined` clears it |
 | `useReducedMotion()` | true when a skin should not animate: the `reduceMotion` device setting or the OS's `prefers-reduced-motion`; follows changes to either |
@@ -577,6 +577,18 @@ Behaviour that changed: the waffle panel now expands the current
 application under `HashRouter` too; TopBar links carry `aria-current`; the
 Settings dialog has a Cancel button next to Save.
 
+## Tests
+
+`__tests__/settingsForm.test.tsx` runs under vitest with jsdom and
+`@testing-library/react`, from an app that has them:
+
+```sh
+npx vitest run src/lib/denim
+```
+
+An app without vitest excludes `src/lib/**/__tests__` from its
+`tsconfig.json`'s type-check.
+
 ## What's in here
 
 | Path | What it is |
@@ -586,7 +598,8 @@ Settings dialog has a Cancel button next to Save.
 | `hooks.ts` | `useDenim`, `useApplications`, `useNav`, `useSettings`, `useAppStatus`, `useReportAppStatus` |
 | `DenimRoutes.tsx` | application, kiosk and `/` routes; `defaultRoute` redirect |
 | `nav.ts` | the nav model as pure functions |
-| `settingsForm.ts` | `useSettingsForm`, the General tab schema |
+| `settingsForm.ts` | `useSettingsForm`, the General tab schema, the field mapping (`read`/`write`), `changedSettings` |
+| `__tests__/` | unit tests (vitest): only changed settings are saved, loading tabs hold Save, General field mapping |
 | `contract.ts` | `DenimShellProps`, `splitShellProps`, and the skin contract in comments |
 | `themes/` | the theme-key vocabulary (`"<mode>-<color>"`) |
 | `lib/queries.ts` | the server contract's documents and types |

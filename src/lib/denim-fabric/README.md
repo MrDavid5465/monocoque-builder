@@ -16,7 +16,9 @@ ships only the one it uses:
 
 Both bars export **exactly the same members** (the same names, the same
 types), so switching is an import-path change. Each re-exports everything
-here, so an app can import from its bar package alone.
+here, so an app can import from its bar package alone, and each exports
+its building blocks under the same **role names** (`Bar`, `BarNav`,
+`BarLink`, `AppSwitcher`, `StatusDot`) with the same props.
 
 What lives here, shared by every bar:
 
@@ -33,8 +35,9 @@ What lives here, shared by every bar:
 - `lib/`: the convenience barrel (Fluent, react-router, Apollo hooks,
   date-fns, typical-admin-fabric's `Form`/`List`/cards, `getStyle()`), kept
   so existing imports keep working;
-- the bars' shared props (`ShellProps`) and export contract
-  (`shared/barContract.ts`).
+- the bars' shared props (`ShellProps`), export contract and role props
+  (`shared/barContract.ts`), and the application **status dot** both bars
+  draw (`shared/StatusDot.tsx`).
 
 It is meant to be cloned and changed: copy a bar's folder to vary it, or
 use the bars as the model for a skin in another UI kit (see
@@ -267,18 +270,24 @@ others as you build them.
 
 ## Same exports as every bar
 
-Every bar package's `index.ts` is exactly:
+Every bar package's `index.ts` is:
 
 ```ts
 export * from '../denim-fabric';                 // this package, and the core
 export const Shell: ShellComponent = ...;        // the bar's shell
 export default Shell;
+export const Bar: BarComponent = ...;            // its building blocks,
+export const BarNav: BarNavComponent = ...;      // under the role names
+export const BarLink: BarLinkComponent = ...;
+export const AppSwitcher: AppSwitcherComponent = ...;
+export const StatusDot: StatusDotComponent = ...;
 ```
 
 | Member | What it is |
 |---|---|
 | `default`, `Shell` | the bar's shell: `React.FC<ShellProps>` |
 | `ShellProps` | every `<DenimProvider>` prop plus `themes`, `Logo`, `Brand`, `title`, `Controls`, `ExternalApps`, `SidebarFooter`, `breakpoints`, `welcome`. A bar ignores the ones it has no place for (each prop's comment says which bars use it). |
+| `Bar`, `BarNav`, `BarLink`, `AppSwitcher`, `StatusDot` | the bar's building blocks under shared role names (below) |
 | everything else | from denim-fabric (below) and the core |
 
 So an app moves between bars by changing one import:
@@ -288,14 +297,49 @@ So an app moves between bars by changing one import:
 +import Shell from './lib/denim-fabric-sidebar';
 ```
 
-(and cloning the other bar). A bar's building blocks (`Header`, `NavBar`,
-`Sidebar`, `StatusDot`, ...) are not on the surface; import them from the
-bar's folder, e.g. `./lib/denim-fabric-sidebar/SidebarShell/Sidebar`, when
-you copy or vary that bar.
+(and cloning the other bar).
+
+**Role exports.** Only one bar is used at a time, so each bar exports its
+building blocks under the same role names, whatever the components are
+called, each typed with the role's props from `shared/barContract.ts`:
+
+| Role | Props | Top bar | Sidebar |
+|---|---|---|---|
+| `Bar` | `BarProps`: `Brand?`, `Controls?` | `Header` (the fixed header, with the waffle panel) | `Sidebar` (the full sidebar; with no `onOpenSettings` it has its own Settings dialog) |
+| `BarNav` | `BarNavProps`: `app?` (default the active one), `onNavigate?`, `className?` | `NavBar` (the header's links, and the link menu below ~1260px) | `SidebarLinks` (the links listed under the active app) |
+| `BarLink` | `BarLinkProps`: `to`, `children`, `active?`, `className?`, `onClick?` | `HeaderLink` | `SidebarLink` |
+| `AppSwitcher` | `AppSwitcherProps`: `onNavigate?` | `AppNavBar` (the waffle panel; on its own it draws its waffle button) | `AppList` (the grouped application list) |
+| `StatusDot` | `StatusDotProps`: `app` | the shared `StatusDot`, beside each app in the waffle panel | the shared `StatusDot`, beside each app (over its icon in the rail) |
+
+```tsx
+import { BarNav, StatusDot, useNav } from './lib/denim-fabric-sidebar';  // or -topbar
+
+// The same code under either bar: the active app's name, its status dot
+// and its links, drawn the way the bar draws them.
+export function AppHeading() {
+  const { activeApp } = useNav();
+  if (!activeApp) return null;
+  return (
+    <header>
+      <h1>{activeApp.name} <StatusDot app={activeApp} /></h1>
+      <BarNav />
+    </header>
+  );
+}
+```
+
+A role export takes exactly its role's props, so code written against it
+works under every bar. A component may take more (optional) props than its
+role; for those, import it under its own name from the bar's folder, e.g.
+`Sidebar` (`variant`, `title`, `onToggle`, ...) from
+`./lib/denim-fabric-sidebar/SidebarShell/Sidebar` or `AppNavBar` (`isOpen`,
+`ExternalApps`) from `./lib/denim-fabric-topbar/TopBarShell/AppNavBar`,
+when you copy or vary that bar.
 
 **The parity check.** The surface is defined once, in
-`shared/barContract.ts` (`BarExports` = this package's exports + `Shell` +
-`default`). Each bar has a `parity.check.ts`:
+`shared/barContract.ts` (`BarExports` = this package's exports +
+`BarOwnExports`: `Shell`, `default` and the five roles). Each bar has a
+`parity.check.ts`:
 
 ```ts
 import type * as Bar from './index';
@@ -304,13 +348,16 @@ export type SidebarExportParity = Assert<MatchesBarExports<typeof Bar>>;
 ```
 
 It fails to type-check (`Type 'false' does not satisfy the constraint
-'true'`) if the bar exports a member the contract doesn't have, lacks one,
-or gives one a different type. Your app's `tsc` checks it (it is under
+'true'`) if the bar exports a member the contract doesn't have, lacks one
+(a role export included), or gives one a different type (a role typed with
+its component's own props instead of the role's). Your app's `tsc` checks it (it is under
 `src/`), so it runs in every app's type-check without any setup.
 
 Type-only exports aren't visible to that check, so
 `scripts/check-bar-parity.mjs` compares the bars' complete export lists,
-types included, with the TypeScript compiler. Run it from an app with the
+types included, with the TypeScript compiler, and names any missing role
+export (it reads the list from `BarOwnExports`, so a role added there is
+required of every bar). Run it from an app with the
 bars side by side (one bar is enough to check it against the contract):
 
 ```sh
@@ -319,7 +366,7 @@ node src/lib/denim-fabric/scripts/check-bar-parity.mjs \
 ```
 
 **Adding a bar, or a member.** A new bar copies one bar's `index.ts` and
-`parity.check.ts` and keeps `index.ts` to those three lines. A member every
+`parity.check.ts`, and must provide `Shell` and all five roles. A member every
 bar should have goes into denim-fabric (it reaches every bar through
 `export *`) or, if each bar implements it differently, into `BarOwnExports`
 in `shared/barContract.ts` and into every bar's `index.ts`, with a sensible
@@ -521,8 +568,11 @@ export default function LayoutDesigner() {
 `SettingsDialog` renders the core's `useSettingsForm`: a General tab
 (colour, mode, font size, default page, "Reduce motion (this device)", plus
 `settingsGeneralFields`) and one Pivot tab per `settingsTabs` entry, saved
-together. Tabs that don't fit go into an overflow menu. Writing tabs is
-the core skill's section 5. Keep it for global preferences; a feature's own
+together. Tabs that don't fit go into an overflow menu. Save sends only
+what changed (nothing when nothing did), and is held, with "Loading
+<tab>…" beside it, while an open tab that loads its own data
+(`loads: true`) hasn't called `setReady(true)`. Writing tabs is the core
+skill's section 5. Keep it for global preferences; a feature's own
 configuration is its own application.
 
 ## `getStyle()`
@@ -635,8 +685,8 @@ denim's README has the full table of moved imports.
 | `{ SidebarShell } from './lib/denim-fabric'` | `import Shell from './lib/denim-fabric-sidebar'` (or `{ Shell }`) |
 | `TopBarShellProps`, `SidebarShellProps` | `ShellProps` |
 | `useShellLayout`, `useBreakpoint`, `layoutFor`, `DEFAULT_BREAKPOINTS`, `ShellLayoutContext`, `FullBleed`, `MasterDetail`, `AdminMasterDetail`, `useDetailRoute` | unchanged, from `'./lib/denim-fabric'` (or your bar); new: `useLayout()`. `IShellLayoutContext` gained `backBar`. |
-| `Header`, `NavBar`, `AppNavBar`, `HeaderLink`, `HeaderProps` | `'./lib/denim-fabric-topbar/TopBarShell/<name>'` |
-| `Sidebar`, `StatusDot`, `SidebarProps`, `SidebarVariant` | `'./lib/denim-fabric-sidebar/SidebarShell/Sidebar'` |
+| `Header`, `NavBar`, `AppNavBar`, `HeaderLink`, `HeaderProps` | `'./lib/denim-fabric-topbar/TopBarShell/<name>'`, or the role exports `Bar`, `BarNav`, `AppSwitcher`, `BarLink` from the bar |
+| `Sidebar`, `StatusDot`, `SidebarProps`, `SidebarVariant` | `'./lib/denim-fabric-sidebar/SidebarShell/Sidebar'` (`StatusDot` now lives in `'./lib/denim-fabric/shared/StatusDot'`), or the role exports `Bar`, `StatusDot` from the bar |
 | `'./lib/denim-fabric/SidebarShell/layout'`, `.../SidebarShell/FullBleed` | `'./lib/denim-fabric/shared/layout'`, `'./lib/denim-fabric/shared/FullBleed'` |
 | `'./lib/denim-fabric/Photo'` | unchanged (a re-export); the code is in typical-admin-fabric's `lib/templates/Photo/` |
 | `light`, `dark` (and `lib/light.ts`, `lib/dark.ts`) | removed: use `THEMES` / `buildTheme('light', 'blue')` |
@@ -659,6 +709,11 @@ a read-only GraphQL mock shaped like the typiql-rs backend in denim's README:
   (before the split its panes stopped at their content), with its own back
   bar on a phone; under the sidebar it is unchanged.
 - No console errors or warnings.
+- Role exports (2026-10-16): both parity checks and the script pass with
+  the five roles, and fail when one is removed from a bar (the script
+  names it as a missing role export) or typed with its component's own
+  props. The top bar is pixel-identical to before apart from the status
+  dots now drawn in its waffle panel.
 
 ## What's in here
 
@@ -666,7 +721,8 @@ a read-only GraphQL mock shaped like the typiql-rs backend in denim's README:
 |---|---|
 | `index.ts` | the shared surface; also re-exports the whole core. No default export (that's the bar's) |
 | `shared/shell.ts` | `ShellProps`, `ShellComponent` |
-| `shared/barContract.ts` | `BarExports`, `MatchesBarExports`: the bars' export surface, for each bar's `parity.check.ts` |
+| `shared/barContract.ts` | `BarExports`, `BarOwnExports`, `MatchesBarExports`: the bars' export surface, for each bar's `parity.check.ts`; the role props (`BarProps`, `BarNavProps`, `BarLinkProps`, `AppSwitcherProps`, `StatusDotProps`) |
+| `shared/StatusDot.tsx` | the application status dot both bars draw (their `StatusDot` role) |
 | `shared/layout.ts` | `ShellLayoutContext`, `useLayout`, `useShellLayout`, `useBreakpoint`, `useGoUp`, `useSimpleShellLayout`, breakpoints |
 | `shared/FullBleed.tsx` | `FullBleed` |
 | `MasterDetail/` | `MasterDetail`, `AdminMasterDetail` (ReactiveAdmin), `useDetailRoute` |
