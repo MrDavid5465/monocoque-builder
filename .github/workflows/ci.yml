@@ -18,7 +18,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           path: monocoque-builder
-          # per-form and typical-admin-fabric are git submodules, so without
+          # The src/lib libraries (per-form, typical-admin-fabric, typical-admin,
+          # denim, denim-fabric, denim-fabric-sidebar) are git submodules, so without
           # this their paths arrive empty and both tsc and eslint fail with
           # TS2307 "Cannot find module '../per-form'". The flatpak manifest
           # solves the same problem differently (pinned git sources) because

@@ -66,8 +66,8 @@ jobs:
         with:
           path: monocoque-builder
           # Needed for the frontend half of `tauri build` (its
-          # beforeBuildCommand runs `npm run build`): per-form and
-          # typical-admin-fabric are submodules, and without them the build
+          # beforeBuildCommand runs `npm run build`): the src/lib
+          # libraries (per-form, typical-admin-fabric, denim, ...) are submodules, and without them the build
           # dies with TS2307 "Cannot find module '../per-form'".
           submodules: recursive
       - uses: actions/checkout@v4
@@ -166,7 +166,7 @@ jobs:
         with:
           path: monocoque-builder
           # This job does more than run the prebuilt binary: Playwright's
-          # webServer boots `npm run dev`, so it needs the two submodules
+          # webServer boots `npm run dev`, so it needs the src/lib submodules
           # like any other frontend build. Without them vite cannot resolve
           # typical-admin-fabric/per-form, the app renders blank, and every
           # spec fails as a locator timeout rather than a module error.

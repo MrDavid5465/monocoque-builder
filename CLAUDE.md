@@ -59,6 +59,12 @@ vitest's glob — pre-existing, not a regression. Everything else should pass.
 
 ## Gotchas that have cost real time
 
+- **`src/lib/*` are git submodules** (denim, denim-fabric,
+  denim-fabric-sidebar, typical-admin, typical-admin-fabric, per-form). A
+  fresh clone needs `git submodule update --init`. A library change is a
+  commit in the submodule, pushed to its repo, then a pointer bump here, and
+  the flatpak manifest pins each one by commit, so move its pin too.
+
 - **Some files are CRLF** (`typical-admin-fabric/lib/templates/Fabric.tsx`,
   `lib/denim/components/index.tsx`). Rewriting one wholesale converts it to LF
   and turns a 30-line change into a 900-line diff. Match on a normalised copy,

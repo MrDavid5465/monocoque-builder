@@ -4,3 +4,19 @@
 [submodule "src/lib/per-form"]
 	path = src/lib/per-form
 	url = https://github.com/MrDavid5465/per-form.git
+[submodule "src/lib/denim"]
+	path = src/lib/denim
+	url = https://github.com/MrDavid5465/denim.git
+	branch = agent-skills
+[submodule "src/lib/denim-fabric"]
+	path = src/lib/denim-fabric
+	url = https://github.com/MrDavid5465/denim-fabric.git
+	branch = master
+[submodule "src/lib/denim-fabric-sidebar"]
+	path = src/lib/denim-fabric-sidebar
+	url = https://github.com/MrDavid5465/denim-fabric-sidebar.git
+	branch = master
+[submodule "src/lib/typical-admin"]
+	path = src/lib/typical-admin
+	url = https://github.com/MrDavid5465/typical-admin.git
+	branch = agent-skills
