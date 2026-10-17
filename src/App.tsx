@@ -4,7 +4,7 @@ import "./App.css";
 import Logo from "./Logo";
 import { Link, Navigate, useLocation } from "react-router-dom";
 import Shell from "./lib/denim-fabric-sidebar";
-import type { IApplication, IAppStatus } from "./lib/denim-fabric";
+import type { BrandProps, IApplication, IAppStatus } from "./lib/denim-fabric";
 import { ConfirmDialogHost } from "./lib/denim-fabric/shared/ConfirmDialog";
 
 import Shakers from "./components/Shakers"
@@ -84,9 +84,11 @@ const defaultLanding = <Navigate to="/dashboards/default" replace />;
 
 const components = { Shakers, LedsDevices, ShiftLights, SimWindDevices, AmbientLights, Dashboards };
 
-const Brand: React.FC<{ className?: string }> = ({ className }) => (
-  <Link to="/dashboards/default" aria-label="Monocoque Builder home" style={{ display: 'flex' }}>
-    <Logo className={className} />
+// The sidebar passes the title as children: logo and title are one home link.
+const Brand: React.FC<BrandProps> = ({ className, logoClassName, children }) => (
+  <Link to="/dashboards/default" aria-label="Monocoque Builder home" className={className} style={{ display: 'flex' }}>
+    <Logo className={logoClassName ?? className} />
+    {children}
   </Link>
 );
 

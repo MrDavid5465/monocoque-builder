@@ -9,13 +9,27 @@ import type { ThemeBuilder } from '../themes';
 import type { IconProps } from './Logo';
 import type { IBreakpoints } from './layout';
 
+/**
+ * Props a bar passes to your `Brand`. `className` styles the brand's root
+ * (the logo's size in the top bar; the whole link in the sidebar). The
+ * sidebar passes the app title as `children`, so your link wraps the logo and
+ * the title as one tap target: render `children` inside it.
+ */
+export interface BrandProps {
+  className?: string;
+  /** The sidebar's title, to render inside the brand link (absent in the top bar). */
+  children?: React.ReactNode;
+  /** Sizes the logo when `className` styles the whole link (sidebar). */
+  logoClassName?: string;
+}
+
 export interface ShellProps extends DenimShellProps {
   /** Theme builders keyed `<mode>-<color>` plus `default`. Defaults to THEMES. (all bars) */
   themes?: Record<string, ThemeBuilder>;
   /** Splash-screen logo. (all bars) */
   Logo?: React.FC<IconProps>;
-  /** Your product's icon: next to the waffle button (top bar), next to the title (sidebar). */
-  Brand?: React.FC<any>;
+  /** Your product's icon: next to the waffle button (top bar); in the sidebar it receives the title as `children`, so logo and title are one link. */
+  Brand?: React.FC<BrandProps>;
   /** Your product's name, at the top of the sidebar. (sidebar; the top bar shows the active app's name instead) */
   title?: string;
   /**

@@ -33,12 +33,12 @@
 import type React from 'react';
 import type * as Shared from '../index';
 import type { IApplication } from '../../denim';
-import type { ShellComponent } from './shell';
+import type { ShellComponent, BrandProps } from './shell';
 
 /** `Bar`: the whole bar (the top bar's header, the sidebar). */
 export interface BarProps {
-  /** Your product's icon. */
-  Brand?: React.FC<any>;
+  /** Your product's icon (and, in the sidebar, the link around the title: see BrandProps). */
+  Brand?: React.FC<BrandProps>;
   /** Always-visible app controls (ShellProps.Controls). */
   Controls?: React.FC<any>;
 }

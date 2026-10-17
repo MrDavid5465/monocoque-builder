@@ -9,7 +9,7 @@
 export * from '../denim';
 
 // The bars' shared props and export surface (the role exports' props too)
-export type { ShellProps, ShellComponent } from './shared/shell';
+export type { ShellProps, ShellComponent, BrandProps } from './shared/shell';
 export type {
   BarOwnExports,
   BarExports,

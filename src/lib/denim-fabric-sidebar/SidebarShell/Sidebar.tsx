@@ -87,6 +87,17 @@ const buildSidebarStyles = (theme: ITheme) => {
       textOverflow: 'ellipsis',
     },
     brand: { width: 28, height: 28, fill: palette.themePrimary, flex: 'none', marginRight: 8 },
+    brandLink: {
+      display: 'flex',
+      alignItems: 'center',
+      flex: 1,
+      minWidth: 0,
+      minHeight: 44,
+      alignSelf: 'stretch',
+      color: 'inherit',
+      textDecoration: 'none',
+      selectors: { ':hover, :focus': { color: 'inherit', textDecoration: 'none' } },
+    },
     // Positioned and isolated: the selection indicator is drawn in here,
     // behind the items (z-index -1), and scrolls with them.
     scroll: {
@@ -394,8 +405,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
   return (
     <nav className={s.root} aria-label="Applications">
       <div className={mergeStyles(s.header, rail && s.railHeader)}>
-        {!rail && Brand && <Brand className={s.brand} />}
-        {!rail && <span className={s.title}>{title}</span>}
+        {!rail && (Brand ? (
+          // Logo and title are one link (one large tap target); Brand renders
+          // its link around them.
+          <Brand className={s.brandLink} logoClassName={s.brand}>
+            <span className={s.title}>{title}</span>
+          </Brand>
+        ) : (
+          <span className={s.title}>{title}</span>
+        ))}
         {onToggle && (
           <IconButton
             className={s.toggle}

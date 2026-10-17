@@ -231,7 +231,7 @@ plus:
 | Prop | What it does here |
 |---|---|
 | `title` | your product's name, at the top of the sidebar |
-| `Brand` | icon next to the title |
+| `Brand` | your icon; receives the title as `children` (and `logoClassName` for the icon), so render both inside your link: logo and title become one tap target |
 | `Logo` | splash-screen logo |
 | `themes` | theme builders; default `THEMES` |
 | `SidebarFooter` | extra content in the sidebar footer, above Settings (full sidebar and phone menu) |
